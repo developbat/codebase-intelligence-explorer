@@ -133,6 +133,7 @@ The UI is **English by default** and ships with Turkish, German, French, Spanish
 - **Full-tree 2D view:** the Files view shows the complete folder/file hierarchy in one graph instead of only direct children. The toolbar toggles between **Full tree** and **Direct children**.
 - **Up navigation:** in 2D, a back/up control in the topbar and toolbar walks from a file → its folder → parent folder → project universe. Breadcrumb parent links remain clickable.
 - **Guided tour:** the help button in the topbar starts a short tour through opening a project, view tabs, the tree, the graph, the inspector, Git changes, AI setup, and 3D.
+- **Guided showcase / promo mode:** the **Demo** button runs an automated 75–90 second tour of the current project with English captions: project profile, tree, call graph, architecture, Git history, commit detail, map highlighting, 3D layouts, and saved-project switching. Pause, skip, exit, and replay controls are included. Screen recording is started externally.
 
 ### Project selection
 
@@ -261,6 +262,7 @@ web/
       GitHistory.tsx             Paginated Git commit graph
       GitCommitDialog.tsx        Commit file tree, diff, and graph impact
       TourButton.tsx             driver.js guided tour
+      ShowcaseDemo.tsx           Automated promo tour with captions and controls
       SourcePreview.tsx          Read-only highlighted source
       GitDiffView.tsx            Unified diff viewer
       FolderBrowserDialog.tsx    Filesystem folder picker
@@ -434,6 +436,7 @@ Manual browser verification covers folder browsing, all views, PHP/Python projec
 | Full-tree Files view and expanded tree by default | ✅ |
 | Non-AI project profile | ✅ |
 | Guided tour | ✅ |
+| Automated 75–90s promo showcase with English captions | ✅ |
 | Always-visible project switcher + saved-analysis memory | ✅ |
 | Project icon discovery with language fallback | ✅ |
 | File-level map for many additional languages | ✅ files only |

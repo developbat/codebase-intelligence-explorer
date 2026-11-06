@@ -3,6 +3,7 @@ import {
   ArrowUp,
   BrainCircuit,
   ChevronRight,
+  Clapperboard,
   FolderOpen,
   FolderTree,
   GitBranch,
@@ -31,6 +32,7 @@ import { AiFlowsDialog } from "./components/AiFlowsDialog";
 import { GitSummary } from "./components/GitSummary";
 import { GitHistory } from "./components/GitHistory";
 import { GitCommitDialog } from "./components/GitCommitDialog";
+import { ShowcaseDemo, type ShowcaseActions } from "./components/ShowcaseDemo";
 import { TourButton } from "./components/TourButton";
 import type { AiSettingsPublic } from "../../shared/ai";
 import { buildViewGraph, type CommitHighlight, type ViewMode } from "./lib/viewGraph";
@@ -106,6 +108,7 @@ export default function App() {
   const [changeBusy, setChangeBusy] = useState(false);
   const [commitDialog, setCommitDialog] = useState<{ hash: string; subject: string } | null>(null);
   const [commitHighlight, setCommitHighlight] = useState<CommitHighlight | null>(null);
+  const [showcaseOpen, setShowcaseOpen] = useState(false);
   const [aiSettings, setAiSettings] = useState<AiSettingsPublic | null>(null);
   const [aiSettingsOpen, setAiSettingsOpen] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
@@ -238,6 +241,7 @@ export default function App() {
     setChangeReport(null);
     setCommitDialog(null);
     setCommitHighlight(null);
+    setShowcaseOpen(false);
     localStorage.setItem(LAST_PROJECT_KEY, result.id);
     setRecent((current) => [toRecent(result), ...current.filter((project) => project.id !== result.id)].slice(0, 20));
 
@@ -324,6 +328,18 @@ export default function App() {
       setRecent((current) => [toRecent(result), ...current.filter((project) => project.id !== result.id)].slice(0, 20));
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : t("Project could not be loaded"));
+    }
+  }
+
+  async function ensureGitStatus(): Promise<GitStatus | null> {
+    if (!analysis) return null;
+    if (gitStatus) return gitStatus;
+    try {
+      const status = await api.gitStatus(analysis.id);
+      setGitStatus(status);
+      return status;
+    } catch {
+      return null;
     }
   }
 
@@ -623,6 +639,18 @@ export default function App() {
   );
   const aiConfigured = Boolean(activeProvider(aiSettings));
 
+  const showcaseActions: ShowcaseActions = {
+    setMode: changeMode,
+    openFile,
+    selectNode: selectGraphNode,
+    setInspectorOpen,
+    openCommit: (hash) => setCommitDialog({ hash, subject: "" }),
+    closeCommit: () => setCommitDialog(null),
+    showCommitOnMap,
+    ensureGitStatus,
+    setLocale,
+  };
+
   return (
     <div className={`app ${analysis ? "" : "no-analysis"} ${analysis && !inspectorOpen ? "inspector-closed" : ""}`}>
       <header className="topbar">
@@ -698,6 +726,11 @@ export default function App() {
               aria-label={inspectorOpen ? t("Close inspector") : t("Open inspector")}
             >
               <PanelRight size={15} />
+            </button>
+          ) : null}
+          {analysis ? (
+            <button className="ghost-button demo-start-button" onClick={() => setShowcaseOpen(true)}>
+              <Clapperboard size={14} /> {t("Demo")}
             </button>
           ) : null}
           {analysis ? (
@@ -1128,6 +1161,15 @@ export default function App() {
           commitHash={commitDialog?.hash ?? null}
           onClose={() => setCommitDialog(null)}
           onShowOnMap={showCommitOnMap}
+        />
+      ) : null}
+
+      {analysis ? (
+        <ShowcaseDemo
+          open={showcaseOpen}
+          analysis={analysis}
+          actions={showcaseActions}
+          onClose={() => setShowcaseOpen(false)}
         />
       ) : null}
 
