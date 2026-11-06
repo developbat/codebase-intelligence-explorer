@@ -201,6 +201,15 @@ export const tr: Dictionary = {
   "Searching the vector index…": "Vektör indeksi aranıyor…",
   "indexed items": "indeksli öğe",
   "Project tree": "Proje Ağacı",
+  "Active project": "Aktif proje",
+  "Switch project": "Proje değiştir",
+  "Filter projects…": "Projeleri filtrele…",
+  "No projects match this filter.": "Bu filtreye uyan proje yok.",
+  "Switch projects instantly": "Projeler arasında anında geçiş yapın",
+  "The active project card at the top lists every saved analysis. Switching opens its saved memory; it does not rescan.":
+    "Üstteki aktif proje kartı kayıtlı tüm analizleri listeler. Geçiş yapmak kayıtlı hafızayı açar; yeniden analiz yapmaz.",
+  "Switching opens the saved analysis. Use Rescan only when you want a fresh analysis.":
+    "Proje değiştirmek kayıtlı analizi açar. Yeni bir analiz istediğinizde Rescan kullanın.",
   "Expand all": "Tümünü aç",
   "Collapse all": "Tümünü kapat",
   "{fileCount} files · {folderCount} folders": "{fileCount} dosya · {folderCount} klasör",

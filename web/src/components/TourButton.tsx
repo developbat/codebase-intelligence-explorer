@@ -25,6 +25,16 @@ export function TourButton() {
         },
       },
       {
+        element: '[data-tour="project-switcher"]',
+        popover: {
+          title: t("Switch projects instantly"),
+          description: t(
+            "The active project card at the top lists every saved analysis. Switching opens its saved memory; it does not rescan.",
+          ),
+          side: "right",
+        },
+      },
+      {
         element: '[data-tour="view-tabs"]',
         popover: {
           title: t("Six ways to explore"),

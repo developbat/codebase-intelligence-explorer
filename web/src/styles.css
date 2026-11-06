@@ -352,6 +352,8 @@ button:disabled {
 /* ------------------------------------------------------------------ */
 
 .sidebar {
+  position: relative;
+  z-index: 6;
   min-height: 0;
   display: flex;
   flex-direction: column;
@@ -389,6 +391,310 @@ button:disabled {
 .open-project-button:hover {
   background: rgba(37, 99, 235, 0.18);
   border-color: rgba(110, 168, 254, 0.6);
+}
+
+/* ------------------------------------------------------------------ */
+/* Project switcher and project icons                                  */
+/* ------------------------------------------------------------------ */
+
+.project-switcher {
+  position: relative;
+  margin-top: 8px;
+}
+
+.project-switcher-trigger {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 7px 8px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: linear-gradient(180deg, rgba(20, 31, 48, 0.8), rgba(11, 18, 29, 0.9));
+  text-align: left;
+  transition: border-color 0.16s ease, background 0.16s ease;
+}
+
+.project-switcher-trigger:hover,
+.project-switcher-trigger.is-open {
+  border-color: rgba(110, 168, 254, 0.42);
+  background: linear-gradient(180deg, rgba(25, 40, 62, 0.9), rgba(12, 21, 34, 0.95));
+}
+
+.project-switcher-main {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  flex: 1;
+}
+
+.project-switcher-eyebrow {
+  font-size: 7px;
+  line-height: 1.2;
+  font-weight: 600;
+  letter-spacing: 0.075em;
+  text-transform: uppercase;
+  color: #6f8db7;
+}
+
+.project-switcher-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #e4edf9;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.project-switcher-path {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted-2);
+  font-family: var(--mono);
+  font-size: 7.5px;
+}
+
+.project-switcher-chevron {
+  flex: none;
+  color: #6f8db7;
+  transition: transform 0.16s ease;
+}
+
+.project-switcher-trigger.is-open .project-switcher-chevron {
+  transform: rotate(180deg);
+}
+
+.project-icon {
+  position: relative;
+  flex: none;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--project-color) 35%, transparent);
+  border-radius: 8px;
+  background:
+    radial-gradient(circle at 30% 20%, color-mix(in srgb, var(--project-color) 34%, transparent), transparent 65%),
+    linear-gradient(145deg, color-mix(in srgb, var(--project-color) 16%, #0b1420), #0a111b);
+  color: #f4f8ff;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07);
+}
+
+.project-icon-sm {
+  width: 29px;
+  height: 29px;
+  border-radius: 7px;
+}
+
+.project-icon-md {
+  width: 34px;
+  height: 34px;
+}
+
+.project-icon-lg {
+  width: 38px;
+  height: 38px;
+  border-radius: 9px;
+}
+
+.project-icon-fallback {
+  font-size: 13px;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
+}
+
+.project-icon-sm .project-icon-fallback {
+  font-size: 11px;
+}
+
+.project-icon img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.project-switcher-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 120;
+  width: min(342px, calc(100vw - 26px));
+  max-height: min(70vh, 540px);
+  display: flex;
+  flex-direction: column;
+  padding: 8px;
+  border: 1px solid rgba(110, 168, 254, 0.24);
+  border-radius: 11px;
+  background:
+    radial-gradient(300px 150px at 8% 0%, rgba(59, 130, 246, 0.13), transparent 70%),
+    #0b111a;
+  box-shadow: 0 26px 70px -24px #000, inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  animation: fadeUp 0.14s ease both;
+}
+
+.project-switcher-menu-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 3px 6px;
+}
+
+.project-switcher-menu-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: #d3e1f4;
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.project-switcher-menu-title svg {
+  color: #8ba8ce;
+}
+
+.project-switcher-menu-count {
+  min-width: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: rgba(148, 163, 184, 0.1);
+  color: var(--muted-2);
+  font-family: var(--mono);
+  font-size: 7.5px;
+  text-align: center;
+}
+
+.project-switcher-menu-head .icon-button {
+  margin-left: auto;
+}
+
+.project-switcher-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px;
+  margin-bottom: 6px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #0d1521;
+  color: var(--muted-2);
+}
+
+.project-switcher-search input {
+  flex: 1;
+  min-width: 0;
+  height: 29px;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--text);
+  font-size: 10px;
+}
+
+.project-switcher-search input::placeholder {
+  color: #5d6c80;
+}
+
+.project-switcher-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+
+.project-switcher-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 6px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.project-switcher-item:hover {
+  background: rgba(148, 163, 184, 0.06);
+}
+
+.project-switcher-item.is-active {
+  border-color: rgba(110, 168, 254, 0.24);
+  background: rgba(59, 130, 246, 0.09);
+}
+
+.project-switcher-item-main {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  flex: 1;
+}
+
+.project-switcher-item-name {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #dce8f7;
+  font-size: 10.5px;
+  font-weight: 550;
+}
+
+.project-switcher-check {
+  flex: none;
+  color: #8ed3b6;
+}
+
+.project-switcher-item-path {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted-2);
+  font-family: var(--mono);
+  font-size: 7.5px;
+}
+
+.project-switcher-item-stats {
+  color: #4f6077;
+  font-size: 8px;
+}
+
+.project-switcher-remove {
+  flex: none;
+  opacity: 0;
+}
+
+.project-switcher-item:hover .project-switcher-remove,
+.project-switcher-item.is-active .project-switcher-remove {
+  opacity: 1;
+}
+
+.project-switcher-empty {
+  padding: 12px 8px;
+  color: var(--muted-2);
+  font-size: 9.5px;
+  text-align: center;
+}
+
+.project-switcher-note {
+  margin-top: 6px;
+  padding: 6px 7px 3px;
+  border-top: 1px solid var(--line);
+  color: #6b7c92;
+  font-size: 8px;
+  line-height: 1.4;
 }
 
 .search-box {

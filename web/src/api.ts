@@ -54,6 +54,11 @@ export const api = {
 
   project: (id: string) => request<AnalysisResult>(`/api/projects/${id}`),
 
+  projectIconUrl: (id: string, version?: string) => {
+    const query = version ? `?v=${encodeURIComponent(version)}` : "";
+    return `/api/projects/${id}/icon${query}`;
+  },
+
   rescan: (id: string) => request<AnalysisResult>(`/api/projects/${id}/rescan`, { method: "POST" }),
 
   source: (id: string, file: string, start?: number, end?: number) => {

@@ -15,7 +15,6 @@ import {
   Orbit,
   Plus,
   Search,
-  Trash2,
   Workflow,
   X,
 } from "lucide-react";
@@ -25,6 +24,7 @@ import { KIND_COLOR, KIND_LABEL, truncate } from "../lib/constants";
 import { buildTree, collectFolderPaths, type TreeNode } from "../lib/tree";
 import type { ViewMode } from "../lib/viewGraph";
 import { useI18n } from "../i18n";
+import { ProjectSwitcher } from "./ProjectSwitcher";
 
 interface SidebarProps {
   analysis: AnalysisResult | null;
@@ -214,6 +214,15 @@ export function Sidebar({
           <Plus size={16} />
           {t("Open Project")}
         </button>
+
+        {analysis ? (
+          <ProjectSwitcher
+            analysis={analysis}
+            recent={recent}
+            onLoadRecent={onLoadRecent}
+            onRemoveRecent={onRemoveRecent}
+          />
+        ) : null}
 
         {analysis ? (
           <>
@@ -415,54 +424,6 @@ export function Sidebar({
             </div>
           </div>
         ) : null}
-
-        <div className="sidebar-section">
-          <div className="section-heading">
-            <span>{t("Recent projects")}</span>
-            <span className="section-meta">{recent.length}</span>
-          </div>
-          {recent.length === 0 ? (
-            <div className="recent-empty">{t("No analyzed projects yet.")}</div>
-          ) : (
-            <div className="recent-list">
-              {recent.map((project) => (
-                <div
-                  key={project.id}
-                  className={`recent-item ${analysis?.id === project.id ? "is-active" : ""}`}
-                  onClick={() => onLoadRecent(project)}
-                  role="button"
-                  tabIndex={0}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter") onLoadRecent(project);
-                  }}
-                >
-                  <span className="recent-main">
-                    <span className="recent-name">{truncate(project.projectName, 22)}</span>
-                    <span className="recent-path" title={project.rootPath}>
-                      {truncate(project.rootPath, 34)}
-                    </span>
-                    <span className="recent-stats">
-                      {t("{fileCount} files · {symbolCount} symbols", {
-                        fileCount: project.stats.files,
-                        symbolCount: project.stats.symbols,
-                      })}
-                    </span>
-                  </span>
-                  <button
-                    className="icon-button subtle"
-                    title={t("Remove from history")}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      onRemoveRecent(project.id);
-                    }}
-                  >
-                    <Trash2 size={12} />
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
       </div>
 
       <div className="sidebar-footer">

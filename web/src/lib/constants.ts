@@ -61,6 +61,16 @@ export const CERTAINTY_COLOR: Record<Certainty, string> = {
   unresolved: "#fb7185",
 };
 
+export const LANGUAGE_COLOR: Record<string, string> = {
+  typescript: "#3178c6",
+  tsx: "#3b82f6",
+  javascript: "#f7df1e",
+  jsx: "#61dafb",
+  php: "#8b9cf6",
+  python: "#f4c542",
+  other: "#94a3b8",
+};
+
 export const EDGE_STYLE: Record<Certainty, { dash?: string; color: string; width: number }> = {
   confirmed: { color: "#4d6fa9", width: 1.4 },
   inferred: { color: "#c99a3e", width: 1.5, dash: "6 4" },

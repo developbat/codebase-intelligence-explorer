@@ -100,6 +100,11 @@ export async function listRecent(): Promise<RecentProject[]> {
   return (await readIndex()).projects;
 }
 
+export async function getRecentProject(id: string): Promise<RecentProject | undefined> {
+  if (!isValidProjectId(id)) return undefined;
+  return (await readIndex()).projects.find((project) => project.id === id);
+}
+
 export async function removeAnalysis(id: string): Promise<void> {
   if (!isValidProjectId(id)) throw new Error("Invalid project id.");
   const index = await readIndex();

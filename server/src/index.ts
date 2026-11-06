@@ -16,6 +16,7 @@ import { listProviderModels, testProvider } from "./ai/providers";
 import { getPublicSettings, updateAiSettings } from "./ai/settings";
 import { buildChangeReport } from "./changes";
 import { getCommitDetail, getCommitFileDiff, getCommitLog, getFileDiff, getGitStatus } from "./git";
+import { findProjectIcon } from "./icons";
 import { listFolders } from "./fsbrowse";
 import { searchCode } from "./search";
 import { subscribeProjectEvents } from "./watcher";
@@ -26,6 +27,7 @@ function isProviderId(value: string): value is AiProviderId {
   return AI_PROVIDERS.some((provider) => provider.id === value);
 }
 import {
+  getRecentProject,
   isValidProjectId,
   listRecent,
   loadAnalysis,
@@ -307,6 +309,27 @@ app.post("/api/projects/:id/rescan", async (req, res) => {
     res.json(result);
   } catch (error) {
     handleError(res, error);
+  }
+});
+
+app.get("/api/projects/:id/icon", async (req, res) => {
+  try {
+    const project = await getRecentProject(req.params.id);
+    if (!project) {
+      res.status(404).end();
+      return;
+    }
+    const icon = await findProjectIcon(project.rootPath);
+    if (!icon) {
+      res.status(404).end();
+      return;
+    }
+    res.setHeader("Content-Type", icon.mime);
+    res.setHeader("Cache-Control", "private, max-age=300");
+    res.setHeader("X-Project-Icon", icon.relativePath);
+    res.send(icon.data);
+  } catch {
+    res.status(404).end();
   }
 });
 

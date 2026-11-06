@@ -129,6 +129,9 @@ The UI is **English by default** and ships with Turkish, German, French, Spanish
 
 ### Project selection
 
+- **Always-visible project switcher:** the active project sits at the top of the sidebar. Open the dropdown to filter and switch between saved analyses without scrolling through the project tree.
+- **Saved-analysis memory:** each project keeps its own cached analysis, keyed by the project root path. Switching opens that saved graph instantly; it does **not** trigger a new analysis. New Project always analyzes, and Rescan refreshes the current project.
+- **Project icons:** the app looks for local favicons/logos (`favicon`, `icon`, `logo`, `apple-touch-icon`) in common locations. Projects without an image fall back to a language-colored initial.
 - Manual full path.
 - **Browse…** folder browser with:
   - Home, Desktop, Documents, Downloads, Volumes, Root shortcuts
@@ -235,7 +238,9 @@ web/
       ai.ts                      Active provider selection
       constants.ts               Colors and labels
     components/
-      Sidebar.tsx                Tree, search, semantic results, recents
+      Sidebar.tsx                Tree, search, semantic results
+      ProjectSwitcher.tsx        Always-visible saved-project switcher
+      ProjectIcon.tsx            Local project icon with fallback
       GraphCanvas.tsx            React Flow 2D map, fit, focus, edge evidence
       EntityNode.tsx             Custom graph node rendering
       Universe3D.tsx             React Three Fiber 3D explorer
@@ -260,6 +265,7 @@ server/src/
   scanner.ts                     Read-only scan, ignore rules, secret filtering
   analyzer.ts                    AST, symbols, calls, routes, databases, events
   languages.ts                   PHP/Python Lezer parsing, imports, calls, routes
+  icons.ts                       Safe local favicon/logo discovery
   git.ts                         Read-only Git status/log/diff
   changes.ts                     Structural diff + impact analysis
   search.ts                      Local TF-IDF vector index and ranking
@@ -296,6 +302,7 @@ fixtures/sample-app/             End-to-end sample order project
 | `POST /api/analyze` | Analyze `{ "path": "..." }` |
 | `GET /api/recent` | Recent analyses |
 | `GET /api/projects/:id` | Stored analysis |
+| `GET /api/projects/:id/icon` | Local project favicon/logo, if present |
 | `POST /api/projects/:id/rescan` | Re-analyze |
 | `DELETE /api/projects/:id` | Remove cached analysis |
 | `GET /api/projects/:id/source` | Read-only source range |
@@ -409,6 +416,8 @@ Manual browser verification covers folder browsing, all views, PHP/Python projec
 | Full-tree Files view and expanded tree by default | ✅ |
 | Non-AI project profile | ✅ |
 | Guided tour | ✅ |
+| Always-visible project switcher + saved-analysis memory | ✅ |
+| Project icon discovery with language fallback | ✅ |
 | File-level map for many additional languages | ✅ files only |
 | Symbol-level support for every language | ⏳ TS/JS, PHP, Python today |
 | Folder browser | ✅ |
