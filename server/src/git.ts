@@ -164,6 +164,26 @@ function nodeImpact(analysis: AnalysisResult, changedPath: string, changedPaths:
   return [...affected.values()].slice(0, 24);
 }
 
+
+async function recentCommits(root: string, limit = 8): Promise<GitCommit[]> {
+  try {
+    const output = await git(root, [
+      "log",
+      `--max-count=${limit}`,
+      "--format=%H%x00%h%x00%s%x00%an%x00%aI%x00%D",
+    ]);
+    return output
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => {
+        const [hash, shortHash, subject, author, date, refs] = line.split("\0");
+        return { hash, shortHash, subject, author, date, refs: refs || undefined };
+      });
+  } catch {
+    return [];
+  }
+}
+
 export async function getGitStatus(rootPath: string, analysis?: AnalysisResult): Promise<GitStatus> {
   const snapshot = await getGitSnapshot(rootPath);
   if (!snapshot.available) {
@@ -172,6 +192,7 @@ export async function getGitStatus(rootPath: string, analysis?: AnalysisResult):
       files: [],
       commitsSinceAnalysis: [],
       commitsSinceAnalysisCount: 0,
+      recentCommits: [],
       message: "This project is not a Git repository (or Git is not installed).",
     };
   }
@@ -248,6 +269,7 @@ export async function getGitStatus(rootPath: string, analysis?: AnalysisResult):
     // no upstream configured
   }
 
+  const history = await recentCommits(rootPath, 8);
   const changedPaths = new Set(files.keys());
   const enriched = [...files.values()].map((file) => {
     const affectedNodes = analysis ? nodeImpact(analysis, file.path, changedPaths) : undefined;
@@ -272,6 +294,7 @@ export async function getGitStatus(rootPath: string, analysis?: AnalysisResult):
     files: enriched.sort((a, b) => a.path.localeCompare(b.path)),
     commitsSinceAnalysis: commits,
     commitsSinceAnalysisCount: commits.length,
+    recentCommits: history,
     message:
       enriched.length === 0
         ? "Working tree is clean and there are no commits since the last analysis."

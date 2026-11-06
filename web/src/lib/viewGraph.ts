@@ -31,6 +31,7 @@ interface BuildOptions {
   changeReport?: ChangeReport | null;
   gitStatus?: GitStatus | null;
   clusterFunctions?: boolean;
+  fullTree?: boolean;
   t: Translate;
   tn: TranslatePlural;
 }
@@ -58,11 +59,11 @@ function folderLabel(path: string): string {
 }
 
 export function buildViewGraph(options: BuildOptions): ViewGraph {
-  const { mode, analysis, selectedFolder, selectedFile, focusNodeId, depth, changeReport, gitStatus, clusterFunctions, t, tn } = options;
+  const { mode, analysis, selectedFolder, selectedFile, focusNodeId, depth, changeReport, gitStatus, clusterFunctions, fullTree, t, tn } = options;
   const nodeById = new Map(analysis.nodes.map((node) => [node.id, node]));
 
   if (mode === "universe") return buildUniverse(analysis, nodeById, t, tn);
-  if (mode === "files") return buildFiles(analysis, nodeById, selectedFolder, t, tn);
+  if (mode === "files") return buildFiles(analysis, nodeById, selectedFolder, Boolean(fullTree), t, tn);
   if (mode === "architecture") return buildArchitecture(analysis, nodeById, t, tn);
   if (mode === "changes") return buildChanges(analysis, nodeById, changeReport ?? null, gitStatus ?? null, t, tn);
   if (mode === "3d") {
@@ -70,7 +71,7 @@ export function buildViewGraph(options: BuildOptions): ViewGraph {
     return base === "functions"
       ? buildFunctions(analysis, nodeById, selectedFile, focusNodeId, depth, Boolean(clusterFunctions), t, tn)
       : base === "files"
-        ? buildFiles(analysis, nodeById, selectedFolder, t, tn)
+        ? buildFiles(analysis, nodeById, selectedFolder, Boolean(fullTree), t, tn)
         : buildUniverse(analysis, nodeById, t, tn);
   }
   return buildFunctions(analysis, nodeById, selectedFile, focusNodeId, depth, Boolean(clusterFunctions), t, tn);
@@ -212,12 +213,65 @@ function buildFiles(
   analysis: AnalysisResult,
   nodeById: Map<string, GraphNode>,
   selectedFolder: string | null,
+  fullTree: boolean,
   t: Translate,
   tn: TranslatePlural,
 ): ViewGraph {
   const scope = selectedFolder ?? "";
   const scopeId = scope ? `folder:${scope}` : "project";
   const scopeNode = nodeById.get(scopeId);
+
+  if (fullTree) {
+    const prefix = scope ? `${scope}/` : "";
+    const allFolders = analysis.nodes
+      .filter((node) => node.kind === "folder" && node.filePath && (!scope || node.filePath.startsWith(prefix)))
+      .slice(0, 140);
+    const allFiles = analysis.files
+      .filter((file) => !scope || file.path.startsWith(prefix))
+      .slice(0, 240);
+    const includedFiles = new Set(allFiles.map((file) => `file:${file.path}`));
+    const includedFolders = new Set(allFolders.map((folder) => folder.id));
+    const nodes: GraphNode[] = [];
+    if (scopeNode) nodes.push(scopeNode);
+    nodes.push(...allFolders, ...allFiles.map((file) => nodeById.get(`file:${file.path}`)).filter((node): node is GraphNode => Boolean(node)));
+
+    const edges: GraphEdge[] = [];
+    for (const folder of allFolders) {
+      if (folder.parentId === scopeId) {
+        edges.push({ id: `full-contains-${folder.id}`, source: scopeId, target: folder.id, kind: "CONTAINS", certainty: "confirmed" });
+      } else if (folder.parentId && includedFolders.has(folder.parentId)) {
+        edges.push({ id: `full-contains-${folder.id}`, source: folder.parentId, target: folder.id, kind: "CONTAINS", certainty: "confirmed" });
+      }
+    }
+    for (const file of allFiles) {
+      const fileNodeId = `file:${file.path}`;
+      const parentId = nodeById.get(fileNodeId)?.parentId;
+      if (parentId && (includedFolders.has(parentId) || parentId === scopeId)) {
+        edges.push({ id: `full-contains-${fileNodeId}`, source: parentId, target: fileNodeId, kind: "CONTAINS", certainty: "confirmed" });
+      }
+    }
+    for (const edge of analysis.edges) {
+      if (edge.kind !== "IMPORTS") continue;
+      if (includedFiles.has(edge.source) && (includedFiles.has(edge.target) || includedFolders.has(edge.target))) {
+        edges.push(edge);
+      }
+    }
+
+    return {
+      nodes,
+      edges,
+      title: scope ? folderLabel(scope) : analysis.projectName,
+      subtitle: t("{files} files · {folders} folders in this branch", {
+        files: allFiles.length,
+        folders: allFolders.length,
+      }),
+      notice:
+        analysis.files.length > 240
+          ? t("Full tree view is capped at 240 files. Select a folder to narrow it down.")
+          : t("Full tree view: every folder and file under this scope is expanded."),
+    };
+  }
+
   const directFiles = analysis.files
     .filter((file) => {
       const dir = file.path.includes("/") ? file.path.slice(0, file.path.lastIndexOf("/")) : "";

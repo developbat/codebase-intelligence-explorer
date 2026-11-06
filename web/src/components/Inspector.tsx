@@ -46,6 +46,7 @@ import { AiSymbolPanel } from "./AiSymbolPanel";
 import { AiProjectSummaryPanel } from "./AiProjectSummary";
 import { AiUnresolvedInvestigation } from "./AiUnresolvedInvestigation";
 import { AiScopePanel } from "./AiScopePanel";
+import { ProjectProfile } from "./ProjectProfile";
 import { useI18n } from "../i18n";
 
 interface InspectorProps {
@@ -174,6 +175,8 @@ function EmptyInspector({
         </div>
       ) : null}
 
+      <ProjectProfile analysis={analysis} />
+
       <div className="inspector-section">
         <div className="inspector-section-title">{t("Languages")}</div>
         <div className="language-list">
@@ -291,7 +294,7 @@ export function Inspector({
     const source = nodeById.get(edge.source);
     const target = nodeById.get(edge.target);
     return (
-      <aside className="inspector">
+      <aside className="inspector" data-tour="inspector">
         <div className="inspector-header">
           <span>{t("Relation")}</span>
           <span className="inspector-header-actions">
@@ -367,7 +370,7 @@ export function Inspector({
 
   if (!node) {
     return (
-      <aside className="inspector">
+      <aside className="inspector" data-tour="inspector">
         <div className="inspector-header">
           <span>{t("Inspector")}</span>
           <span className="inspector-header-actions">
@@ -463,7 +466,7 @@ export function Inspector({
   };
 
   return (
-    <aside className="inspector">
+    <aside className="inspector" data-tour="inspector">
       <div className="inspector-header">
         <span>{t("Inspector")}</span>
         <span className="inspector-header-actions">
@@ -862,29 +865,32 @@ export function Inspector({
         ) : null}
 
         {node.kind === "project" ? (
-          <div className="inspector-section">
-            <div className="inspector-section-title">
-              <Workflow size={12} /> Graph
+          <>
+            <ProjectProfile analysis={analysis} />
+            <div className="inspector-section">
+              <div className="inspector-section-title">
+                <Workflow size={12} /> Graph
+              </div>
+              <div className="file-meta-grid">
+                <div>
+                  <span>{t("Nodes")}</span>
+                  <strong>{formatNumber(analysis.stats.nodes, localeInfo.dateLocale)}</strong>
+                </div>
+                <div>
+                  <span>{t("Relationships")}</span>
+                  <strong>{formatNumber(analysis.stats.edges, localeInfo.dateLocale)}</strong>
+                </div>
+                <div>
+                  <span>{t("Confirmed")}</span>
+                  <strong>{formatNumber(analysis.stats.confirmedEdges, localeInfo.dateLocale)}</strong>
+                </div>
+                <div>
+                  <span>{t("Unresolved")}</span>
+                  <strong>{formatNumber(analysis.stats.unresolvedEdges, localeInfo.dateLocale)}</strong>
+                </div>
+              </div>
             </div>
-            <div className="file-meta-grid">
-              <div>
-                <span>{t("Nodes")}</span>
-                <strong>{formatNumber(analysis.stats.nodes, localeInfo.dateLocale)}</strong>
-              </div>
-              <div>
-                <span>{t("Relationships")}</span>
-                <strong>{formatNumber(analysis.stats.edges, localeInfo.dateLocale)}</strong>
-              </div>
-              <div>
-                <span>{t("Confirmed")}</span>
-                <strong>{formatNumber(analysis.stats.confirmedEdges, localeInfo.dateLocale)}</strong>
-              </div>
-              <div>
-                <span>{t("Unresolved")}</span>
-                <strong>{formatNumber(analysis.stats.unresolvedEdges, localeInfo.dateLocale)}</strong>
-              </div>
-            </div>
-          </div>
+          </>
         ) : null}
 
         {node.kind === "project" ? (

@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import {
   ChevronDown,
   ChevronRight,
+  ChevronsDown,
+  ChevronsUp,
   FileCode2,
   Folder,
   FolderOpen,
@@ -144,7 +146,7 @@ export function Sidebar({
 
   useEffect(() => {
     if (!analysis) return;
-    setExpanded(new Set(collectFolderPaths(tree, 2)));
+    setExpanded(new Set(collectFolderPaths(tree, 50)));
   }, [analysis?.id, tree, analysis]);
 
   const results = useMemo(() => {
@@ -208,7 +210,7 @@ export function Sidebar({
   return (
     <aside className="sidebar">
       <div className="sidebar-section">
-        <button className="open-project-button" onClick={onOpenDialog}>
+        <button className="open-project-button" data-tour="open-project" onClick={onOpenDialog}>
           <Plus size={16} />
           {t("Open Project")}
         </button>
@@ -298,7 +300,7 @@ export function Sidebar({
               </div>
             ) : null}
 
-            <nav className="view-tabs" aria-label={t("View selection")}>
+            <nav className="view-tabs" data-tour="view-tabs" aria-label={t("View selection")}>
               <button
                 className={mode === "universe" ? "is-active" : ""}
                 onClick={() => onModeChange("universe")}
@@ -332,6 +334,7 @@ export function Sidebar({
                 <span>{t("Architecture")}</span>
               </button>
               <button
+                data-tour="changes"
                 className={mode === "changes" ? "is-active" : ""}
                 onClick={() => onModeChange("changes")}
                 title={t("Changes since analysis")}
@@ -350,6 +353,7 @@ export function Sidebar({
                 </button>
               ) : (
                 <button
+                  data-tour="3d"
                   onClick={() => onModeChange("3d")}
                   title={t("3D Explorer")}
                 >
@@ -364,11 +368,29 @@ export function Sidebar({
 
       <div className="sidebar-scroll">
         {analysis ? (
-          <div className="sidebar-section tree-section">
+          <div className="sidebar-section tree-section" data-tour="tree">
             <div className="section-heading">
               <span>{t("Project tree")}</span>
-              <span className="section-meta">
-                {t("{fileCount} files · {folderCount} folders", { fileCount, folderCount })}
+              <span className="section-tools">
+                <span className="section-meta">
+                  {t("{fileCount} files · {folderCount} folders", { fileCount, folderCount })}
+                </span>
+                <button
+                  className="tree-action"
+                  onClick={() => setExpanded(new Set(collectFolderPaths(tree, 50)))}
+                  title={t("Expand all")}
+                  aria-label={t("Expand all")}
+                >
+                  <ChevronsDown size={12} />
+                </button>
+                <button
+                  className="tree-action"
+                  onClick={() => setExpanded(new Set())}
+                  title={t("Collapse all")}
+                  aria-label={t("Collapse all")}
+                >
+                  <ChevronsUp size={12} />
+                </button>
               </span>
             </div>
             <div className="project-root" onClick={() => onOpenFolder("")} role="treeitem">

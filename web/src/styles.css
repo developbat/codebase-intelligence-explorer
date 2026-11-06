@@ -682,6 +682,30 @@ button:disabled {
   white-space: nowrap;
 }
 
+.section-tools {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.tree-action {
+  width: 18px;
+  height: 18px;
+  display: grid;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted-2);
+  padding: 0;
+}
+
+.tree-action:hover {
+  background: var(--panel-2);
+  border-color: var(--line);
+  color: var(--text-soft);
+}
+
 .project-root {
   display: flex;
   align-items: center;
@@ -1021,6 +1045,216 @@ button.canvas-stat {
   height: 25px;
   padding: 0 9px;
   font-size: 10px;
+}
+
+.git-summary {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 9px 14px;
+  border-bottom: 1px solid var(--line);
+  background: linear-gradient(180deg, rgba(15, 23, 36, 0.72), rgba(8, 13, 21, 0.62));
+}
+
+.git-summary-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 9.5px;
+  color: var(--muted);
+}
+
+.git-summary-branch {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: #cbd9ec;
+}
+
+.git-summary-branch svg {
+  color: #a78bfa;
+}
+
+.git-summary-branch code {
+  font-family: var(--mono);
+  font-size: 8px;
+  color: var(--muted-2);
+}
+
+.git-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 6px;
+  border-radius: 10px;
+  font-size: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.git-state > span {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+}
+
+.git-state.is-clean {
+  color: #8ed3b6;
+  background: rgba(52, 211, 153, 0.08);
+}
+
+.git-state.is-clean > span {
+  background: #34d399;
+}
+
+.git-state.is-dirty {
+  color: #ecc37d;
+  background: rgba(245, 184, 75, 0.08);
+}
+
+.git-state.is-dirty > span {
+  background: #f5b84b;
+}
+
+.git-ahead,
+.git-behind,
+.git-since {
+  color: var(--muted-2);
+  font-family: var(--mono);
+  font-size: 8px;
+}
+
+.git-last {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+  font-size: 9.5px;
+}
+
+.git-last svg {
+  color: #8ba8ce;
+  flex: none;
+}
+
+.git-last-label {
+  color: var(--muted-2);
+  font-size: 8.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.git-last strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-soft);
+  font-weight: 500;
+}
+
+.git-last-meta {
+  color: var(--muted-2);
+  font-family: var(--mono);
+  font-size: 8px;
+}
+
+.git-history summary {
+  cursor: pointer;
+  color: var(--muted-2);
+  font-size: 8.5px;
+  user-select: none;
+}
+
+.git-history summary:hover {
+  color: var(--text-soft);
+}
+
+.git-history ol {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 5px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.git-history li {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  padding: 2px 5px;
+  border-radius: 4px;
+  background: rgba(148, 163, 184, 0.03);
+  font-size: 9px;
+  color: var(--muted);
+}
+
+.git-history li code {
+  flex: none;
+  font-family: var(--mono);
+  font-size: 8px;
+  color: #8ba8ce;
+}
+
+.git-history li > span {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.git-history li small {
+  flex: none;
+  color: var(--muted-2);
+  font-size: 7.5px;
+}
+
+.git-clean-note,
+.git-analysis-head {
+  font-size: 8.5px;
+  color: var(--muted-2);
+}
+
+.git-analysis-head code {
+  font-family: var(--mono);
+  font-size: 8px;
+  color: #8ba8ce;
+}
+
+.git-summary-unavailable {
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 8px;
+  color: #d5b779;
+  background: rgba(56, 43, 15, 0.5);
+  border-bottom-color: rgba(245, 184, 75, 0.18);
+}
+
+.git-summary-unavailable > svg {
+  flex: none;
+  margin-top: 1px;
+}
+
+.git-summary-unavailable div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.git-summary-unavailable strong {
+  font-size: 10px;
+  color: #e9c887;
+}
+
+.git-summary-unavailable span {
+  font-size: 9px;
+  color: #b39b71;
 }
 
 .change-strip {
@@ -1646,6 +1880,121 @@ button.canvas-stat {
   font-size: 9.5px;
   line-height: 1.5;
   color: var(--muted-2);
+}
+
+/* ------------------------------------------------------------------ */
+/* Project profile                                                     */
+/* ------------------------------------------------------------------ */
+
+.project-profile {
+  margin: 12px 14px;
+  padding: 11px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: linear-gradient(180deg, rgba(14, 22, 35, 0.9), rgba(10, 16, 26, 0.72));
+}
+
+.project-profile .inspector-section-title {
+  margin: 0 0 4px;
+}
+
+.profile-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 9px;
+}
+
+.profile-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 8px;
+  font-weight: 600;
+  letter-spacing: 0.055em;
+  text-transform: uppercase;
+  color: var(--muted-2);
+}
+
+.profile-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 5px;
+  margin-top: 9px;
+}
+
+.profile-metrics span {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 5px 7px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: rgba(148, 163, 184, 0.03);
+  font-size: 8.5px;
+  color: var(--muted-2);
+}
+
+.profile-metrics strong {
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-soft);
+}
+
+.profile-list,
+.profile-folder-list {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.profile-file,
+.profile-folder {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  padding: 3px 6px;
+  border-radius: 4px;
+  background: rgba(148, 163, 184, 0.035);
+  font-family: var(--mono);
+  font-size: 8.5px;
+  color: var(--muted);
+}
+
+.profile-file svg,
+.profile-folder svg {
+  flex: none;
+  color: var(--muted-2);
+}
+
+.profile-file > em,
+.profile-folder > em {
+  margin-left: auto;
+  padding-left: 6px;
+  font-style: normal;
+  font-size: 8px;
+  color: var(--muted-2);
+}
+
+.profile-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 5px;
+  margin-top: 9px;
+  padding: 6px 8px;
+  border-left: 2px solid rgba(245, 184, 75, 0.5);
+  border-radius: 0 5px 5px 0;
+  background: rgba(245, 184, 75, 0.06);
+  font-size: 9px;
+  line-height: 1.45;
+  color: #c6ab7c;
+}
+
+.profile-warning svg {
+  flex: none;
+  margin-top: 1px;
 }
 
 .warning-section {
@@ -2552,6 +2901,76 @@ button.canvas-stat {
   border-color: rgba(251, 113, 133, 0.2);
   background: rgba(251, 113, 133, 0.05);
   color: #d795a0;
+}
+
+/* ------------------------------------------------------------------ */
+/* Guided tour                                                         */
+/* ------------------------------------------------------------------ */
+
+.driver-popover.cie-tour-popover {
+  min-width: 290px;
+  max-width: 380px;
+  padding: 16px;
+  border: 1px solid rgba(110, 168, 254, 0.28);
+  border-radius: 12px;
+  background:
+    radial-gradient(260px 120px at 20% 0%, rgba(59, 130, 246, 0.13), transparent 70%),
+    #0b111a;
+  color: var(--text);
+  box-shadow: 0 30px 80px -34px #000, inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  font-family: var(--font);
+}
+
+.driver-popover.cie-tour-popover .driver-popover-title {
+  font-size: 14px;
+  font-weight: 620;
+  color: #e8f1ff;
+  margin-bottom: 6px;
+}
+
+.driver-popover.cie-tour-popover .driver-popover-description {
+  font-size: 10.5px;
+  line-height: 1.55;
+  color: var(--muted);
+}
+
+.driver-popover.cie-tour-popover .driver-popover-progress-text {
+  color: #6f8db7;
+  font-family: var(--mono);
+  font-size: 8px;
+}
+
+.driver-popover.cie-tour-popover .driver-popover-navigation-btns button {
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: #0e1724;
+  color: var(--text-soft);
+  text-shadow: none;
+  font-family: var(--font);
+  font-size: 10px;
+  padding: 5px 10px;
+}
+
+.driver-popover.cie-tour-popover .driver-popover-navigation-btns button:hover {
+  border-color: rgba(110, 168, 254, 0.45);
+  background: #152132;
+}
+
+.driver-popover.cie-tour-popover .driver-popover-next-btn {
+  background: linear-gradient(135deg, #2563eb, #5b54e8);
+  border-color: rgba(147, 197, 253, 0.32);
+  color: #ffffff;
+}
+
+.driver-popover.cie-tour-popover .driver-popover-close-btn {
+  color: var(--muted);
+}
+
+.driver-popover.cie-tour-popover .driver-popover-arrow-side-left.driver-popover-arrow,
+.driver-popover.cie-tour-popover .driver-popover-arrow-side-right.driver-popover-arrow,
+.driver-popover.cie-tour-popover .driver-popover-arrow-side-top.driver-popover-arrow,
+.driver-popover.cie-tour-popover .driver-popover-arrow-side-bottom.driver-popover-arrow {
+  border-color: #0b111a;
 }
 
 /* ------------------------------------------------------------------ */

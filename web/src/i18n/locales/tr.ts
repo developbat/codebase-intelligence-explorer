@@ -16,6 +16,38 @@ export const tr: Dictionary = {
   "Open inspector": "Denetçiyi aç",
   "Close inspector": "Denetçiyi kapat",
   "Language": "Dil",
+  "Take a tour": "Tur at",
+  "Welcome to Codebase Intelligence Explorer": "Codebase Intelligence Explorer'a hoş geldiniz",
+  "This short tour shows how to move from a project folder to files, symbols, call graphs, Git changes, and the 3D explorer.":
+    "Bu kısa tur proje klasöründen dosyalara, sembollere, çağrı grafiklerine, Git değişikliklerine ve 3D kaşife nasıl geçeceğinizi gösterir.",
+  "Open a project": "Proje açın",
+  "Paste a path or use Browse… to pick a local folder. Scanning is read-only.":
+    "Yol yapıştırın veya Browse… ile yerel klasör seçin. Tarama salt okunurdur.",
+  "Six ways to explore": "Altı keşif yolu",
+  "Universe shows modules, Files shows the tree, Calls shows functions, Architecture shows routes and data, Changes shows Git impact, and 3D gives you the spatial view.":
+    "Universe modülleri, Files ağacı, Calls fonksiyonları, Architecture route ve verileri, Changes Git etkisini, 3D ise mekânsal görünümü gösterir.",
+  "The full project tree is open": "Tüm proje ağacı açık",
+  "All branches start expanded. Use the chevrons to expand or collapse everything, and click a file to jump into its function map.":
+    "Tüm dallar açık başlar. Tümünü açmak/kapatmak için okları kullanın; fonksiyon haritasına gitmek için bir dosyaya tıklayın.",
+  "Explore the graph": "Grafiği keşfedin",
+  "Click a node to inspect it and light up its direct connections. Double-click a file or folder to go deeper.":
+    "İncelemek ve doğrudan bağlantılarını parlatmak için bir düğüme tıklayın. Daha derine inmek için dosya/klasöre çift tıklayın.",
+  "Read the evidence": "Kanıtı okuyun",
+  "The inspector shows the source, relationships, Git diff, and optional AI explanation for the selected entity.":
+    "Denetçi seçili varlığın kaynağını, ilişkilerini, Git diff'ini ve isteğe bağlı AI açıklamasını gösterir.",
+  "Review changes": "Değişiklikleri inceleyin",
+  "Changes shows the current branch, HEAD, the last commit, working-tree state, structural diff, and impact analysis.":
+    "Changes mevcut branch'i, HEAD'i, son commit'i, çalışma ağacı durumunu, yapısal farkı ve etki analizini gösterir.",
+  "Optional AI layer": "İsteğe bağlı AI katmanı",
+  "Connect OpenAI, Claude, DeepSeek, OpenRouter, Gemini, NVIDIA, or a custom endpoint. Keys stay local.":
+    "OpenAI, Claude, DeepSeek, OpenRouter, Gemini, NVIDIA veya özel bir endpoint bağlayın. Anahtarlar yerelde kalır.",
+  "Enter 3D": "3D'ye geçin",
+  "The same graph becomes a spatial scene. The button toggles back to 2D in place.":
+    "Aynı graph mekânsal bir sahneye dönüşür. Düğme yerinde 2D'ye geri döndürür.",
+  "Next": "Sonraki",
+  "Previous": "Önceki",
+  "Done": "Bitti",
+  "{{current}} of {{total}}": "{{current}} / {{total}}",
   "Project Universe": "Proje Evreni",
   "File Map": "Dosya Haritası",
   "Call Graph": "Çağrı Grafiği",
@@ -69,6 +101,22 @@ export const tr: Dictionary = {
   "Git status": "Git durumu",
   "dirty": "değişiklik var",
   "clean": "temiz",
+  "Git repository not detected": "Git deposu bulunamadı",
+  "The analyzer can still diff file hashes, but commit history and Git review require a Git repository.":
+    "Analiz motoru dosya hash'lerini yine karşılaştırabilir; ancak commit geçmişi ve Git incelemesi için bir Git deposu gerekir.",
+  "ahead": "ileride",
+  "behind": "geride",
+  "commits since analysis": "analizden bu yana commit",
+  "Last commit": "Son commit",
+  "No commits yet": "Henüz commit yok",
+  "Recent commits": "Son commit'ler",
+  "Working tree is clean. There are no uncommitted changes to review.":
+    "Çalışma ağacı temiz. İncelenecek commit edilmemiş değişiklik yok.",
+  "The repository has new commits since this analysis snapshot.":
+    "Bu analiz anından bu yana yeni commit'ler var.",
+  "Uncommitted changes exist. Run Analyze changes to inspect their structural impact.":
+    "Commit edilmemiş değişiklikler var. Yapısal etkiyi görmek için Değişiklikleri analiz et'i çalıştırın.",
+  "Analysis snapshot": "Analiz anı",
   "Run “Analyze changes” to compute the structural diff and impacted callers.":
     "Yapısal farkı ve etkilenen çağıranları hesaplamak için “Değişiklikleri analiz et”i çalıştırın.",
   "Universe": "Proje",
@@ -124,7 +172,17 @@ export const tr: Dictionary = {
   "Searching the vector index…": "Vektör indeksi aranıyor…",
   "indexed items": "indeksli öğe",
   "Project tree": "Proje Ağacı",
+  "Expand all": "Tümünü aç",
+  "Collapse all": "Tümünü kapat",
   "{fileCount} files · {folderCount} folders": "{fileCount} dosya · {folderCount} klasör",
+  "Full tree": "Tüm ağaç",
+  "Direct children": "Doğrudan alt öğeler",
+  "Toggle full tree": "Tüm ağaç görünümünü aç/kapat",
+  "{files} files · {folders} folders in this branch": "Bu dalda {files} dosya · {folders} klasör",
+  "Full tree view is capped at 240 files. Select a folder to narrow it down.":
+    "Tüm ağaç görünümü 240 dosyayla sınırlı. Daraltmak için bir klasör seçin.",
+  "Full tree view: every folder and file under this scope is expanded.":
+    "Tüm ağaç görünümü: bu kapsamdaki her klasör ve dosya açık.",
   "Recent projects": "Son Projeler",
   "No analyzed projects yet.": "Henüz analiz edilmiş proje yok.",
   "Remove from history": "Geçmişten kaldır",
@@ -365,6 +423,19 @@ export const tr: Dictionary = {
   "Hash": "Hash",
   "Imports": "Importlar",
   "Symbols": "Semboller",
+  "Functions": "Fonksiyonlar",
+  "Routes": "Route'lar",
+  "Database objects": "Veritabanı nesneleri",
+  "Events": "Olaylar",
+  "Project profile": "Proje profili",
+  "Inferred from the file tree, symbols, routes, and manifests without using AI.":
+    "Dosya ağacı, semboller, route'lar ve manifestlerden AI kullanmadan çıkarıldı.",
+  "Detected stack": "Algılanan stack",
+  "Likely entry points": "Muhtemel giriş noktaları",
+  "Largest modules": "En büyük modüller",
+  "Sample routes": "Örnek route'lar",
+  "The scanner found files but no symbols. The language may not be supported yet.":
+    "Tarayıcı dosyaları buldu ancak sembol bulamadı. Dil henüz desteklenmiyor olabilir.",
   "Contents": "İçerik",
   "{count} files lower": "{count} dosya",
   "Graph": "Graph",

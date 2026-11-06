@@ -3,6 +3,7 @@ import {
   BrainCircuit,
   ChevronRight,
   FolderOpen,
+  FolderTree,
   GitBranch,
   GitCompareArrows,
   Loader2,
@@ -25,6 +26,8 @@ import { AiSettingsDialog } from "./components/AiSettingsDialog";
 import { AiChatDrawer } from "./components/AiChatDrawer";
 import { AiReviewDialog } from "./components/AiReviewDialog";
 import { AiFlowsDialog } from "./components/AiFlowsDialog";
+import { GitSummary } from "./components/GitSummary";
+import { TourButton } from "./components/TourButton";
 import type { AiSettingsPublic } from "../../shared/ai";
 import { buildViewGraph, type ViewMode } from "./lib/viewGraph";
 import { formatNumber } from "./lib/constants";
@@ -102,6 +105,7 @@ export default function App() {
   const [reviewOpen, setReviewOpen] = useState(false);
   const [flowsOpen, setFlowsOpen] = useState(false);
   const [clusterFunctions, setClusterFunctions] = useState(false);
+  const [fullTree, setFullTree] = useState(true);
   const [workspaceUpdate, setWorkspaceUpdate] = useState<{
     createdAt: string;
     changedPaths: string[];
@@ -462,12 +466,13 @@ export default function App() {
       changeReport,
       gitStatus,
       clusterFunctions,
+      fullTree,
       t,
       tn,
     });
-  }, [analysis, mode, selectedFolder, selectedFile, focusNodeId, depth, changeReport, gitStatus, clusterFunctions, t, tn]);
+  }, [analysis, mode, selectedFolder, selectedFile, focusNodeId, depth, changeReport, gitStatus, clusterFunctions, fullTree, t, tn]);
 
-  const viewKey = `${analysis?.id ?? "none"}|${mode}|${selectedFolder ?? ""}|${selectedFile ?? ""}|${focusNodeId ?? ""}|${depth}|${changeReport?.generatedAt ?? gitStatus?.head ?? ""}|${clusterFunctions ? "cluster" : "flat"}`;
+  const viewKey = `${analysis?.id ?? "none"}|${mode}|${selectedFolder ?? ""}|${selectedFile ?? ""}|${focusNodeId ?? ""}|${depth}|${changeReport?.generatedAt ?? gitStatus?.head ?? ""}|${clusterFunctions ? "cluster" : "flat"}|${fullTree ? "full" : "direct"}`;
 
   const breadcrumbs = useMemo(() => {
     const parts: { label: string; path?: string }[] = [];
@@ -528,6 +533,7 @@ export default function App() {
         </div>
 
         <div className="topbar-actions">
+          <TourButton />
           <button
             className={`icon-button topbar-icon ${aiConfigured ? "is-active" : ""}`}
             onClick={() => setAiSettingsOpen(true)}
@@ -591,7 +597,7 @@ export default function App() {
           onRemoveRecent={removeRecent}
         />
 
-        <main className="main">
+        <main className="main" data-tour="canvas">
           {analysis && view ? (
             <>
               {workspaceUpdate ? (
@@ -650,6 +656,15 @@ export default function App() {
                       <BrainCircuit size={13} /> {t("Business flows")}
                     </button>
                   ) : null}
+                  {mode === "files" ? (
+                    <button
+                      className={`ghost-button toolbar-action ${fullTree ? "is-active" : ""}`}
+                      onClick={() => setFullTree((value) => !value)}
+                      title={t("Toggle full tree")}
+                    >
+                      <FolderTree size={13} /> {fullTree ? t("Direct children") : t("Full tree")}
+                    </button>
+                  ) : null}
                   {mode === "functions" && !selectedFile && !focusNodeId ? (
                     <button
                       className={`ghost-button toolbar-action ${clusterFunctions ? "is-active" : ""}`}
@@ -658,7 +673,12 @@ export default function App() {
                       <GitBranch size={13} /> {t("Cluster by file")}
                     </button>
                   ) : null}
-                  <button className="canvas-stat" onClick={() => setAiSettingsOpen(true)} title={t("AI models & providers")}>
+                  <button
+                    className="canvas-stat"
+                    data-tour="ai-setup"
+                    onClick={() => setAiSettingsOpen(true)}
+                    title={t("AI models & providers")}
+                  >
                     <Sparkles size={12} /> {aiConfigured ? t("AI ready") : t("AI setup")}
                   </button>
                   {aiConfigured ? (
@@ -673,6 +693,7 @@ export default function App() {
                   ) : null}
                 </div>
               </div>
+              {mode === "changes" && gitStatus ? <GitSummary status={gitStatus} /> : null}
               {mode === "changes" ? (
                 <div className="change-strip">
                   <button className="change-action primary" onClick={analyzeChanges} disabled={changeBusy}>

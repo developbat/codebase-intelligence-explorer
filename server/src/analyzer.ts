@@ -13,6 +13,7 @@ import type {
 } from "../../shared/types";
 import { isWithin, scanProject, type ScannedFile } from "./scanner";
 import { getGitSnapshot } from "./git";
+import { analyzePolyglot } from "./languages";
 
 const MAX_GRAPH_NODES = 12_000;
 const MAX_BODY_CHARS = 12_000;
@@ -265,6 +266,8 @@ export async function analyzeProject(inputPath: string, options: AnalyzeOptions 
   const startedAt = Date.now();
   const scan = await scanProject(inputPath, { signal: options.signal });
   const { rootPath, files, warnings } = scan;
+  const tsLanguages = new Set(["typescript", "tsx", "javascript", "jsx"]);
+  const tsFiles = files.filter((file) => tsLanguages.has(file.language));
 
   const graph: GraphBuilder = { nodes: new Map(), edges: new Map(), truncated: false };
   const fileRecords: FileRecord[] = [];
@@ -344,14 +347,14 @@ export async function analyzeProject(inputPath: string, options: AnalyzeOptions 
   // ---------------------------------------------------------------------
   const compilerOptions = loadCompilerOptions(scan.tsconfigPath);
   const program = ts.createProgram({
-    rootNames: files.map((file) => file.absPath),
+    rootNames: tsFiles.map((file) => file.absPath),
     options: compilerOptions,
   });
   const checker = program.getTypeChecker();
   const scannedByAbs = new Map(files.map((file) => [path.resolve(file.absPath), file]));
 
   const sourceFiles = new Map<string, ts.SourceFile>();
-  for (const file of files) {
+  for (const file of tsFiles) {
     const sourceFile = program.getSourceFile(file.absPath);
     if (sourceFile) sourceFiles.set(file.relPath, sourceFile);
     else warnings.push(`${file.relPath} could not be added to the TypeScript program.`);
@@ -992,6 +995,23 @@ export async function analyzeProject(inputPath: string, options: AnalyzeOptions 
         });
       }
       addEdge(graph, symbol.id, unresolvedId, "CALLS", "unresolved", evidence);
+    }
+  }
+
+  // ---------------------------------------------------------------------
+  // PHP / Python parser layer
+  // ---------------------------------------------------------------------
+  const polyglot = await analyzePolyglot(files);
+  const polyglotSymbols = polyglot.symbols;
+  for (const node of polyglot.nodes) addNode(graph, node);
+  for (const edge of polyglot.edges) {
+    if (!graph.edges.has(edge.id)) graph.edges.set(edge.id, edge);
+  }
+  for (const [filePath, importList] of polyglot.imports) {
+    const record = fileRecords.find((file) => file.path === filePath);
+    if (!record) continue;
+    for (const specifier of importList) {
+      if (!record.imports.includes(specifier)) record.imports.push(specifier);
     }
   }
 
@@ -1640,11 +1660,12 @@ export async function analyzeProject(inputPath: string, options: AnalyzeOptions 
     if (node?.metadata) node.metadata.fileCount = count;
   }
 
+  const allSymbols = [...symbols, ...polyglotSymbols];
   const projectNode = graph.nodes.get("project");
   if (projectNode?.metadata) {
     projectNode.metadata.fileCount = fileRecords.length;
     projectNode.metadata.folderCount = [...graph.nodes.values()].filter((node) => node.kind === "folder").length;
-    projectNode.metadata.symbolCount = symbols.length;
+    projectNode.metadata.symbolCount = allSymbols.length;
   }
 
   if (graph.truncated) {
@@ -1657,8 +1678,8 @@ export async function analyzeProject(inputPath: string, options: AnalyzeOptions 
   for (const file of fileRecords) languages[file.language] = (languages[file.language] ?? 0) + 1;
 
   const totalLines = fileRecords.reduce((sum, file) => sum + file.loc, 0);
-  const functions = symbols.filter((symbol) => symbol.kind === "function" || symbol.kind === "method").length;
-  const classes = symbols.filter((symbol) => symbol.kind === "class").length;
+  const functions = allSymbols.filter((symbol) => symbol.kind === "function" || symbol.kind === "method").length;
+  const classes = allSymbols.filter((symbol) => symbol.kind === "class").length;
   const nodeKinds = [...graph.nodes.values()];
   const routes = nodeKinds.filter((node) => node.kind === "route").length;
   const databases = nodeKinds.filter((node) => node.kind === "database").length;
@@ -1669,6 +1690,26 @@ export async function analyzeProject(inputPath: string, options: AnalyzeOptions 
     ...Object.keys(scan.packageJson?.dependencies ?? {}),
     ...Object.keys(scan.packageJson?.devDependencies ?? {}),
   ]);
+  try {
+    const composer = JSON.parse(await fs.readFile(path.join(rootPath, "composer.json"), "utf8")) as {
+      require?: Record<string, string>;
+      "require-dev"?: Record<string, string>;
+    };
+    for (const name of [...Object.keys(composer.require ?? {}), ...Object.keys(composer["require-dev"] ?? {})]) {
+      dependencyNames.add(name);
+    }
+  } catch {
+    // no composer manifest
+  }
+  try {
+    const requirements = await fs.readFile(path.join(rootPath, "requirements.txt"), "utf8");
+    for (const line of requirements.split("\n")) {
+      const name = line.trim().split(/[=<>~!\[]/)[0];
+      if (name) dependencyNames.add(name.toLowerCase());
+    }
+  } catch {
+    // no requirements.txt
+  }
   const frameworks = new Set<string>();
   const frameworkMarkers: [string, RegExp][] = [
     ["Next.js", /^next$/],
@@ -1686,10 +1727,30 @@ export async function analyzeProject(inputPath: string, options: AnalyzeOptions 
     ["Drizzle", /^drizzle-orm$/],
     ["Vitest", /^vitest$/],
     ["Jest", /^jest$/],
+    ["Laravel", /^laravel\/framework$/],
+    ["Symfony", /^symfony\//],
+    ["WordPress", /^johnpbloch\/wordpress$|^wordpress\//],
+    ["CodeIgniter", /^codeigniter4\/framework$/],
+    ["Flask", /^flask$/],
+    ["FastAPI", /^fastapi$/],
+    ["Django", /^django$/],
+    ["SQLAlchemy", /^sqlalchemy$/],
+    ["Celery", /^celery$/],
+    ["Pydantic", /^pydantic$/],
   ];
   for (const [name, pattern] of frameworkMarkers) {
     if ([...dependencyNames].some((dependency) => pattern.test(dependency))) frameworks.add(name);
   }
+  const relativePaths = new Set(files.map((file) => file.relPath));
+  if (relativePaths.has("routes/web.php") || [...relativePaths].some((file) => file.startsWith("app/Http/"))) {
+    frameworks.add("Laravel");
+  }
+  if (relativePaths.has("bin/console") || relativePaths.has("config/bundles.php")) frameworks.add("Symfony");
+  if (relativePaths.has("wp-config.php")) frameworks.add("WordPress");
+  if (relativePaths.has("manage.py") || [...relativePaths].some((file) => file.endsWith("/settings.py"))) {
+    frameworks.add("Django");
+  }
+  if (relativePaths.has("app.py") || relativePaths.has("wsgi.py")) frameworks.add("Python web");
   if (routes > 0 && frameworks.size === 0) frameworks.add("Framework routes");
   if (databases > 0) frameworks.add("Database");
   if (events > 0) frameworks.add("Events");
@@ -1703,7 +1764,7 @@ export async function analyzeProject(inputPath: string, options: AnalyzeOptions 
       files: fileRecords.length,
       folders: folderCount,
       lines: totalLines,
-      symbols: symbols.length,
+      symbols: allSymbols.length,
       functions,
       classes,
       nodes: graph.nodes.size,
@@ -1725,7 +1786,10 @@ export async function analyzeProject(inputPath: string, options: AnalyzeOptions 
     files: fileRecords,
     // Source bodies stay out of the API payload; the inspector reads the real
     // file on demand. This keeps large analyses small and evidence-fresh.
-    symbols: symbols.map(({ decl: _decl, rangeNode: _rangeNode, body: _body, ...record }) => record),
+    symbols: [
+      ...symbols.map(({ decl: _decl, rangeNode: _rangeNode, body: _body, ...record }) => record),
+      ...polyglotSymbols.map(({ body: _body, ...record }) => record),
+    ],
     nodes: [...graph.nodes.values()],
     edges: [...graph.edges.values()],
     externalModules: [...externalModules].sort((a, b) => a.localeCompare(b)),

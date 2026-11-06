@@ -3,7 +3,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import crypto from "node:crypto";
 
-export type SourceLanguage = "typescript" | "tsx" | "javascript" | "jsx";
+export type SourceLanguage = "typescript" | "tsx" | "javascript" | "jsx" | "php" | "python";
 
 export interface ScannedFile {
   absPath: string;
@@ -15,7 +15,7 @@ export interface ScannedFile {
   hash: string;
 }
 
-const SOURCE_EXTENSIONS = [".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".mts", ".cts"];
+const SOURCE_EXTENSIONS = [".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".mts", ".cts", ".php", ".py"];
 
 /** Folders that never carry first-party source code. */
 const IGNORED_GLOBS = [
@@ -51,6 +51,7 @@ const IGNORED_GLOBS = [
   "**/*.bundle.js",
   "**/*.map",
   "**/*.d.ts",
+  "**/*.pyc",
   "**/*.lock",
   "**/package-lock.json",
   "**/pnpm-lock.yaml",
@@ -107,6 +108,10 @@ function toLanguage(filePath: string): SourceLanguage | null {
     case ".mjs":
     case ".cjs":
       return "javascript";
+    case ".php":
+      return "php";
+    case ".py":
+      return "python";
     default:
       return "typescript";
   }

@@ -5,7 +5,7 @@
 <h1 align="center">Codebase Intelligence Explorer</h1>
 
 <p align="center">
-  <strong>Read-only code intelligence, a symbol-level knowledge graph, Git impact analysis, optional multi-provider AI, semantic search, and 2D/3D project exploration.</strong>
+  <strong>Read-only code intelligence for TypeScript/JavaScript, PHP, and Python: a symbol-level knowledge graph, Git impact analysis, optional multi-provider AI, semantic search, and 2D/3D project exploration.</strong>
 </p>
 
 <p align="center">
@@ -37,12 +37,14 @@ The UI is **English by default** and ships with Turkish, German, French, Spanish
 ### Static analysis engine
 
 - **Read-only scanning:** source files are read; the analysis engine has no write, delete, move, or execute path.
-- **TypeScript Compiler API:** real AST, symbols, types, imports, and call resolution.
+- **TypeScript Compiler API:** real AST, symbols, types, imports, and call resolution for TypeScript and JavaScript.
+- **PHP and Python parser layer:** Lezer-based parsing for classes, interfaces, traits, enums, functions, methods, imports, calls, and framework routes without requiring a PHP or Python runtime.
 - **Symbol extraction:** functions, methods, classes, interfaces, type aliases, enums, arrow functions, nested functions, and CommonJS exports.
 - **Knowledge graph:** files, folders, classes, functions, routes, database objects, events, packages, and their relationships.
 - **Evidence and certainty:** every relationship carries source evidence and is marked `confirmed`, `inferred`, or `unresolved`.
-- **Low-noise unresolved handling:** JS/TS builtins, TypeScript utility types, external package declarations, and local runtime values such as state setters do not create false unresolved nodes.
+- **Low-noise unresolved handling:** JS/TS builtins, TypeScript utility types, external package declarations, and local runtime values such as state setters do not create false unresolved nodes. PHP/Python resolution is syntax-based, so unresolved-node noise is suppressed there.
 - **Call-site inspection:** a genuine unresolved target lists the source locations that produced it, shows a surrounding preview, and can jump to the caller.
+- **Project profile without AI:** detects the stack, file/symbol/function/route counts, likely entry points, largest modules, and sample routes directly from the scan.
 
 ### Framework and architecture adapters (MVP 2)
 
@@ -50,6 +52,8 @@ The UI is **English by default** and ships with Turkish, German, French, Spanish
   - Express / Fastify / Koa / Hono style `app.get("/path", handler)`
   - NestJS `@Controller`, `@Get`, `@Post`, `@Put`, `@Patch`, `@Delete`, `@All`
   - Next.js Pages API, App Router `route.ts`, and `page.tsx` file-system routes
+  - Laravel `Route::get(...)` and custom router `$router->get(...)` registrations
+  - Flask `@app.route(...)`, FastAPI `@app.get(...)` / `@router.post(...)`
 - **Databases**
   - Prisma `schema.prisma` models, `@@map`, and model relations
   - TypeORM `@Entity` and Sequelize `@Table`
@@ -59,11 +63,12 @@ The UI is **English by default** and ships with Turkish, German, French, Spanish
   - `emit` / `publish` and `on` / `subscribe` style calls
   - NestJS `@OnEvent` and `@EventPattern`
 - **Architecture view:** routes → controllers → services, database access, model relations, and events.
-- **Framework detection:** Next.js, NestJS, Express, Fastify, Koa, Hono, React, Vue, Svelte, Prisma, TypeORM, Sequelize, Drizzle, Vitest, and Jest.
+- **Framework detection:** Next.js, NestJS, Express, Fastify, Koa, Hono, React, Vue, Svelte, Prisma, TypeORM, Sequelize, Drizzle, Vitest, Jest, Laravel, Symfony, WordPress, CodeIgniter, Flask, FastAPI, Django, SQLAlchemy, Celery, and Pydantic. Manifest and marker-file heuristics also recognize Laravel, Symfony, WordPress, Django, and Python web layouts without a `.json` manifest.
 
 ### Git change intelligence
 
 - Branch, HEAD, subject, dirty state captured at analysis time.
+- **Last commit and recent history:** the Changes view always shows the current branch, shortened HEAD, last commit subject/author/date, and the most recent commits—even when the working tree is clean.
 - Changes since analysis: working tree, commits since the saved HEAD, and only files whose content really changed.
 - Unified diff viewer, including synthetic diffs for untracked files.
 - Structural diff: added, removed, and changed symbols and edge counts per file.
@@ -109,6 +114,13 @@ The UI is **English by default** and ships with Turkish, German, French, Spanish
 - Labels for small graphs, selected/hover labels for larger graphs, 120-node safety cap.
 - One-click transition back to 2D.
 - Legend, orientation HUD, and inspector integration.
+
+### Project profile, full tree, and guided tour
+
+- **Project profile:** the inspector opens with a non-AI overview: detected stack, counts, likely entry points, largest modules, and sample routes.
+- **Full project tree by default:** every folder branch is expanded when a project opens. Expand-all and collapse-all buttons are always available.
+- **Full-tree 2D view:** the Files view shows the complete folder/file hierarchy in one graph instead of only direct children. The toolbar toggles between **Full tree** and **Direct children**.
+- **Guided tour:** the help button in the topbar starts a short tour through opening a project, view tabs, the tree, the graph, the inspector, Git changes, AI setup, and 3D.
 
 ### Project selection
 
@@ -164,11 +176,12 @@ npm run dev
 
 Open **http://localhost:5173**.
 
-1. Click **Open Project** (or **Browse…**) and choose a TypeScript/JavaScript project folder.
+1. Click **Open Project** (or **Browse…**) and choose a TypeScript/JavaScript, PHP, or Python project folder.
 2. Or click **Open sample project** to explore `fixtures/sample-app`.
 3. Use **Universe**, **Files**, **Calls**, **Architecture**, **Changes**, and **3D** from the sidebar.
-4. Select any node to inspect it and highlight its direct connections.
-5. Open **AI setup** to connect an optional provider.
+4. All tree branches are expanded by default; use the chevrons to expand or collapse everything. The help button starts a guided tour.
+5. Select any node to inspect it and highlight its direct connections.
+6. Open **AI setup** to connect an optional provider.
 
 ### Production build
 
@@ -222,6 +235,9 @@ web/
       EntityNode.tsx             Custom graph node rendering
       Universe3D.tsx             React Three Fiber 3D explorer
       Inspector.tsx              Entity details, source, Git diff, AI panels
+      ProjectProfile.tsx         Non-AI stack/counts/entry-point inference
+      GitSummary.tsx             Branch, HEAD, last commit, recent history
+      TourButton.tsx             driver.js guided tour
       SourcePreview.tsx          Read-only highlighted source
       GitDiffView.tsx            Unified diff viewer
       FolderBrowserDialog.tsx    Filesystem folder picker
@@ -236,6 +252,7 @@ web/
 server/src/
   scanner.ts                     Read-only scan, ignore rules, secret filtering
   analyzer.ts                    AST, symbols, calls, routes, databases, events
+  languages.ts                   PHP/Python Lezer parsing, imports, calls, routes
   git.ts                         Read-only Git status/log/diff
   changes.ts                     Structural diff + impact analysis
   search.ts                      Local TF-IDF vector index and ranking
@@ -256,9 +273,9 @@ fixtures/sample-app/             End-to-end sample order project
 ### Analysis flow
 
 1. **Scanner** builds a file tree and filters build output, dependencies, caches, lockfiles, and secret files.
-2. **TypeScript program** parses TypeScript/JavaScript with project `tsconfig` support.
+2. **TypeScript program** parses TypeScript/JavaScript with project `tsconfig` support; the Lezer layer parses `.php` and `.py` files.
 3. **Symbol extraction** records names, ranges, signatures, parameters, return types, exports, and source hashes.
-4. **Semantic resolution** links calls to real declarations through the TypeScript checker.
+4. **Semantic resolution** links calls to real declarations through the TypeScript checker; PHP/Python links are import- and name-based and marked `inferred`.
 5. **Framework adapters** add routes, controllers, database objects, relations, queries, and events.
 6. **Knowledge graph** stores nodes/edges with evidence and certainty.
 7. **Views** consume the same graph identities: 2D, 3D, inspector, Git impact, search, AI context.
@@ -365,7 +382,7 @@ Current coverage (6 tests):
 5. Git status, diff, commits since analysis, structural diff, impact.
 6. AI service: real source prompt, structured result, cache, language instruction, grounded chat.
 
-Manual browser verification covers folder browsing, all views, 3D scene, semantic search, Git changes, AI panels, and language switching.
+Manual browser verification covers folder browsing, all views, PHP/Python projects, the guided tour, the project profile, Git last-commit history, 3D scene, semantic search, Git changes, AI panels, and language switching.
 
 ---
 
@@ -378,6 +395,11 @@ Manual browser verification covers folder browsing, all views, 3D scene, semanti
 | MVP 3 — AI providers, symbol/scope/project/flow/review/chat, languages | ✅ core |
 | MVP 4 — local vector search, watcher, clustering, hash reuse | ✅ core |
 | MVP 5 — 3D project explorer | ✅ core |
+| PHP / Python symbol, import, call, and route support | ✅ core |
+| Git last commit + recent history in Changes | ✅ |
+| Full-tree Files view and expanded tree by default | ✅ |
+| Non-AI project profile | ✅ |
+| Guided tour | ✅ |
 | Folder browser | ✅ |
 | English UI + 9 languages | ✅ core translations with English fallback |
 | Desktop packaging | ⏳ local web app |
@@ -386,6 +408,8 @@ Manual browser verification covers folder browsing, all views, 3D scene, semanti
 
 ### Remaining / future work
 
+- **Deeper PHP/Python precision:** classes, functions, methods, imports, calls, and common framework routes are detected, but resolution is syntax-based rather than type-checked. Dynamic dispatch, dependency-injection bindings, and generated code may remain unresolved or inferred.
+- **More PHP/Python framework adapters:** Laravel routes and Flask/FastAPI decorators are covered; deeper Django, Symfony, and WordPress route/ORM conventions are next.
 - **Neural embeddings** and provider-backed vector search (the current index is local TF-IDF, not a neural embedding model).
 - **True streaming** AI responses, cancellation, and precise provider-specific cost estimates (tokens are shown today).
 - **Fully incremental parser**; the watcher triggers a safe full re-analysis, while file hashes and AI caches prevent unnecessary AI work.
@@ -393,7 +417,7 @@ Manual browser verification covers folder browsing, all views, 3D scene, semanti
 - **3D progressive expansion** beyond the aggregated universe; deeper levels currently transition to 2D.
 - **Desktop shell** (Tauri/Electron) and OS keychain integration.
 - **SQLite migration** for very large projects.
-- **More framework/language adapters** (Django, Spring, Go, Java, Python, etc.).
+- **More language adapters** (Go, Java, C#, Rust, etc.).
 - **Benchmarks** on very large repositories and accessibility polish.
 
 ---

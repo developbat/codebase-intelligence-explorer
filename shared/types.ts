@@ -110,7 +110,7 @@ export interface SymbolRecord {
 export interface FileRecord {
   id: string;
   path: string;
-  language: "typescript" | "tsx" | "javascript" | "jsx" | "prisma" | "sql" | "other";
+  language: "typescript" | "tsx" | "javascript" | "jsx" | "php" | "python" | "prisma" | "sql" | "other";
   bytes: number;
   loc: number;
   hash: string;
@@ -198,6 +198,7 @@ export interface GitStatus {
   files: GitChangedFile[];
   commitsSinceAnalysis: GitCommit[];
   commitsSinceAnalysisCount: number;
+  recentCommits: GitCommit[];
   analysisHead?: string;
   analysisCreatedAt?: string;
   message?: string;
