@@ -304,13 +304,13 @@ export function ShowcaseDemo({ open, analysis, actions, onClose }: ShowcaseDemoP
         13500,
         async () => {
           await sleep(900);
-          await clickByText(".u3d-segmented button", "Hierarchical");
+          await clickByText(".u3d-layout-option", "Hierarchical");
           await sleep(2800);
-          await clickByText(".u3d-segmented button", "Clustered");
+          await clickByText(".u3d-layout-option", "Clustered");
           await sleep(2800);
-          await clickByText(".u3d-segmented button", "Force");
+          await clickByText(".u3d-layout-option", "Force");
           await sleep(3000);
-          await clickByText(".u3d-segmented button", "Hybrid");
+          await clickByText(".u3d-layout-option", "Hybrid");
           await sleep(1200);
           if (demoFunction) {
             currentActions.selectNode(demoFunction.id);

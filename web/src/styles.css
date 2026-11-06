@@ -4001,6 +4001,98 @@ button.canvas-stat {
   gap: 3px;
 }
 
+.u3d-layout-control {
+  position: relative;
+}
+
+.u3d-layout-trigger {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: rgba(7, 12, 19, 0.65);
+  color: #9db6d5;
+  font-size: 9px;
+  text-align: left;
+}
+
+.u3d-layout-trigger:hover,
+.u3d-layout-trigger.is-open {
+  border-color: rgba(110, 168, 254, 0.36);
+  background: rgba(59, 130, 246, 0.1);
+  color: #c5dcff;
+}
+
+.u3d-layout-trigger svg:first-child {
+  flex: none;
+  color: #8ba8ce;
+}
+
+.u3d-layout-trigger span {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.u3d-layout-trigger svg:last-child {
+  flex: none;
+  transition: transform 0.16s ease;
+}
+
+.u3d-layout-trigger.is-open svg:last-child {
+  transform: rotate(180deg);
+}
+
+.u3d-layout-popover {
+  position: absolute;
+  top: 0;
+  left: calc(100% + 8px);
+  z-index: 30;
+  width: 208px;
+  display: none;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  padding: 6px;
+  border: 1px solid rgba(110, 168, 254, 0.26);
+  border-radius: 9px;
+  background:
+    radial-gradient(240px 120px at 20% 0%, rgba(59, 130, 246, 0.12), transparent 70%),
+    rgba(8, 13, 21, 0.96);
+  box-shadow: 0 22px 60px -24px #000, inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  backdrop-filter: blur(12px);
+}
+
+.u3d-layout-popover.is-open {
+  display: grid;
+}
+
+.u3d-layout-option {
+  padding: 10px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: rgba(148, 163, 184, 0.035);
+  color: var(--muted);
+  font-size: 9px;
+  text-align: center;
+}
+
+.u3d-layout-option:hover {
+  border-color: rgba(110, 168, 254, 0.32);
+  background: rgba(59, 130, 246, 0.08);
+  color: var(--text-soft);
+}
+
+.u3d-layout-option.is-active {
+  border-color: rgba(167, 139, 250, 0.4);
+  background: rgba(124, 58, 237, 0.14);
+  color: #d8ccff;
+}
+
 .u3d-control-label {
   color: #6f8db7;
   font-size: 7px;
@@ -4200,6 +4292,14 @@ button.canvas-stat {
     left: 8px;
     right: 8px;
     width: auto;
+  }
+
+  .u3d-layout-popover {
+    position: static;
+    width: 100%;
+    margin-top: 4px;
+    left: auto;
+    top: auto;
   }
 
   .universe-3d-nav {

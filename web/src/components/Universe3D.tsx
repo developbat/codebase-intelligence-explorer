@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { Edges, Grid, Line, OrbitControls, RoundedBox } from "@react-three/drei";
 import { Bloom, EffectComposer, Vignette } from "@react-three/postprocessing";
@@ -8,6 +8,7 @@ import {
   ChevronLeft,
   ChevronRight,
   ChevronUp,
+  LayoutGrid,
   LocateFixed,
   Minus,
   Plus,
@@ -180,82 +181,104 @@ function CameraRig({ center, radius }: { center: [number, number, number]; radiu
   return null;
 }
 
-interface NavApi {
-  pan: (horizontal: number, vertical: number) => void;
-  zoom: (factor: number) => void;
-  reset: () => void;
+type NavCommand =
+  | { type: "pan"; horizontal: number; vertical: number }
+  | { type: "zoom"; factor: number }
+  | { type: "reset" };
+
+const NAV_EVENT = "cie:3d-nav";
+
+function sendNavCommand(command: NavCommand): void {
+  window.dispatchEvent(new CustomEvent<NavCommand>(NAV_EVENT, { detail: command }));
 }
 
 function NavigationBridge({
-  controlsRef,
   center,
   radius,
-  onReady,
 }: {
-  controlsRef: MutableRefObject<any>;
   center: [number, number, number];
   radius: number;
-  onReady: (api: NavApi | null) => void;
 }) {
   const { camera } = useThree();
+  const controls = useThree((state) => state.controls) as any;
   const centerKey = center.join("|");
+  const desiredPosition = useRef(new THREE.Vector3());
+  const desiredTarget = useRef(new THREE.Vector3());
+  const animating = useRef(false);
 
   useEffect(() => {
-    let disposed = false;
-    let frame = 0;
-    let api: NavApi | null = null;
+    if (!controls) return;
 
-    const setup = () => {
-      if (disposed) return;
-      const controls = controlsRef.current;
-      if (!controls) {
-        frame = requestAnimationFrame(setup);
-        return;
-      }
+    desiredPosition.current.copy(camera.position);
+    desiredTarget.current.copy(controls.target);
+    animating.current = false;
 
-      const pan = (horizontal: number, vertical: number) => {
-        const distance = camera.position.distanceTo(controls.target);
-        const step = Math.max(0.28, distance * 0.055);
-        const right = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
-        const up = new THREE.Vector3(0, 1, 0).applyQuaternion(camera.quaternion);
-        const delta = right.multiplyScalar(horizontal * step).add(up.multiplyScalar(vertical * step));
-        camera.position.add(delta);
-        controls.target.add(delta);
-        controls.update();
-      };
-
-      const zoom = (factor: number) => {
-        const direction = camera.position.clone().sub(controls.target);
-        const distance = direction.length();
-        const next = THREE.MathUtils.clamp(
-          distance * factor,
-          typeof controls.minDistance === "number" ? controls.minDistance : 1.8,
-          typeof controls.maxDistance === "number" ? controls.maxDistance : radius * 7,
-        );
-        direction.setLength(next);
-        camera.position.copy(controls.target).add(direction);
-        controls.update();
-      };
-
-      const reset = () => {
-        camera.position.set(center[0] + radius * 1.35, center[1] + radius * 0.8, center[2] + radius * 1.7);
-        controls.target.set(center[0], center[1], center[2]);
-        camera.lookAt(center[0], center[1], center[2]);
-        controls.update();
-      };
-
-      api = { pan, zoom, reset };
-      onReady(api);
+    const pan = (horizontal: number, vertical: number) => {
+      const distance = desiredPosition.current.distanceTo(desiredTarget.current);
+      const step = Math.max(0.28, distance * 0.055);
+      const right = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
+      const up = new THREE.Vector3(0, 1, 0).applyQuaternion(camera.quaternion);
+      const delta = right.multiplyScalar(horizontal * step).add(up.multiplyScalar(vertical * step));
+      desiredPosition.current.add(delta);
+      desiredTarget.current.add(delta);
+      animating.current = true;
     };
 
-    setup();
-    return () => {
-      disposed = true;
-      cancelAnimationFrame(frame);
-      onReady(null);
+    const zoom = (factor: number) => {
+      const direction = desiredPosition.current.clone().sub(desiredTarget.current);
+      const distance = direction.length();
+      const next = THREE.MathUtils.clamp(
+        distance * factor,
+        typeof controls.minDistance === "number" ? controls.minDistance : 1.8,
+        typeof controls.maxDistance === "number" ? controls.maxDistance : radius * 7,
+      );
+      direction.setLength(next);
+      desiredPosition.current.copy(desiredTarget.current).add(direction);
+      animating.current = true;
     };
+
+    const reset = () => {
+      desiredPosition.current.set(
+        center[0] + radius * 1.35,
+        center[1] + radius * 0.8,
+        center[2] + radius * 1.7,
+      );
+      desiredTarget.current.set(center[0], center[1], center[2]);
+      animating.current = true;
+    };
+
+    const handler = (event: Event) => {
+      const command = (event as CustomEvent<NavCommand>).detail;
+      if (!command) return;
+      if (command.type === "pan") pan(command.horizontal, command.vertical);
+      else if (command.type === "zoom") zoom(command.factor);
+      else reset();
+    };
+
+    window.addEventListener(NAV_EVENT, handler);
+    return () => window.removeEventListener(NAV_EVENT, handler);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [camera, controlsRef, centerKey, radius]);
+  }, [camera, controls, centerKey, radius]);
+
+  useFrame((_, delta) => {
+    if (!animating.current) return;
+    if (!controls) return;
+
+    const easing = 1 - Math.exp(-Math.min(0.06, delta) * 11);
+    camera.position.lerp(desiredPosition.current, easing);
+    controls.target.lerp(desiredTarget.current, easing);
+    controls.update();
+
+    if (
+      camera.position.distanceTo(desiredPosition.current) < 0.025 &&
+      controls.target.distanceTo(desiredTarget.current) < 0.025
+    ) {
+      camera.position.copy(desiredPosition.current);
+      controls.target.copy(desiredTarget.current);
+      controls.update();
+      animating.current = false;
+    }
+  });
 
   return null;
 }
@@ -848,9 +871,7 @@ export default function Universe3D({
   const [edgeMode, setEdgeMode] = useState<EdgeMode>("architecture");
   const [maxDepth, setMaxDepth] = useState(1);
   const [allLabels, setAllLabels] = useState(false);
-  const [navReady, setNavReady] = useState(false);
-  const controlsRef = useRef<any>(null);
-  const navApiRef = useRef<NavApi | null>(null);
+  const [layoutMenuOpen, setLayoutMenuOpen] = useState(true);
 
   const layout = useMemo(() => layout3D(nodes, edges, layoutKind), [nodes, edges, layoutKind]);
   const positionsById = useMemo(
@@ -866,6 +887,11 @@ export default function Universe3D({
   useEffect(() => {
     setMaxDepth(layoutKind === "force" || nodes.length <= 42 ? layout.maxLevel : 1);
   }, [layoutKind, layout.maxLevel, nodes.length]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setLayoutMenuOpen(false), 6000);
+    return () => window.clearTimeout(timer);
+  }, []);
 
   const groundY = useMemo(
     () => Math.min(...layout.nodes.map((item) => item.position[1]), 0) - 0.36,
@@ -936,7 +962,7 @@ export default function Universe3D({
           onDepth={(depth) => setMaxDepth((current) => (current === depth ? current : depth))}
         />
         <OrbitControls
-          ref={controlsRef}
+          makeDefault
           target={layout.center}
           enablePan
           enableDamping
@@ -946,15 +972,7 @@ export default function Universe3D({
           minDistance={1.8}
           maxDistance={layout.radius * 7}
         />
-        <NavigationBridge
-          controlsRef={controlsRef}
-          center={layout.center}
-          radius={layout.radius}
-          onReady={(api) => {
-            navApiRef.current = api;
-            setNavReady(Boolean(api));
-          }}
-        />
+        <NavigationBridge center={layout.center} radius={layout.radius} />
 
         <Grid
           args={[groundSize, groundSize]}
@@ -994,14 +1012,27 @@ export default function Universe3D({
       </Canvas>
 
       <div className="universe-3d-controls">
-        <div className="u3d-control-group">
-          <span className="u3d-control-label">{t("Layout")}</span>
-          <div className="u3d-segmented">
+        <div className="u3d-layout-control">
+          <button
+            className={`u3d-layout-trigger ${layoutMenuOpen ? "is-open" : ""}`}
+            onClick={() => setLayoutMenuOpen((value) => !value)}
+            title={t("Layout")}
+          >
+            <LayoutGrid size={12} />
+            <span>
+              {t("Layout")}: {t(LAYOUT_OPTIONS.find((option) => option.id === layoutKind)?.label ?? "Hybrid")}
+            </span>
+            <ChevronDown size={12} />
+          </button>
+          <div className={`u3d-layout-popover ${layoutMenuOpen ? "is-open" : ""}`}>
             {LAYOUT_OPTIONS.map((option) => (
               <button
                 key={option.id}
-                className={layoutKind === option.id ? "is-active" : ""}
-                onClick={() => setLayoutKind(option.id)}
+                className={`u3d-layout-option ${layoutKind === option.id ? "is-active" : ""}`}
+                onClick={() => {
+                  setLayoutKind(option.id);
+                  setLayoutMenuOpen(false);
+                }}
                 title={t(option.label)}
               >
                 {t(option.label)}
@@ -1052,38 +1083,62 @@ export default function Universe3D({
         ) : null}
       </div>
 
-      <div className="universe-3d-nav" aria-label={t("3D navigation")} data-ready={navReady ? "true" : "false"}>
+      <div className="universe-3d-nav" aria-label={t("3D navigation")}>
         <div className="u3d-nav-grid">
           <span />
-          <button onClick={() => navApiRef.current?.pan(0, 1)} title={t("Pan up")} aria-label={t("Pan up")}>
+          <button
+            onClick={() => sendNavCommand({ type: "pan", horizontal: 0, vertical: 1 })}
+            title={t("Pan up")}
+            aria-label={t("Pan up")}
+          >
             <ChevronUp size={14} />
           </button>
           <span />
-          <button onClick={() => navApiRef.current?.pan(-1, 0)} title={t("Pan left")} aria-label={t("Pan left")}>
+          <button
+            onClick={() => sendNavCommand({ type: "pan", horizontal: -1, vertical: 0 })}
+            title={t("Pan left")}
+            aria-label={t("Pan left")}
+          >
             <ChevronLeft size={14} />
           </button>
           <button
             className="u3d-nav-reset"
-            onClick={() => navApiRef.current?.reset()}
+            onClick={() => sendNavCommand({ type: "reset" })}
             title={t("Reset camera")}
             aria-label={t("Reset camera")}
           >
             <LocateFixed size={13} />
           </button>
-          <button onClick={() => navApiRef.current?.pan(1, 0)} title={t("Pan right")} aria-label={t("Pan right")}>
+          <button
+            onClick={() => sendNavCommand({ type: "pan", horizontal: 1, vertical: 0 })}
+            title={t("Pan right")}
+            aria-label={t("Pan right")}
+          >
             <ChevronRight size={14} />
           </button>
           <span />
-          <button onClick={() => navApiRef.current?.pan(0, -1)} title={t("Pan down")} aria-label={t("Pan down")}>
+          <button
+            onClick={() => sendNavCommand({ type: "pan", horizontal: 0, vertical: -1 })}
+            title={t("Pan down")}
+            aria-label={t("Pan down")}
+          >
             <ChevronDown size={14} />
           </button>
           <span />
         </div>
         <div className="u3d-nav-zoom">
-          <button onClick={() => navApiRef.current?.zoom(1.15)} title={t("Zoom out")} aria-label={t("Zoom out")}>
+          <button
+            onClick={() => sendNavCommand({ type: "zoom", factor: 1.15 })}
+            title={t("Zoom out")}
+            aria-label={t("Zoom out")}
+          >
             <Minus size={13} />
           </button>
-          <button onClick={() => navApiRef.current?.zoom(0.87)} title={t("Zoom in")} aria-label={t("Zoom in")}>
+          <button
+            onClick={() => sendNavCommand({ type: "zoom", factor: 0.87 })}
+            title={t("Zoom in")}
+            aria-label={t("Zoom in")}
+          >
             <Plus size={13} />
           </button>
         </div>
