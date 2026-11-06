@@ -137,6 +137,7 @@ The UI is **English by default** and ships with Turkish, German, French, Spanish
 ### Project selection
 
 - **Always-visible project switcher:** the active project sits at the top of the sidebar. Open the dropdown to filter and switch between saved analyses without scrolling through the project tree.
+- **Home screen saved projects:** when no project is open, the home screen lists saved analyses as icon cards with file/symbol counts and delete actions, so returning to a previous project does not require browsing again.
 - **Saved-analysis memory:** each project keeps its own cached analysis, keyed by the project root path. Switching opens that saved graph instantly; it does **not** trigger a new analysis. New Project always analyzes, and Rescan refreshes the current project.
 - **Project icons:** the app looks for local favicons/logos (`favicon`, `icon`, `logo`, `apple-touch-icon`) in common locations. Projects without an image fall back to a language-colored initial.
 - Manual full path.

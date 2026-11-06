@@ -40,6 +40,10 @@ import type { SourceResponse } from "../../shared/types";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(HERE, "../..");
 const PORT = Number(process.env.PORT || 4317);
+const TRANSPARENT_PNG = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+  "base64",
+);
 const SERVE_WEB = process.argv.includes("--serve-web") || process.env.CIE_SERVE_WEB === "1";
 
 const app = express();
@@ -321,7 +325,10 @@ app.get("/api/projects/:id/icon", async (req, res) => {
     }
     const icon = await findProjectIcon(project.rootPath);
     if (!icon) {
-      res.status(404).end();
+      res.setHeader("Content-Type", "image/png");
+      res.setHeader("Cache-Control", "private, max-age=60");
+      res.setHeader("X-Project-Icon", "none");
+      res.send(TRANSPARENT_PNG);
       return;
     }
     res.setHeader("Content-Type", icon.mime);

@@ -257,6 +257,8 @@ export const tr: Dictionary = {
   "spatially.": "uzamsal olarak keşfet.",
   "Pick a project folder. We will read its files, symbols, imports, and function calls and turn them into a navigable knowledge graph. Source code is never modified or executed.":
     "Bir proje klasörü seçin. Dosyaları, sembolleri, importları ve fonksiyon çağrılarını okuyup gezilebilir bir knowledge graph'a dönüştürelim. Kaynak kod asla değiştirilmez veya çalıştırılmaz.",
+  "Pick a TypeScript/JavaScript, PHP, or Python project folder. We will read its files, symbols, imports, calls, and routes and turn them into a navigable knowledge graph. Source code is never modified or executed.":
+    "Bir TypeScript/JavaScript, PHP veya Python proje klasörü seçin. Dosyaları, sembolleri, importları, çağrıları ve route'ları okuyup gezilebilir bir knowledge graph'a dönüştürelim. Kaynak kod asla değiştirilmez veya çalıştırılmaz.",
   "Project folder path": "Proje klasörü yolu",
   "Analyze": "Analiz Et",
   "Open sample project": "Örnek projeyi aç",
@@ -273,6 +275,25 @@ export const tr: Dictionary = {
   "2D project map": "2D proje haritası",
   "Navigate interactively from the project universe to files and function calls.":
     "Proje evreninden dosyaya, oradan fonksiyon çağrılarına inen interaktif gezinme.",
+  "Multi-language symbols": "Çok dilli semboller",
+  "TypeScript/JavaScript, PHP, and Python symbols, imports, calls, and framework routes. More languages appear at file level.":
+    "TypeScript/JavaScript, PHP ve Python sembolleri, importlar, çağrılar ve framework route'ları. Diğer diller dosya seviyesinde görünür.",
+  "Knowledge graph + evidence": "Knowledge graph + kanıt",
+  "Files, folders, classes, functions, routes, database objects, events, and every relationship with certainty.":
+    "Dosyalar, klasörler, sınıflar, fonksiyonlar, route'lar, veritabanı nesneleri, olaylar ve her ilişkinin güvenilirlik seviyesi.",
+  "Git change intelligence": "Git değişiklik zekâsı",
+  "Branch, last commit, paginated commit graph, commit detail, diffs, structural impact, and map highlighting.":
+    "Branch, son commit, sayfalı commit ağacı, commit detayı, diff'ler, yapısal etki ve haritada işaretleme.",
+  "2D + 3D architecture": "2D + 3D mimari",
+  "React Flow maps and a Three.js 3D explorer with hybrid, hierarchical, clustered, and force layouts.":
+    "React Flow haritaları ve hibrit, hiyerarşik, kümelenmiş ve kuvvet düzenlerine sahip Three.js 3D kaşif.",
+  "Saved project memory": "Kayıtlı proje hafızası",
+  "Each project keeps its own analysis. Switch instantly without rescanning; local project icons are discovered automatically.":
+    "Her proje kendi analizini saklar. Yeniden taramadan anında geçiş yapın; yerel proje ikonları otomatik bulunur.",
+  "Saved projects": "Kayıtlı projeler",
+  "Continue where you left off": "Kaldığınız yerden devam edin",
+  "TS/JS · PHP · Python · file-level multi-language":
+    "TS/JS · PHP · Python · dosya seviyesinde çok dilli",
   "New analysis": "Yeni analiz",
   "Select a project folder": "Proje klasörü seç",
   "Enter the full path of the folder to analyze. It is opened read-only; no files are changed.":

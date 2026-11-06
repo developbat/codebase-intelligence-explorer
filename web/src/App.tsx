@@ -944,7 +944,15 @@ export default function App() {
               <span>{t("Loading project")}…</span>
             </div>
           ) : (
-            <EmptyState onAnalyze={analyze} busy={busy !== null} error={error} lastPath={lastPath} />
+            <EmptyState
+              onAnalyze={analyze}
+              busy={busy !== null}
+              error={error}
+              lastPath={lastPath}
+              recent={recent}
+              onLoadRecent={loadRecent}
+              onRemoveRecent={removeRecent}
+            />
           )}
         </main>
 
