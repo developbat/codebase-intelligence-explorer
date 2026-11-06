@@ -193,10 +193,11 @@ Open **http://localhost:5173**.
 
 1. Click **Open Project** (or **Browse…**) and choose a TypeScript/JavaScript, PHP, or Python project folder.
 2. Or click **Open sample project** to explore `fixtures/sample-app`.
-3. Use **Universe**, **Files**, **Calls**, **Architecture**, **Changes**, and **3D** from the sidebar.
-4. All tree branches are expanded by default; use the chevrons to expand or collapse everything. The help button starts a guided tour.
-5. Select any node to inspect it and highlight its direct connections.
-6. Open **AI setup** to connect an optional provider.
+3. Use the **active project card** at the top of the sidebar to switch between saved analyses. Switching opens the cached graph instantly; it does not rescan.
+4. Use **Universe**, **Files**, **Calls**, **Architecture**, **Changes**, and **3D** from the sidebar.
+5. All tree branches are expanded by default; use the chevrons to expand or collapse everything. The help button starts a guided tour.
+6. Select any node to inspect it and highlight its direct connections. In 2D, **Up** walks from file → folder → project. In 3D, selection stays in 3D; use **Open selected item in 2D** for an explicit handoff.
+7. Open **AI setup** to connect an optional provider.
 
 ### Production build
 
@@ -318,7 +319,10 @@ fixtures/sample-app/             End-to-end sample order project
 | `POST /api/projects/:id/search` | Local vector search |
 | `GET /api/projects/:id/events` | SSE watcher stream |
 | `GET /api/projects/:id/git` | Branch, HEAD, changed files, commits |
-| `GET /api/projects/:id/git/diff` | Unified diff |
+| `GET /api/projects/:id/git/commits` | Paginated commit graph (`limit`, `skip`) |
+| `GET /api/projects/:id/git/commits/:hash` | Commit detail: files, stats, graph impact |
+| `GET /api/projects/:id/git/commits/:hash/diff` | File diff inside a commit |
+| `GET /api/projects/:id/git/diff` | Unified diff against a base |
 | `POST /api/projects/:id/changes` | Re-analyze + structural diff + impact |
 | `GET /api/fs/list` | Directory-only folder browser |
 | `GET/PUT /api/ai/settings` | Public AI settings / update config |
@@ -402,10 +406,10 @@ Current coverage (6 tests):
 2. CommonJS `require()` / `exports.x`.
 3. Secret and `node_modules` exclusion.
 4. MVP 2 adapters: NestJS/Express routes, Prisma relations, ORM queries, events.
-5. Git status, diff, commits since analysis, structural diff, impact.
+5. Git status, diff, commits since analysis, commit graph/detail/diff, structural diff, impact.
 6. AI service: real source prompt, structured result, cache, language instruction, grounded chat.
 
-Manual browser verification covers folder browsing, all views, PHP/Python projects, the guided tour, the project profile, Git last-commit history, 3D scene, semantic search, Git changes, AI panels, and language switching.
+Manual browser verification covers folder browsing, all views, PHP/Python projects, the guided tour, the project profile, Git last-commit history and commit detail, 3D hybrid/hierarchical/clustered/force layouts, 3D LOD selection, 2D up navigation, semantic search, Git changes, AI panels, and language switching.
 
 ---
 
@@ -450,7 +454,7 @@ Manual browser verification covers folder browsing, all views, PHP/Python projec
 - **Fully incremental parser**; the watcher triggers a safe full re-analysis, while file hashes and AI caches prevent unnecessary AI work.
 - **Full translations** for every string in every new language (menus/core screens are translated; missing keys fall back to English).
 - **InstancedMesh batching for very large 3D scenes:** the current renderer uses LOD, edge aggregation, and per-node meshes for accurate hover/selection; instancing is the next step beyond 1,000 nodes.
-- **3D progressive expansion** beyond the focused graph; deeper levels currently appear via zoom LOD and selection.
+- **3D streaming for very large projects:** current LOD reveals deeper layers by zoom and selection, but the full 3D graph is still capped at 1,000 nodes / 3,000 edges.
 - **Desktop shell** (Tauri/Electron) and OS keychain integration.
 - **SQLite migration** for very large projects.
 - **More language adapters** (Go, Java, C#, Rust, etc.).
