@@ -1,0 +1,38 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+out/
+coverage/
+*.tsbuildinfo
+
+# Local caches
+.vite/
+.cache/
+.codebase-cache/
+
+# Local-only architecture notes, source icon, and design assets
+docs/
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+*.local
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Editors and OS
+.DS_Store
+._*
+.idea/
+.vscode/
+
+# Temporary files
+*.tmp
+*.bak

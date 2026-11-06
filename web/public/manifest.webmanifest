@@ -1,0 +1,17 @@
+{
+  "name": "Codebase Intelligence Explorer",
+  "short_name": "Codebase Explorer",
+  "description": "Static code intelligence, knowledge graph, Git change review, and optional AI analysis.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#070a10",
+  "theme_color": "#0b0f16",
+  "icons": [
+    {
+      "src": "/cbe.png",
+      "sizes": "200x200",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}

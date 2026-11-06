@@ -1,0 +1,63 @@
+{
+  "name": "codebase-intelligence-explorer",
+  "private": true,
+  "version": "0.2.0",
+  "type": "module",
+  "description": "Read-only code intelligence explorer: static analysis, knowledge graph, Git change impact, and optional multi-provider AI analysis.",
+  "scripts": {
+    "dev": "concurrently -k -n server,web -c blue,magenta \"npm:dev:server\" \"npm:dev:web\"",
+    "dev:server": "tsx watch server/src/index.ts",
+    "dev:web": "vite",
+    "build": "npm run typecheck && vite build",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "start": "tsx server/src/index.ts --serve-web",
+    "analyze": "tsx server/src/cli.ts",
+    "test": "tsx --test server/src/*.test.ts"
+  },
+  "dependencies": {
+    "@react-three/drei": "^9.114.3",
+    "@react-three/fiber": "^8.17.10",
+    "@react-three/postprocessing": "^2.16.3",
+    "@xyflow/react": "^12.3.6",
+    "chokidar": "^3.6.0",
+    "elkjs": "^0.9.3",
+    "express": "^4.21.2",
+    "fast-glob": "^3.3.3",
+    "lucide-react": "^0.468.0",
+    "postprocessing": "^6.36.4",
+    "prism-react-renderer": "^2.4.1",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "three": "^0.170.0",
+    "typescript": "^5.7.2"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.10.2",
+    "@types/react": "^18.3.18",
+    "@types/react-dom": "^18.3.5",
+    "@types/three": "^0.170.0",
+    "@vitejs/plugin-react": "^4.3.4",
+    "concurrently": "^9.1.2",
+    "tsx": "^4.19.2",
+    "vite": "^5.4.11"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/developbat/codebase-intelligence-explorer.git"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "code-intelligence",
+    "knowledge-graph",
+    "typescript",
+    "static-analysis",
+    "git",
+    "ai",
+    "react",
+    "threejs"
+  ]
+}
