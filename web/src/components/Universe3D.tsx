@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
-import { Line, OrbitControls, RoundedBox, Stars } from "@react-three/drei";
+import { Edges, Grid, Line, OrbitControls, RoundedBox } from "@react-three/drei";
 import { Bloom, EffectComposer, Vignette } from "@react-three/postprocessing";
 import * as THREE from "three";
-import type { GraphEdge, GraphNode } from "../../../shared/types";
-import { CERTAINTY_COLOR, KIND_COLOR, KIND_LABEL, truncate } from "../lib/constants";
+import type { Certainty, GraphEdge, GraphNode } from "../../../shared/types";
+import { CERTAINTY_COLOR, KIND_COLOR, KIND_LABEL, LANGUAGE_COLOR, truncate } from "../lib/constants";
+import { layout3D, type Cluster3D, type Layout3DKind, type Positioned3D } from "../lib/threeLayout";
 import { useI18n } from "../i18n";
 
 interface Universe3DProps {
@@ -14,144 +15,56 @@ interface Universe3DProps {
   onSelectNode: (id: string | null) => void;
   onOpenFile: (filePath: string) => void;
   onOpenFolder: (folderPath: string) => void;
+  truncated?: boolean;
 }
 
-interface Positioned {
-  node: GraphNode;
-  position: [number, number, number];
-  size: number;
+type EdgeMode = "architecture" | "dependency" | "flow";
+
+interface VisibleEdge extends GraphEdge {
+  count: number;
 }
 
-function priority(node: GraphNode): number {
-  switch (node.kind) {
-    case "project":
-      return 0;
-    case "folder":
-    case "module":
-      return 1;
-    case "file":
-      return 2;
-    case "class":
-    case "interface":
-    case "route":
-    case "database":
-    case "event":
-      return 3;
-    default:
-      return 4;
+const LAYOUT_OPTIONS: { id: Layout3DKind; label: string }[] = [
+  { id: "hybrid", label: "Hybrid" },
+  { id: "hierarchical", label: "Hierarchical" },
+  { id: "clustered", label: "Clustered" },
+  { id: "force", label: "Force" },
+];
+
+const EDGE_OPTIONS: { id: EdgeMode; label: string }[] = [
+  { id: "architecture", label: "Architecture" },
+  { id: "dependency", label: "Dependency" },
+  { id: "flow", label: "Execution flow" },
+];
+
+function edgeAllowed(mode: EdgeMode, kind: GraphEdge["kind"]): boolean {
+  if (mode === "architecture") {
+    return [
+      "CONTAINS",
+      "IMPORTS",
+      "ROUTES_TO",
+      "READS_FROM",
+      "WRITES_TO",
+      "PUBLISHES",
+      "SUBSCRIBES_TO",
+      "MAPS_TO",
+      "RELATES_TO",
+    ].includes(kind);
   }
+  if (mode === "dependency") {
+    return ["IMPORTS", "CALLS", "EXTENDS", "IMPLEMENTS", "ROUTES_TO"].includes(kind);
+  }
+  return ["CALLS", "ROUTES_TO", "READS_FROM", "WRITES_TO", "PUBLISHES", "SUBSCRIBES_TO"].includes(kind);
 }
 
-function positionsFor(nodes: GraphNode[]): Positioned[] {
-  const capped = [...nodes].sort((a, b) => priority(a) - priority(b)).slice(0, 120);
-  const project = capped.find((node) => node.kind === "project");
-  const rest = capped.filter((node) => node !== project);
-  const baseRadius = Math.max(5.5, Math.cbrt(Math.max(1, rest.length)) * 3.7);
-  const golden = Math.PI * (3 - Math.sqrt(5));
-  const positioned: Positioned[] = [];
-
-  if (project) positioned.push({ node: project, position: [0, 0, 0], size: 0.66 });
-
-  rest.forEach((node, index) => {
-    const folderLike = node.kind === "folder" || node.kind === "module";
-    const radius = folderLike ? baseRadius * 0.64 : baseRadius;
-    const t = rest.length <= 1 ? 0.5 : index / (rest.length - 1);
-    const y = 1 - t * 2;
-    const ring = Math.sqrt(Math.max(0.001, 1 - y * y));
-    const angle = index * golden;
-    positioned.push({
-      node,
-      position: [
-        Math.cos(angle) * ring * radius,
-        y * radius * 0.72,
-        Math.sin(angle) * ring * radius,
-      ],
-      size:
-        node.kind === "folder" || node.kind === "module"
-          ? 0.48
-          : node.kind === "file"
-            ? 0.4
-            : node.kind === "project"
-              ? 0.66
-              : 0.28,
-    });
-  });
-
-  return positioned;
+function certaintyRank(certainty: Certainty): number {
+  return certainty === "confirmed" ? 0 : certainty === "inferred" ? 1 : 2;
 }
 
-function CameraRig({ radius }: { radius: number }) {
-  const { camera } = useThree();
-  const done = useRef(false);
-  useFrame(() => {
-    if (done.current) return;
-    camera.position.set(radius * 1.35, radius * 0.75, radius * 1.7);
-    camera.lookAt(0, 0, 0);
-    done.current = true;
-  });
-  return null;
-}
-
-function NodeSurface({
-  node,
-  size,
-  children,
-}: {
-  node: GraphNode;
-  size: number;
-  children: React.ReactNode;
-}) {
-  if (node.kind === "folder" || node.kind === "module") {
-    return (
-      <RoundedBox args={[size, size, size]} radius={size * 0.16} smoothness={5}>
-        {children}
-      </RoundedBox>
-    );
-  }
-  if (node.kind === "file") {
-    return (
-      <RoundedBox args={[size * 1.25, size * 0.7, size * 0.22]} radius={0.045} smoothness={4}>
-        {children}
-      </RoundedBox>
-    );
-  }
-  if (node.kind === "project") {
-    return (
-      <mesh>
-        <icosahedronGeometry args={[size, 1]} />
-        {children}
-      </mesh>
-    );
-  }
-  if (node.kind === "database") {
-    return (
-      <mesh>
-        <cylinderGeometry args={[size * 0.72, size * 0.72, size * 1.15, 24]} />
-        {children}
-      </mesh>
-    );
-  }
-  if (node.kind === "route") {
-    return (
-      <mesh>
-        <torusGeometry args={[size * 0.8, size * 0.23, 14, 32]} />
-        {children}
-      </mesh>
-    );
-  }
-  if (node.kind === "event") {
-    return (
-      <mesh>
-        <octahedronGeometry args={[size, 0]} />
-        {children}
-      </mesh>
-    );
-  }
-  return (
-    <mesh>
-      <sphereGeometry args={[size, 28, 28]} />
-      {children}
-    </mesh>
+function worstCertainty(values: Certainty[]): Certainty {
+  return values.reduce<Certainty>(
+    (worst, value) => (certaintyRank(value) > certaintyRank(worst) ? value : worst),
+    "confirmed",
   );
 }
 
@@ -170,10 +83,9 @@ function makeLabelTexture(label: string, color: string, selected: boolean, conne
   const context = canvas.getContext("2d")!;
   context.scale(dpr, dpr);
 
-  const radius = 14;
   context.beginPath();
-  context.roundRect(0.5, 0.5, width - 1, height - 1, radius);
-  context.fillStyle = selected ? "rgba(8, 15, 25, 0.97)" : connected ? "rgba(8, 14, 23, 0.9)" : "rgba(7, 12, 19, 0.82)";
+  context.roundRect(0.5, 0.5, width - 1, height - 1, 14);
+  context.fillStyle = selected ? "rgba(8, 15, 25, 0.97)" : connected ? "rgba(8, 14, 23, 0.9)" : "rgba(7, 12, 19, 0.8)";
   context.fill();
   context.strokeStyle = selected ? `${color}cc` : `${color}55`;
   context.lineWidth = selected ? 2 : 1.2;
@@ -248,30 +160,340 @@ function LabelSprite({
   );
 }
 
+function CameraRig({ center, radius }: { center: [number, number, number]; radius: number }) {
+  const { camera } = useThree();
+  const centerKey = center.join("|");
+
+  useEffect(() => {
+    camera.position.set(center[0] + radius * 1.35, center[1] + radius * 0.8, center[2] + radius * 1.7);
+    camera.lookAt(center[0], center[1], center[2]);
+    camera.near = 0.1;
+    camera.far = radius * 18;
+    camera.updateProjectionMatrix();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [centerKey, radius, camera]);
+
+  return null;
+}
+
+function LodController({
+  center,
+  radius,
+  enabled,
+  onDepth,
+}: {
+  center: [number, number, number];
+  radius: number;
+  enabled: boolean;
+  onDepth: (depth: number) => void;
+}) {
+  const { camera } = useThree();
+  const last = useRef(0);
+  const centerVector = useMemo(() => new THREE.Vector3(center[0], center[1], center[2]), [center]);
+
+  useFrame(({ clock }) => {
+    if (!enabled) return;
+    if (clock.elapsedTime - last.current < 0.22) return;
+    last.current = clock.elapsedTime;
+    const ratio = camera.position.distanceTo(centerVector) / Math.max(1, radius);
+    const depth = ratio > 1.55 ? 1 : ratio > 1.12 ? 2 : ratio > 0.78 ? 3 : 4;
+    onDepth(depth);
+  });
+
+  return null;
+}
+
+function ProjectCore({ color, selected, dimmed }: { color: string; selected: boolean; dimmed: boolean }) {
+  const opacity = dimmed ? 0.3 : 1;
+  return (
+    <group>
+      <mesh position={[0, 0.06, 0]}>
+        <cylinderGeometry args={[3.1, 3.35, 0.12, 64]} />
+        <meshPhysicalMaterial
+          color={color}
+          emissive={color}
+          emissiveIntensity={selected ? 0.3 : 0.08}
+          roughness={0.3}
+          metalness={0.3}
+          transparent
+          opacity={0.28 * opacity}
+          vertexColors={false}
+        />
+      </mesh>
+      <mesh position={[0, 0.16, 0]}>
+        <cylinderGeometry args={[2.62, 2.82, 0.1, 64]} />
+        <meshPhysicalMaterial
+          color="#141d2d"
+          emissive={color}
+          emissiveIntensity={selected ? 0.22 : 0.05}
+          roughness={0.32}
+          metalness={0.4}
+          transparent
+          opacity={0.9 * opacity}
+        />
+      </mesh>
+      <mesh position={[0, 0.78, 0]}>
+        <icosahedronGeometry args={[0.52, 1]} />
+        <meshPhysicalMaterial
+          color={color}
+          emissive={color}
+          emissiveIntensity={selected ? 0.7 : 0.26}
+          roughness={0.22}
+          metalness={0.25}
+          clearcoat={0.7}
+          clearcoatRoughness={0.2}
+          transparent
+          opacity={opacity}
+        />
+      </mesh>
+      <mesh position={[0, 0.78, 0]} rotation={[Math.PI / 2.7, 0.2, 0]}>
+        <torusGeometry args={[0.88, 0.022, 10, 64]} />
+        <meshBasicMaterial color={color} transparent opacity={0.55 * opacity} />
+      </mesh>
+      <mesh position={[0, 0.78, 0]} rotation={[Math.PI / 1.9, -0.5, 0.4]}>
+        <torusGeometry args={[1.02, 0.014, 8, 64]} />
+        <meshBasicMaterial color={color} transparent opacity={0.28 * opacity} />
+      </mesh>
+      <mesh position={[0, 0.25, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+        <ringGeometry args={[2.86, 3.12, 64]} />
+        <meshBasicMaterial color={color} transparent opacity={0.12 * opacity} side={THREE.DoubleSide} />
+      </mesh>
+    </group>
+  );
+}
+
+function FolderBlock({
+  item,
+  color,
+  selected,
+  connected,
+  dimmed,
+}: {
+  item: Positioned3D;
+  color: string;
+  selected: boolean;
+  connected: boolean;
+  dimmed: boolean;
+}) {
+  const block = item.block ?? [1.2, 0.45, 1.2];
+  const opacity = dimmed ? 0.28 : 0.96;
+  return (
+    <RoundedBox args={block} radius={Math.min(0.14, block[1] * 0.18)} smoothness={4}>
+      <meshPhysicalMaterial
+        color={color}
+        emissive={color}
+        emissiveIntensity={selected ? 0.3 : connected ? 0.1 : 0.055}
+        roughness={0.34}
+        metalness={0.18}
+        clearcoat={0.45}
+        clearcoatRoughness={0.26}
+        transparent
+        opacity={opacity}
+      />
+      {selected || connected ? <Edges color={color} /> : null}
+    </RoundedBox>
+  );
+}
+
+function FileCard({
+  item,
+  color,
+  selected,
+  connected,
+  dimmed,
+}: {
+  item: Positioned3D;
+  color: string;
+  selected: boolean;
+  connected: boolean;
+  dimmed: boolean;
+}) {
+  const block = item.block ?? [0.92, 0.055, 0.66];
+  const language = item.node.language ?? "other";
+  const accent = LANGUAGE_COLOR[language] ?? color;
+  return (
+    <group>
+      <RoundedBox args={block} radius={0.035} smoothness={3}>
+        <meshPhysicalMaterial
+          color={color}
+          emissive={color}
+          emissiveIntensity={selected ? 0.5 : connected ? 0.15 : 0.06}
+          roughness={0.18}
+          metalness={0.1}
+          clearcoat={0.9}
+          clearcoatRoughness={0.12}
+          transparent
+          opacity={dimmed ? 0.24 : 0.74}
+        />
+        {selected || connected ? <Edges color={color} /> : null}
+      </RoundedBox>
+      <mesh position={[0, block[1] / 2 + 0.01, block[2] * 0.34]}>
+        <boxGeometry args={[block[0] * 0.7, 0.012, 0.035]} />
+        <meshBasicMaterial color={accent} transparent opacity={dimmed ? 0.3 : 0.95} />
+      </mesh>
+    </group>
+  );
+}
+
+function DatabaseCore({
+  size,
+  color,
+  selected,
+  dimmed,
+}: {
+  size: number;
+  color: string;
+  selected: boolean;
+  dimmed: boolean;
+}) {
+  return (
+    <group>
+      <mesh>
+        <cylinderGeometry args={[size * 0.72, size * 0.72, size * 1.15, 24]} />
+        <meshPhysicalMaterial
+          color={color}
+          emissive={color}
+          emissiveIntensity={selected ? 0.4 : 0.08}
+          roughness={0.3}
+          metalness={0.3}
+          transparent
+          opacity={dimmed ? 0.3 : 0.95}
+        />
+      </mesh>
+      {[-0.24, 0, 0.24].map((offset) => (
+        <mesh key={offset} position={[0, offset * size, 0]} rotation={[Math.PI / 2, 0, 0]}>
+          <torusGeometry args={[size * 0.73, 0.012, 8, 32]} />
+          <meshBasicMaterial color={color} transparent opacity={dimmed ? 0.15 : 0.6} />
+        </mesh>
+      ))}
+    </group>
+  );
+}
+
+function NodeGeometry({
+  item,
+  color,
+  selected,
+  connected,
+  dimmed,
+}: {
+  item: Positioned3D;
+  color: string;
+  selected: boolean;
+  connected: boolean;
+  dimmed: boolean;
+}) {
+  const { node, size } = item;
+  const opacity = dimmed ? 0.28 : 1;
+
+  if (node.kind === "project") return <ProjectCore color={color} selected={selected} dimmed={dimmed} />;
+  if (node.kind === "folder" || node.kind === "module") {
+    return <FolderBlock item={item} color={color} selected={selected} connected={connected} dimmed={dimmed} />;
+  }
+  if (node.kind === "file") {
+    return <FileCard item={item} color={color} selected={selected} connected={connected} dimmed={dimmed} />;
+  }
+  if (node.kind === "database") {
+    return <DatabaseCore size={size} color={color} selected={selected} dimmed={dimmed} />;
+  }
+  if (node.kind === "route") {
+    return (
+      <mesh>
+        <torusGeometry args={[size * 0.9, size * 0.25, 14, 36]} />
+        <meshPhysicalMaterial
+          color={color}
+          emissive={color}
+          emissiveIntensity={selected ? 0.6 : 0.08}
+          roughness={0.32}
+          metalness={0.2}
+          transparent
+          opacity={opacity}
+        />
+      </mesh>
+    );
+  }
+  if (node.kind === "event") {
+    return (
+      <mesh>
+        <octahedronGeometry args={[size, 0]} />
+        <meshPhysicalMaterial
+          color={color}
+          emissive={color}
+          emissiveIntensity={selected ? 0.6 : 0.08}
+          roughness={0.3}
+          metalness={0.2}
+          transparent
+          opacity={opacity}
+        />
+      </mesh>
+    );
+  }
+  if (node.kind === "class" || node.kind === "interface" || node.kind === "type" || node.kind === "enum") {
+    return (
+      <mesh>
+        <dodecahedronGeometry args={[size, 0]} />
+        <meshPhysicalMaterial
+          color={color}
+          emissive={color}
+          emissiveIntensity={selected ? 0.5 : 0.08}
+          roughness={0.34}
+          metalness={0.16}
+          transparent
+          opacity={opacity}
+        />
+      </mesh>
+    );
+  }
+  return (
+    <mesh>
+      <sphereGeometry args={[size, 20, 20]} />
+      <meshPhysicalMaterial
+        color={color}
+        emissive={color}
+        emissiveIntensity={selected ? 0.75 : 0.22}
+        roughness={0.28}
+        metalness={0.18}
+        clearcoat={0.6}
+        clearcoatRoughness={0.2}
+        transparent
+        opacity={opacity}
+      />
+    </mesh>
+  );
+}
+
 function NodeMesh({
   item,
   selected,
   connected,
+  dimmed,
   showLabel,
   onSelect,
   onOpen,
 }: {
-  item: Positioned;
+  item: Positioned3D;
   selected: boolean;
   connected: boolean;
+  dimmed: boolean;
   showLabel: boolean;
   onSelect: (id: string) => void;
   onOpen: (node: GraphNode) => void;
 }) {
-  const { node, position, size } = item;
+  const { node } = item;
   const [hovered, setHovered] = useState(false);
   const color = node.metadata?.unresolved ? "#fb7185" : KIND_COLOR[node.kind];
-  const scale = selected ? 1.12 : hovered ? 1.06 : connected ? 1.03 : 1;
-  const essentialLabel = node.kind === "project" || node.kind === "folder";
+  const scale = selected ? 1.12 : hovered ? 1.06 : connected ? 1.03 : dimmed ? 0.92 : 1;
+  const essentialLabel = node.kind === "project" || node.kind === "folder" || node.kind === "module";
   const labelVisible = showLabel || essentialLabel || selected || hovered || connected;
+  const labelY =
+    node.kind === "project"
+      ? 1.42
+      : item.block
+        ? item.block[1] / 2 + 0.34
+        : item.size + 0.32;
 
   return (
-    <group position={position}>
+    <group position={item.position}>
       <group
         scale={scale}
         onPointerOver={(event) => {
@@ -292,40 +514,15 @@ function NodeMesh({
           onOpen(node);
         }}
       >
-        <NodeSurface node={node} size={size}>
-          <meshPhysicalMaterial
-            color={color}
-            emissive={color}
-            emissiveIntensity={selected ? 0.4 : connected ? 0.08 : hovered ? 0.18 : 0.05}
-            roughness={0.38}
-            metalness={0.08}
-            clearcoat={0.35}
-            clearcoatRoughness={0.32}
-            reflectivity={0.35}
-          />
-        </NodeSurface>
-        {selected || connected ? (
-          <group scale={selected ? 1.05 : 1.025}>
-            <NodeSurface node={node} size={size}>
-              <meshBasicMaterial
-                color={color}
-                transparent
-                opacity={selected ? 0.06 : 0.02}
-                depthWrite={false}
-                blending={THREE.AdditiveBlending}
-              />
-            </NodeSurface>
-          </group>
-        ) : null}
+        <NodeGeometry item={item} color={color} selected={selected} connected={connected} dimmed={dimmed} />
       </group>
-      {selected ? <pointLight color={color} intensity={0.35} distance={1.5} decay={2} /> : null}
       {labelVisible ? (
         <LabelSprite
           node={node}
           color={color}
           selected={selected}
           connected={connected}
-          y={size + 0.42}
+          y={labelY}
           onSelect={onSelect}
           onOpen={onOpen}
         />
@@ -334,87 +531,151 @@ function NodeMesh({
   );
 }
 
-function GlowEdge({
-  points,
-  color,
-  glowColor,
-  dashed,
-  opacity,
-  pulse,
+function PlatformLabel({ cluster }: { cluster: Cluster3D }) {
+  const texture = useMemo(
+    () => makeLabelTexture(cluster.label, cluster.color, false, false),
+    [cluster.label, cluster.color],
+  );
+  useEffect(() => () => texture.dispose(), [texture]);
+  const width = 2.1;
+  return (
+    <sprite position={[0, 0.55, cluster.depth * 0.56]} scale={[width, width * 0.32, 1]} renderOrder={90}>
+      <spriteMaterial map={texture} transparent depthTest={false} depthWrite={false} opacity={0.9} />
+    </sprite>
+  );
+}
+
+function ClusterPlatforms({
+  clusters,
+  selectedClusterId,
 }: {
-  points: [number, number, number][];
-  color: string;
-  glowColor: string;
-  dashed: boolean;
-  opacity: number;
-  pulse: boolean;
+  clusters: Cluster3D[];
+  selectedClusterId: string | null;
 }) {
-  const core = useRef<any>(null);
-  const glow = useRef<any>(null);
+  return (
+    <>
+      {clusters.map((cluster) => {
+        const selected = cluster.id === selectedClusterId;
+        return (
+          <group key={cluster.id} position={[cluster.center[0], 0, cluster.center[2]]}>
+            <RoundedBox args={[cluster.width * 1.1, 0.07, cluster.depth * 1.1]} radius={0.18} smoothness={3}>
+              <meshBasicMaterial color={cluster.color} transparent opacity={selected ? 0.12 : 0.045} depthWrite={false} />
+              <Edges color={selected ? cluster.color : "#294057"} />
+            </RoundedBox>
+            {cluster.rootId ? null : <PlatformLabel cluster={cluster} />}
+          </group>
+        );
+      })}
+    </>
+  );
+}
+
+function FunctionStems({
+  nodes,
+  positionsById,
+  selectedNodeId,
+}: {
+  nodes: Positioned3D[];
+  positionsById: Map<string, Positioned3D>;
+  selectedNodeId: string | null;
+}) {
+  return (
+    <>
+      {nodes.slice(0, 260).map((item) => {
+        if (!item.parentFileId || (item.node.kind !== "function" && item.node.kind !== "method")) return null;
+        const parent = positionsById.get(item.parentFileId);
+        if (!parent) return null;
+        const active = item.node.id === selectedNodeId || parent.node.id === selectedNodeId;
+        return (
+          <Line
+            key={`stem:${item.node.id}`}
+            points={[parent.position, item.position]}
+            color="#39d5a0"
+            lineWidth={active ? 1.1 : 0.35}
+            transparent
+            opacity={active ? 0.6 : 0.12}
+            depthWrite={false}
+          />
+        );
+      })}
+    </>
+  );
+}
+
+function FlowEdge({
+  from,
+  to,
+  certainty,
+  outgoing,
+  opacity,
+}: {
+  from: [number, number, number];
+  to: [number, number, number];
+  certainty: Certainty;
+  outgoing: boolean;
+  opacity: number;
+}) {
+  const color = certainty === "unresolved" ? CERTAINTY_COLOR.unresolved : outgoing ? "#2dd4bf" : "#ff934b";
+  const dotRef = useRef<THREE.Mesh>(null);
+  const fromVector = useMemo(() => new THREE.Vector3(...from), [from]);
+  const toVector = useMemo(() => new THREE.Vector3(...to), [to]);
+  const target = useMemo(() => new THREE.Vector3(), []);
+  const points = useMemo(() => [fromVector, toVector], [fromVector, toVector]);
+  const offset = useMemo(() => (from[0] + from[2] + to[0] + to[2]) % 7, [from, to]);
 
   useFrame(({ clock }) => {
-    if (!pulse) return;
-    const value = 0.84 + 0.16 * Math.sin(clock.elapsedTime * 1.8);
-    if (core.current?.material) core.current.material.opacity = opacity * value;
-    if (glow.current?.material) glow.current.material.opacity = 0.14 * value;
+    if (!dotRef.current) return;
+    const t = (clock.elapsedTime * 0.34 + offset * 0.07) % 1;
+    target.lerpVectors(fromVector, toVector, outgoing ? t : 1 - t);
+    dotRef.current.position.copy(target);
   });
 
   return (
     <>
       <Line
-        ref={glow}
-        points={points}
-        color={glowColor}
-        lineWidth={4.2}
-        transparent
-        opacity={0.14}
-        depthWrite={false}
-      />
-      <Line
-        ref={core}
         points={points}
         color={color}
-        lineWidth={1.8}
+        lineWidth={certainty === "confirmed" ? 1.8 : 1.5}
         transparent
         opacity={opacity}
-        dashed={dashed}
+        dashed={certainty !== "confirmed"}
         dashSize={0.16}
         gapSize={0.1}
       />
+      <mesh ref={dotRef}>
+        <sphereGeometry args={[0.055, 8, 8]} />
+        <meshBasicMaterial color={color} transparent opacity={opacity} />
+      </mesh>
     </>
   );
 }
 
 function EdgeLines({
-  nodesById,
   edges,
+  positionsById,
   selectedNodeId,
-  selectedColor,
 }: {
-  nodesById: Map<string, Positioned>;
-  edges: GraphEdge[];
+  edges: VisibleEdge[];
+  positionsById: Map<string, Positioned3D>;
   selectedNodeId: string | null;
-  selectedColor: string;
 }) {
   return (
     <>
-      {edges.slice(0, 240).map((edge) => {
-        const source = nodesById.get(edge.source);
-        const target = nodesById.get(edge.target);
+      {edges.slice(0, 420).map((edge) => {
+        const source = positionsById.get(edge.source);
+        const target = positionsById.get(edge.target);
         if (!source || !target) return null;
         const connected =
           Boolean(selectedNodeId) && (edge.source === selectedNodeId || edge.target === selectedNodeId);
-        const dimmed = Boolean(selectedNodeId) && !connected;
-        if (connected) {
+        if (selectedNodeId && connected) {
           return (
-            <GlowEdge
+            <FlowEdge
               key={edge.id}
-              points={[source.position, target.position]}
-              color={CERTAINTY_COLOR[edge.certainty]}
-              glowColor={selectedColor}
-              dashed={edge.certainty !== "confirmed"}
+              from={source.position}
+              to={target.position}
+              certainty={edge.certainty}
+              outgoing={edge.source === selectedNodeId}
               opacity={0.95}
-              pulse
             />
           );
         }
@@ -423,17 +684,77 @@ function EdgeLines({
             key={edge.id}
             points={[source.position, target.position]}
             color={CERTAINTY_COLOR[edge.certainty]}
-            lineWidth={0.7}
+            lineWidth={edge.certainty === "confirmed" ? 1 : 0.8}
             transparent
-            opacity={dimmed ? 0.05 : 0.22}
+            opacity={selectedNodeId ? 0.06 : 0.2}
             dashed={edge.certainty !== "confirmed"}
             dashSize={0.16}
             gapSize={0.12}
+            depthWrite={false}
           />
         );
       })}
     </>
   );
+}
+
+function buildVisibleGraph(
+  layoutNodes: Positioned3D[],
+  allEdges: GraphEdge[],
+  maxDepth: number,
+  edgeMode: EdgeMode,
+  selectedNodeId: string | null,
+): { nodes: Positioned3D[]; edges: VisibleEdge[] } {
+  const visible = new Set(
+    layoutNodes.filter((item) => item.level <= maxDepth || item.node.id === selectedNodeId).map((item) => item.node.id),
+  );
+  const parentById = new Map<string, string>();
+  for (const item of layoutNodes) {
+    if (item.node.parentId) parentById.set(item.node.id, item.node.parentId);
+  }
+
+  function resolve(id: string): string | null {
+    let current = id;
+    for (let guard = 0; guard < 64; guard += 1) {
+      if (visible.has(current)) return current;
+      const parent = parentById.get(current);
+      if (!parent) return null;
+      current = parent;
+    }
+    return null;
+  }
+
+  const aggregated = new Map<string, VisibleEdge>();
+  for (const edge of allEdges) {
+    if (!edgeAllowed(edgeMode, edge.kind)) continue;
+    if (edge.kind === "CONTAINS") {
+      if (!visible.has(edge.source) || !visible.has(edge.target)) continue;
+      aggregated.set(edge.id, { ...edge, count: 1 });
+      continue;
+    }
+    const source = resolve(edge.source);
+    const target = resolve(edge.target);
+    if (!source || !target || source === target) continue;
+    const key = `${edge.kind}|${source}|${target}`;
+    const existing = aggregated.get(key);
+    if (existing) {
+      existing.count += 1;
+      existing.certainty = worstCertainty([existing.certainty, edge.certainty]);
+      continue;
+    }
+    aggregated.set(key, {
+      ...edge,
+      id: `visible:${key}`,
+      source,
+      target,
+      count: 1,
+    });
+  }
+
+  return {
+    nodes: layoutNodes.filter((item) => visible.has(item.node.id)),
+    edges: [...aggregated.values()].slice(0, 500),
+  };
 }
 
 export default function Universe3D({
@@ -443,27 +764,67 @@ export default function Universe3D({
   onSelectNode,
   onOpenFile,
   onOpenFolder,
+  truncated,
 }: Universe3DProps) {
   const { t } = useI18n();
-  const positioned = useMemo(() => positionsFor(nodes), [nodes]);
-  const nodesById = useMemo(() => new Map(positioned.map((item) => [item.node.id, item])), [positioned]);
+  const [layoutKind, setLayoutKind] = useState<Layout3DKind>("hybrid");
+  const [edgeMode, setEdgeMode] = useState<EdgeMode>("architecture");
+  const [maxDepth, setMaxDepth] = useState(1);
+
+  const layout = useMemo(() => layout3D(nodes, edges, layoutKind), [nodes, edges, layoutKind]);
+  const positionsById = useMemo(
+    () => new Map(layout.nodes.map((item) => [item.node.id, item])),
+    [layout.nodes],
+  );
+  const selectedItem = selectedNodeId ? positionsById.get(selectedNodeId) : undefined;
+  const effectiveDepth =
+    layoutKind === "force"
+      ? layout.maxLevel
+      : Math.min(layout.maxLevel, Math.max(maxDepth, selectedItem ? selectedItem.level + 1 : 0));
+
+  useEffect(() => {
+    setMaxDepth(layoutKind === "force" || nodes.length <= 42 ? layout.maxLevel : 1);
+  }, [layoutKind, layout.maxLevel, nodes.length]);
+
+  const groundY = useMemo(
+    () => Math.min(...layout.nodes.map((item) => item.position[1]), 0) - 0.36,
+    [layout.nodes],
+  );
+  const visible = useMemo(
+    () => buildVisibleGraph(layout.nodes, edges, effectiveDepth, edgeMode, selectedNodeId),
+    [layout.nodes, edges, effectiveDepth, edgeMode, selectedNodeId],
+  );
+  const visibleEdges = visible.edges;
+  const visibleNodes = visible.nodes;
+
   const neighborIds = useMemo(() => {
     if (!selectedNodeId) return new Set<string>();
     const neighbours = new Set<string>();
-    for (const edge of edges) {
+    for (const edge of visibleEdges) {
       if (edge.source === selectedNodeId) neighbours.add(edge.target);
       if (edge.target === selectedNodeId) neighbours.add(edge.source);
     }
     return neighbours;
-  }, [edges, selectedNodeId]);
-  const radius = useMemo(
-    () => positioned.reduce((max, item) => Math.max(max, Math.hypot(...item.position)), 5),
-    [positioned],
-  );
-  const selectedColor = selectedNodeId
-    ? KIND_COLOR[nodesById.get(selectedNodeId)?.node.kind ?? "project"]
-    : "#8ab8ff";
-  const showAllLabels = positioned.length <= 14;
+  }, [visibleEdges, selectedNodeId]);
+
+  const selectedClusterId = useMemo(() => {
+    if (!selectedNodeId) return null;
+    const nodeById = new Map(nodes.map((node) => [node.id, node]));
+    let current = nodeById.get(selectedNodeId);
+    for (let guard = 0; guard < 64 && current; guard += 1) {
+      const parent = current.parentId ? nodeById.get(current.parentId) : undefined;
+      if (!parent || parent.kind === "project") break;
+      current = parent;
+    }
+    if (!current) return null;
+    if (current.kind === "folder" || current.kind === "module") return current.id;
+    return null;
+  }, [nodes, selectedNodeId]);
+
+  const showAllLabels = visibleNodes.length <= 24;
+  const groundSize = Math.max(40, layout.radius * 2.7);
+  const cellSize = Math.max(1, Math.round((layout.radius / 18) * 10) / 10);
+  const sectionSize = Math.max(4, Math.round(cellSize * 5));
 
   function openNode(node: GraphNode) {
     if (node.kind === "file" && node.filePath) onOpenFile(node.filePath);
@@ -474,61 +835,126 @@ export default function Universe3D({
   return (
     <div className="universe-3d">
       <Canvas
-        camera={{ position: [radius * 1.35, radius * 0.75, radius * 1.7], fov: 46, near: 0.1, far: radius * 14 }}
+        camera={{ position: [layout.radius * 1.35, layout.radius * 0.8, layout.radius * 1.7], fov: 44, near: 0.1, far: layout.radius * 18 }}
         dpr={[1, 1.8]}
         gl={{ antialias: true, powerPreference: "high-performance", toneMappingExposure: 0.9 }}
         onPointerMissed={() => onSelectNode(null)}
       >
         <color attach="background" args={["#04070c"]} />
-        <fog attach="fog" args={["#04070c", radius * 2.1, radius * 6.2]} />
-        <ambientLight intensity={0.42} />
-        <hemisphereLight args={["#93c5fd", "#1e293b", 0.36]} />
-        <directionalLight position={[6, 9, 5]} intensity={0.95} />
-        <pointLight position={[-radius, -radius, -radius]} intensity={0.65} color="#4f8cff" decay={2} />
-        <pointLight position={[radius, radius * 0.4, radius]} intensity={0.45} color="#a855f7" decay={2} />
-        <Stars radius={radius * 3.8} depth={radius * 2.2} count={1400} factor={2.4} saturation={0} fade={false} speed={0.1} />
-        <CameraRig radius={radius} />
+        <fog attach="fog" args={["#04070c", layout.radius * 2.2, layout.radius * 7.5]} />
+        <ambientLight intensity={0.2} />
+        <hemisphereLight args={["#8fb6e8", "#101820", 0.16]} />
+        <directionalLight position={[6, 10, 5]} intensity={0.58} />
+        <pointLight position={[-layout.radius * 0.7, layout.radius * 0.5, -layout.radius * 0.6]} intensity={0.3} color="#6d8cff" decay={2} />
+        <pointLight position={[layout.radius * 0.7, layout.radius * 0.2, layout.radius * 0.7]} intensity={0.22} color="#a855f7" decay={2} />
+
+        <CameraRig center={layout.center} radius={layout.radius} />
+        <LodController
+          center={layout.center}
+          radius={layout.radius}
+          enabled={layoutKind !== "force" && nodes.length > 42}
+          onDepth={(depth) => setMaxDepth((current) => (current === depth ? current : depth))}
+        />
         <OrbitControls
+          target={layout.center}
           enablePan
           enableDamping
-          dampingFactor={0.07}
-          rotateSpeed={0.7}
+          dampingFactor={0.08}
+          rotateSpeed={0.68}
           zoomSpeed={0.8}
-          minDistance={2}
-          maxDistance={radius * 7}
+          minDistance={1.8}
+          maxDistance={layout.radius * 7}
         />
-        <EdgeLines
-          nodesById={nodesById}
-          edges={edges}
-          selectedNodeId={selectedNodeId}
-          selectedColor={selectedColor}
+
+        <Grid
+          args={[groundSize, groundSize]}
+          position={[layout.center[0], groundY, layout.center[2]]}
+          cellSize={cellSize}
+          cellThickness={0.55}
+          cellColor="#152334"
+          sectionSize={sectionSize}
+          sectionThickness={1}
+          sectionColor="#213a55"
+          fadeDistance={layout.radius * 2.8}
+          fadeStrength={1.2}
+          infiniteGrid={false}
+          followCamera={false}
         />
-        {positioned.map((item) => (
+
+        <ClusterPlatforms clusters={layout.clusters} selectedClusterId={selectedClusterId} />
+        <FunctionStems nodes={visibleNodes} positionsById={positionsById} selectedNodeId={selectedNodeId} />
+        <EdgeLines edges={visibleEdges} positionsById={positionsById} selectedNodeId={selectedNodeId} />
+
+        {visibleNodes.map((item) => (
           <NodeMesh
             key={item.node.id}
             item={item}
             selected={item.node.id === selectedNodeId}
             connected={neighborIds.has(item.node.id)}
+            dimmed={Boolean(selectedNodeId) && item.node.id !== selectedNodeId && !neighborIds.has(item.node.id)}
             showLabel={showAllLabels}
             onSelect={onSelectNode}
             onOpen={openNode}
           />
         ))}
+
         <EffectComposer multisampling={0}>
-          <Bloom intensity={0.2} luminanceThreshold={0.9} luminanceSmoothing={0.3} mipmapBlur />
-          <Vignette eskil={false} offset={0.14} darkness={0.78} />
+          <Bloom intensity={0.16} luminanceThreshold={0.92} luminanceSmoothing={0.35} mipmapBlur />
+          <Vignette eskil={false} offset={0.2} darkness={0.8} />
         </EffectComposer>
       </Canvas>
+
+      <div className="universe-3d-controls">
+        <div className="u3d-control-group">
+          <span className="u3d-control-label">{t("Layout")}</span>
+          <div className="u3d-segmented">
+            {LAYOUT_OPTIONS.map((option) => (
+              <button
+                key={option.id}
+                className={layoutKind === option.id ? "is-active" : ""}
+                onClick={() => setLayoutKind(option.id)}
+                title={t(option.label)}
+              >
+                {t(option.label)}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="u3d-control-group">
+          <span className="u3d-control-label">{t("View")}</span>
+          <div className="u3d-segmented">
+            {EDGE_OPTIONS.map((option) => (
+              <button
+                key={option.id}
+                className={edgeMode === option.id ? "is-active" : ""}
+                onClick={() => setEdgeMode(option.id)}
+                title={t(option.label)}
+              >
+                {t(option.label)}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="u3d-layer-hint">
+          {layoutKind === "force"
+            ? t("{count} nodes in the force graph", { count: layout.nodes.length })
+            : t("Layer {depth}/{max} · zoom in to reveal deeper levels", {
+                depth: effectiveDepth,
+                max: layout.maxLevel,
+              })}
+        </div>
+      </div>
 
       <div className="universe-3d-hud">
         <span>{t("Drag to orbit · scroll to zoom · hover for labels · click to inspect")}</span>
         {selectedNodeId ? (
           <span className="universe-3d-selected">
-            {nodesById.get(selectedNodeId)?.node.label} · {t("{count} connections highlighted", { count: neighborIds.size })}
+            {positionsById.get(selectedNodeId)?.node.label} ·{" "}
+            {t("{count} connections highlighted", { count: neighborIds.size })}
           </span>
         ) : null}
-        {nodes.length > 120 ? (
-          <span className="universe-3d-note">{t("Showing the first 120 nodes for performance.")}</span>
+        {truncated ? (
+          <span className="universe-3d-note">{t("Large project: the 3D graph is capped for performance.")}</span>
         ) : null}
       </div>
       <div className="universe-3d-legend">

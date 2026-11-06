@@ -56,6 +56,21 @@ export const tr: Dictionary = {
   "3D": "3D",
   "2D": "2D",
   "3D Explorer": "3D Kaşif",
+  "Layout": "Düzen",
+  "Hybrid": "Hibrit",
+  "Hierarchical": "Hiyerarşik",
+  "Clustered": "Kümelenmiş",
+  "Force": "Kuvvet",
+  "View": "Görünüm",
+  "Dependency": "Bağımlılık",
+  "Execution flow": "Yürütme akışı",
+  "Layer {depth}/{max} · zoom in to reveal deeper levels":
+    "Katman {depth}/{max} · derin katmanlar için yakınlaştırın",
+  "{count} nodes · {symbols} symbols across the full project":
+    "Tüm proje genelinde {count} düğüm · {symbols} sembol",
+  "{count} nodes in the force graph": "Kuvvet graph'ında {count} düğüm",
+  "Large project: the 3D graph is capped for performance.":
+    "Büyük proje: 3D graph performans için sınırlandırıldı.",
   "Back to 2D": "2D'ye dön",
   "Preparing 3D scene…": "3D sahne hazırlanıyor…",
   "Drag to orbit · scroll to zoom · click to inspect":

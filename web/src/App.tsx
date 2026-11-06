@@ -33,6 +33,7 @@ import { GitCommitDialog } from "./components/GitCommitDialog";
 import { TourButton } from "./components/TourButton";
 import type { AiSettingsPublic } from "../../shared/ai";
 import { buildViewGraph, type CommitHighlight, type ViewMode } from "./lib/viewGraph";
+import { build3DGraph } from "./lib/threeGraph";
 import { formatNumber } from "./lib/constants";
 import { useI18n } from "./i18n";
 import { activeProvider } from "./lib/ai";
@@ -498,6 +499,21 @@ export default function App() {
 
   const viewKey = `${analysis?.id ?? "none"}|${mode}|${selectedFolder ?? ""}|${selectedFile ?? ""}|${focusNodeId ?? ""}|${depth}|${changeReport?.generatedAt ?? gitStatus?.head ?? ""}|${clusterFunctions ? "cluster" : "flat"}|${fullTree ? "full" : "direct"}|${commitHighlight?.hash ?? ""}`;
 
+  const threeGraph = useMemo(
+    () => (analysis ? build3DGraph(analysis) : null),
+    [analysis],
+  );
+
+  const displayTitle = mode === "3d" && analysis ? analysis.projectName : view?.title;
+  const displaySubtitle =
+    mode === "3d" && analysis && threeGraph
+      ? t("{count} nodes · {symbols} symbols across the full project", {
+          count: threeGraph.nodes.length,
+          symbols: analysis.stats.symbols,
+        })
+      : view?.subtitle;
+  const displayNodeCount = mode === "3d" && threeGraph ? threeGraph.nodes.length : view?.nodes.length ?? 0;
+
   const breadcrumbs = useMemo(() => {
     const parts: { label: string; path?: string }[] = [];
     if (!analysis) return parts;
@@ -648,8 +664,8 @@ export default function App() {
               <div className="canvas-toolbar">
                 <div className="view-title">
                   <span className="view-eyebrow">{t(MODE_LABEL[mode])}</span>
-                  <h1>{view.title}</h1>
-                  <p>{view.subtitle}</p>
+                  <h1>{displayTitle}</h1>
+                  <p>{displaySubtitle}</p>
                 </div>
                 <div className="canvas-toolbar-actions">
                   {mode === "3d" ? (
@@ -673,7 +689,7 @@ export default function App() {
                     </button>
                   ) : null}
                   <span className="canvas-stat">
-                    <Network size={12} /> {t("{count} nodes", { count: view.nodes.length })}
+                    <Network size={12} /> {t("{count} nodes", { count: displayNodeCount })}
                   </span>
                   {mode === "architecture" ? (
                     <button className="ghost-button toolbar-action" onClick={() => setFlowsOpen(true)}>
@@ -798,9 +814,10 @@ export default function App() {
                   }
                 >
                   <Universe3D
-                    key={viewKey}
-                    nodes={view.nodes}
-                    edges={view.edges}
+                    key={analysis.id}
+                    nodes={threeGraph?.nodes ?? view.nodes}
+                    edges={threeGraph?.edges ?? view.edges}
+                    truncated={threeGraph?.truncated}
                     selectedNodeId={selectedNodeId}
                     onSelectNode={selectGraphNode}
                     onOpenFile={openFile}

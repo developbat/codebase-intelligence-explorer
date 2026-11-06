@@ -18,19 +18,19 @@ export const KIND_LABEL: Record<GraphNodeKind, string> = {
 };
 
 export const KIND_COLOR: Record<GraphNodeKind, string> = {
-  project: "#a78bfa",
-  module: "#94a3b8",
-  folder: "#f5b84b",
-  file: "#38bdf8",
-  class: "#f472b6",
-  interface: "#c084fc",
-  type: "#d8b4fe",
-  enum: "#e879f9",
-  function: "#34d399",
+  project: "#9875ff",
+  module: "#e3a943",
+  folder: "#e3a943",
+  file: "#36bdf2",
+  class: "#b388ff",
+  interface: "#8b5cf6",
+  type: "#c4b5fd",
+  enum: "#f0abfc",
+  function: "#39d5a0",
   method: "#2dd4bf",
-  route: "#fb923c",
-  database: "#f87171",
-  event: "#facc15",
+  route: "#ff934b",
+  database: "#f16f91",
+  event: "#ebcb4a",
 };
 
 export const EDGE_LABEL: Record<GraphEdgeKind, string> = {

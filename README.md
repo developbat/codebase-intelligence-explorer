@@ -109,16 +109,21 @@ The UI is **English by default** and ships with Turkish, German, French, Spanish
 
 - **Three.js + React Three Fiber** scene, lazy-loaded as a separate chunk.
 - Same node/edge identities as 2D, search, Git impact, and the inspector.
+- **Four layout algorithms:** Hybrid (default), Hierarchical, Clustered, and Force-directed.
+- **Hybrid layout:** the project sits on a central layered platform; top-level modules become architectural platform blocks arranged around it; nested folders become smaller blocks, files become glass cards, and functions become small components attached to their file.
+- **Hierarchical layout:** project → module → folder → file → function levels descend in 3D space.
+- **Clustered layout:** modules are grouped as architectural blocks with their files arranged flat on each platform.
+- **Force-directed layout:** a local 3D force simulation for exploring call and dependency networks (220-node focused subset).
+- **Zoom-based LOD:** the scene starts with modules only and reveals folders, files, and functions as you zoom in. Selecting a node also reveals its next layer.
+- **Edge semantics:** imports, calls, routes, and data flows keep their certainty styling; selecting a node distinguishes outgoing calls (turquoise), incoming calls (orange), unresolved links (dashed), and dims unrelated nodes.
+- **Interaction-only animation:** a small light packet travels along selected call edges. There is no ambient flashing or constant scene motion.
+- **Technical workspace:** no stars. A subtle perspective grid, translucent module platforms, neon selection outlines, low ambient light, and distance-faded links replace the space background.
+- **Consistent palette:** project, module/folder, file, function, route, database, and event colors follow the fixed UI palette; certainty is communicated through line style, not node color.
+- **Performance:** full-project graph capped at 1,000 nodes / 3,000 edges; visible layers are filtered by LOD, edges are aggregated to visible ancestors, and the Force layout uses a focused 220-node subset.
 - Orbit, pan, zoom, click-to-inspect, double-click to open files/folders in 2D.
-- Color and shape encoding by entity type; edge color/dash by certainty.
-- Rounded boxes, physical materials, bloom, subtle glows, and hover labels.
-- Selecting a folder/file/package glows its direct relationships in both 2D and 3D.
-- Labels show the entity name only; type is conveyed by color, the legend, and the inspector.
-- Selected nodes use a compact, shape-following glow instead of a large halo.
+- Labels show the entity name only; type is conveyed by color, shape, the legend, and the inspector.
 - The sidebar button toggles between **3D** and **2D** in place.
-- Labels for small graphs, selected/hover labels for larger graphs, 120-node safety cap.
-- One-click transition back to 2D.
-- Legend, orientation HUD, and inspector integration.
+- Legend, layered HUD, and inspector integration.
 
 ### Project profile, full tree, and guided tour
 
@@ -234,6 +239,8 @@ web/
     i18n/                        Provider + en/tr/de/fr/es/pt/ru/zh/ja dictionaries
     lib/
       viewGraph.ts               Universe / files / calls / architecture / changes / 3D views
+      threeGraph.ts              Full-project 3D graph (layered LOD source)
+      threeLayout.ts             Hybrid / hierarchical / clustered / force 3D layouts
       layout.ts                  ELK layered layout + radial universe layout
       ai.ts                      Active provider selection
       constants.ts               Colors and labels
@@ -409,6 +416,8 @@ Manual browser verification covers folder browsing, all views, PHP/Python projec
 | MVP 3 — AI providers, symbol/scope/project/flow/review/chat, languages | ✅ core |
 | MVP 4 — local vector search, watcher, clustering, hash reuse | ✅ core |
 | MVP 5 — 3D project explorer | ✅ core |
+| 3D hybrid / hierarchical / clustered / force layouts | ✅ |
+| 3D zoom LOD + aggregated edges + interaction-only flow animation | ✅ |
 | PHP / Python symbol, import, call, and route support | ✅ core |
 | Git last commit + recent history in Changes | ✅ |
 | Git commit graph, pagination, commit detail, diffs | ✅ |
@@ -436,7 +445,8 @@ Manual browser verification covers folder browsing, all views, PHP/Python projec
 - **True streaming** AI responses, cancellation, and precise provider-specific cost estimates (tokens are shown today).
 - **Fully incremental parser**; the watcher triggers a safe full re-analysis, while file hashes and AI caches prevent unnecessary AI work.
 - **Full translations** for every string in every new language (menus/core screens are translated; missing keys fall back to English).
-- **3D progressive expansion** beyond the aggregated universe; deeper levels currently transition to 2D.
+- **InstancedMesh batching for very large 3D scenes:** the current renderer uses LOD, edge aggregation, and per-node meshes for accurate hover/selection; instancing is the next step beyond 1,000 nodes.
+- **3D progressive expansion** beyond the focused graph; deeper levels currently appear via zoom LOD and selection.
 - **Desktop shell** (Tauri/Electron) and OS keychain integration.
 - **SQLite migration** for very large projects.
 - **More language adapters** (Go, Java, C#, Rust, etc.).
