@@ -94,6 +94,8 @@ export const tr: Dictionary = {
   "Up": "Yukarı",
   "Go up one level": "Bir üst seviyeye çık",
   "Open selected item in 2D": "Seçili öğeyi 2D'de aç",
+  "Back": "Geri",
+  "Back to previous selection": "Önceki seçime dön",
   "Preparing 3D scene…": "3D sahne hazırlanıyor…",
   "Drag to orbit · scroll to zoom · click to inspect":
     "Döndürmek için sürükle · yakınlaştırmak için kaydır · incelemek için tıkla",

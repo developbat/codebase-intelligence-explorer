@@ -135,6 +135,7 @@ The UI is **English by default** and ships with Turkish, German, French, Spanish
 - **Full project tree by default:** every folder branch is expanded when a project opens. Expand-all and collapse-all buttons are always available.
 - **Full-tree 2D view:** the Files view shows the complete folder/file hierarchy in one graph instead of only direct children. The toolbar toggles between **Full tree** and **Direct children**.
 - **Up navigation:** in 2D, a back/up control in the topbar and toolbar walks from a file → its folder → parent folder → project universe. Breadcrumb parent links remain clickable.
+- **Inspector back stack:** clicking a member or relationship inside the right inspector pushes the previous selection; the **Back** button in the inspector header returns to that exact earlier list/detail, including multi-level drill-down.
 - **Guided tour:** the help button in the topbar starts a short tour through opening a project, view tabs, the tree, the graph, the inspector, Git changes, AI setup, and 3D.
 - **Guided showcase / promo mode:** the **Demo** button runs an automated 75–90 second tour of the current project with English captions: project profile, tree, call graph, architecture, Git history, commit detail, map highlighting, 3D layouts, and saved-project switching. Pause, skip, exit, and replay controls are included. Screen recording is started externally.
 
@@ -434,6 +435,7 @@ Manual browser verification covers folder browsing, all views, PHP/Python projec
 | 3D navigation pad + flow-only labels toggle | ✅ |
 | Smooth 3D free movement + collapsible layout menu | ✅ |
 | 2D up / parent navigation | ✅ |
+| Inspector back stack for previous list/detail | ✅ |
 | PHP / Python symbol, import, call, and route support | ✅ core |
 | Git last commit + recent history in Changes | ✅ |
 | Git commit graph, pagination, commit detail, diffs | ✅ |

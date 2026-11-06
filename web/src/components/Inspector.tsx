@@ -1,7 +1,8 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
   ArrowDownLeft,
+  ArrowLeft,
   ArrowUpRight,
   Boxes,
   Braces,
@@ -284,8 +285,51 @@ export function Inspector({
 }: InspectorProps) {
   const { t, tn, localeInfo } = useI18n();
   const [activeCallSiteKey, setActiveCallSiteKey] = useState<string | null>(null);
+  const [history, setHistory] = useState<string[]>([]);
+  const previousNodeRef = useRef<string | null>(selectedNodeId);
+  const suppressHistoryRef = useRef(false);
   const nodeById = useMemo(() => new Map(analysis.nodes.map((node) => [node.id, node])), [analysis]);
   const edgeById = useMemo(() => new Map(analysis.edges.map((edge) => [edge.id, edge])), [analysis]);
+
+  useEffect(() => {
+    setHistory([]);
+    previousNodeRef.current = selectedNodeId;
+    suppressHistoryRef.current = false;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [analysis.id]);
+
+  useEffect(() => {
+    const previous = previousNodeRef.current;
+    if (suppressHistoryRef.current) {
+      suppressHistoryRef.current = false;
+      previousNodeRef.current = selectedNodeId;
+      return;
+    }
+    if (selectedNodeId && previous && selectedNodeId !== previous) {
+      setHistory((current) => [...current.slice(-29), previous]);
+    }
+    previousNodeRef.current = selectedNodeId;
+  }, [selectedNodeId]);
+
+  function goBack() {
+    const target = history[history.length - 1];
+    if (!target) return;
+    suppressHistoryRef.current = true;
+    setHistory((current) => current.slice(0, -1));
+    onSelectNode(target);
+  }
+
+  const backButton =
+    history.length > 0 ? (
+      <button
+        className="inspector-back"
+        onClick={goBack}
+        title={t("Back to previous selection")}
+        aria-label={t("Back to previous selection")}
+      >
+        <ArrowLeft size={12} /> {t("Back")}
+      </button>
+    ) : null;
 
   const node = selectedNodeId ? nodeById.get(selectedNodeId) : undefined;
   const edge = selectedEdgeId ? edgeById.get(selectedEdgeId) : undefined;
@@ -296,7 +340,10 @@ export function Inspector({
     return (
       <aside className="inspector" data-tour="inspector">
         <div className="inspector-header">
-          <span>{t("Relation")}</span>
+          <div className="inspector-header-title">
+            {backButton}
+            <span>{t("Relation")}</span>
+          </div>
           <span className="inspector-header-actions">
             <span className="inspector-header-meta">{t(EDGE_LABEL[edge.kind])}</span>
             <button className="icon-button subtle" onClick={onClose} aria-label={t("Close inspector")}>
@@ -372,7 +419,10 @@ export function Inspector({
     return (
       <aside className="inspector" data-tour="inspector">
         <div className="inspector-header">
-          <span>{t("Inspector")}</span>
+          <div className="inspector-header-title">
+            {backButton}
+            <span>{t("Inspector")}</span>
+          </div>
           <span className="inspector-header-actions">
             <span className="inspector-header-meta">
               <Lock size={11} /> {t("read-only")}
@@ -468,7 +518,10 @@ export function Inspector({
   return (
     <aside className="inspector" data-tour="inspector">
       <div className="inspector-header">
-        <span>{t("Inspector")}</span>
+        <div className="inspector-header-title">
+          {backButton}
+          <span>{t("Inspector")}</span>
+        </div>
         <span className="inspector-header-actions">
           <span className="inspector-header-meta">
             <Lock size={11} /> {t("read-only")}
