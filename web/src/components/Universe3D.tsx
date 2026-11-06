@@ -1,8 +1,18 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { Edges, Grid, Line, OrbitControls, RoundedBox } from "@react-three/drei";
 import { Bloom, EffectComposer, Vignette } from "@react-three/postprocessing";
 import * as THREE from "three";
+import {
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  ChevronUp,
+  LocateFixed,
+  Minus,
+  Plus,
+  Tags,
+} from "lucide-react";
 import type { Certainty, GraphEdge, GraphNode } from "../../../shared/types";
 import { CERTAINTY_COLOR, KIND_COLOR, KIND_LABEL, LANGUAGE_COLOR, truncate } from "../lib/constants";
 import { layout3D, type Cluster3D, type Layout3DKind, type Positioned3D } from "../lib/threeLayout";
@@ -166,6 +176,86 @@ function CameraRig({ center, radius }: { center: [number, number, number]; radiu
     camera.updateProjectionMatrix();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [centerKey, radius, camera]);
+
+  return null;
+}
+
+interface NavApi {
+  pan: (horizontal: number, vertical: number) => void;
+  zoom: (factor: number) => void;
+  reset: () => void;
+}
+
+function NavigationBridge({
+  controlsRef,
+  center,
+  radius,
+  onReady,
+}: {
+  controlsRef: MutableRefObject<any>;
+  center: [number, number, number];
+  radius: number;
+  onReady: (api: NavApi | null) => void;
+}) {
+  const { camera } = useThree();
+  const centerKey = center.join("|");
+
+  useEffect(() => {
+    let disposed = false;
+    let frame = 0;
+    let api: NavApi | null = null;
+
+    const setup = () => {
+      if (disposed) return;
+      const controls = controlsRef.current;
+      if (!controls) {
+        frame = requestAnimationFrame(setup);
+        return;
+      }
+
+      const pan = (horizontal: number, vertical: number) => {
+        const distance = camera.position.distanceTo(controls.target);
+        const step = Math.max(0.28, distance * 0.055);
+        const right = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
+        const up = new THREE.Vector3(0, 1, 0).applyQuaternion(camera.quaternion);
+        const delta = right.multiplyScalar(horizontal * step).add(up.multiplyScalar(vertical * step));
+        camera.position.add(delta);
+        controls.target.add(delta);
+        controls.update();
+      };
+
+      const zoom = (factor: number) => {
+        const direction = camera.position.clone().sub(controls.target);
+        const distance = direction.length();
+        const next = THREE.MathUtils.clamp(
+          distance * factor,
+          typeof controls.minDistance === "number" ? controls.minDistance : 1.8,
+          typeof controls.maxDistance === "number" ? controls.maxDistance : radius * 7,
+        );
+        direction.setLength(next);
+        camera.position.copy(controls.target).add(direction);
+        controls.update();
+      };
+
+      const reset = () => {
+        camera.position.set(center[0] + radius * 1.35, center[1] + radius * 0.8, center[2] + radius * 1.7);
+        controls.target.set(center[0], center[1], center[2]);
+        camera.lookAt(center[0], center[1], center[2]);
+        controls.update();
+      };
+
+      api = { pan, zoom, reset };
+      onReady(api);
+    };
+
+    setup();
+    return () => {
+      disposed = true;
+      cancelAnimationFrame(frame);
+      onReady(null);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [camera, controlsRef, centerKey, radius]);
 
   return null;
 }
@@ -475,8 +565,8 @@ function NodeMesh({
   const [hovered, setHovered] = useState(false);
   const color = node.metadata?.unresolved ? "#fb7185" : KIND_COLOR[node.kind];
   const scale = selected ? 1.12 : hovered ? 1.06 : connected ? 1.03 : dimmed ? 0.92 : 1;
-  const essentialLabel = node.kind === "project" || node.kind === "folder" || node.kind === "module";
-  const labelVisible = showLabel || essentialLabel || selected || hovered || connected;
+  const labelVisible =
+    showLabel || selected || hovered || connected || node.kind === "project";
   const labelY =
     node.kind === "project"
       ? 1.42
@@ -612,7 +702,7 @@ function FlowEdge({
 
   useFrame(({ clock }) => {
     if (!dotRef.current) return;
-    const t = (clock.elapsedTime * 0.34 + offset * 0.07) % 1;
+    const t = (clock.elapsedTime * 0.32 + offset * 0.07) % 1;
     target.lerpVectors(fromVector, toVector, outgoing ? t : 1 - t);
     dotRef.current.position.copy(target);
   });
@@ -622,7 +712,7 @@ function FlowEdge({
       <Line
         points={points}
         color={color}
-        lineWidth={certainty === "confirmed" ? 1.8 : 1.5}
+        lineWidth={certainty === "confirmed" ? 2.4 : 2}
         transparent
         opacity={opacity}
         dashed={certainty !== "confirmed"}
@@ -630,7 +720,7 @@ function FlowEdge({
         gapSize={0.1}
       />
       <mesh ref={dotRef}>
-        <sphereGeometry args={[0.055, 8, 8]} />
+        <sphereGeometry args={[0.075, 10, 10]} />
         <meshBasicMaterial color={color} transparent opacity={opacity} />
       </mesh>
     </>
@@ -757,6 +847,10 @@ export default function Universe3D({
   const [layoutKind, setLayoutKind] = useState<Layout3DKind>("hybrid");
   const [edgeMode, setEdgeMode] = useState<EdgeMode>("architecture");
   const [maxDepth, setMaxDepth] = useState(1);
+  const [allLabels, setAllLabels] = useState(false);
+  const [navReady, setNavReady] = useState(false);
+  const controlsRef = useRef<any>(null);
+  const navApiRef = useRef<NavApi | null>(null);
 
   const layout = useMemo(() => layout3D(nodes, edges, layoutKind), [nodes, edges, layoutKind]);
   const positionsById = useMemo(
@@ -808,7 +902,7 @@ export default function Universe3D({
     return null;
   }, [nodes, selectedNodeId]);
 
-  const showAllLabels = visibleNodes.length <= 24;
+  const showAllLabels = allLabels;
   const groundSize = Math.max(40, layout.radius * 2.7);
   const cellSize = Math.max(1, Math.round((layout.radius / 18) * 10) / 10);
   const sectionSize = Math.max(4, Math.round(cellSize * 5));
@@ -842,6 +936,7 @@ export default function Universe3D({
           onDepth={(depth) => setMaxDepth((current) => (current === depth ? current : depth))}
         />
         <OrbitControls
+          ref={controlsRef}
           target={layout.center}
           enablePan
           enableDamping
@@ -850,6 +945,15 @@ export default function Universe3D({
           zoomSpeed={0.8}
           minDistance={1.8}
           maxDistance={layout.radius * 7}
+        />
+        <NavigationBridge
+          controlsRef={controlsRef}
+          center={layout.center}
+          radius={layout.radius}
+          onReady={(api) => {
+            navApiRef.current = api;
+            setNavReady(Boolean(api));
+          }}
         />
 
         <Grid
@@ -920,6 +1024,17 @@ export default function Universe3D({
             ))}
           </div>
         </div>
+        <div className="u3d-control-group">
+          <span className="u3d-control-label">{t("Labels")}</span>
+          <button
+            className={`u3d-label-toggle ${allLabels ? "is-active" : ""}`}
+            onClick={() => setAllLabels((value) => !value)}
+            title={t("Show all labels")}
+          >
+            <Tags size={12} />
+            <span>{allLabels ? t("All labels") : t("Selected flow only")}</span>
+          </button>
+        </div>
         <div className="u3d-layer-hint">
           {layoutKind === "force"
             ? t("{count} nodes in the force graph", { count: layout.nodes.length })
@@ -935,6 +1050,43 @@ export default function Universe3D({
             {t("Open selected item in 2D")}
           </button>
         ) : null}
+      </div>
+
+      <div className="universe-3d-nav" aria-label={t("3D navigation")} data-ready={navReady ? "true" : "false"}>
+        <div className="u3d-nav-grid">
+          <span />
+          <button onClick={() => navApiRef.current?.pan(0, 1)} title={t("Pan up")} aria-label={t("Pan up")}>
+            <ChevronUp size={14} />
+          </button>
+          <span />
+          <button onClick={() => navApiRef.current?.pan(-1, 0)} title={t("Pan left")} aria-label={t("Pan left")}>
+            <ChevronLeft size={14} />
+          </button>
+          <button
+            className="u3d-nav-reset"
+            onClick={() => navApiRef.current?.reset()}
+            title={t("Reset camera")}
+            aria-label={t("Reset camera")}
+          >
+            <LocateFixed size={13} />
+          </button>
+          <button onClick={() => navApiRef.current?.pan(1, 0)} title={t("Pan right")} aria-label={t("Pan right")}>
+            <ChevronRight size={14} />
+          </button>
+          <span />
+          <button onClick={() => navApiRef.current?.pan(0, -1)} title={t("Pan down")} aria-label={t("Pan down")}>
+            <ChevronDown size={14} />
+          </button>
+          <span />
+        </div>
+        <div className="u3d-nav-zoom">
+          <button onClick={() => navApiRef.current?.zoom(1.15)} title={t("Zoom out")} aria-label={t("Zoom out")}>
+            <Minus size={13} />
+          </button>
+          <button onClick={() => navApiRef.current?.zoom(0.87)} title={t("Zoom in")} aria-label={t("Zoom in")}>
+            <Plus size={13} />
+          </button>
+        </div>
       </div>
 
       <div className="universe-3d-hud">

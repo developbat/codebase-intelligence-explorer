@@ -64,6 +64,18 @@ export const tr: Dictionary = {
   "View": "Görünüm",
   "Dependency": "Bağımlılık",
   "Execution flow": "Yürütme akışı",
+  "Labels": "Etiketler",
+  "All labels": "Tüm etiketler",
+  "Selected flow only": "Sadece seçili akış",
+  "Show all labels": "Tüm etiketleri göster",
+  "3D navigation": "3D gezinme",
+  "Pan up": "Yukarı kaydır",
+  "Pan down": "Aşağı kaydır",
+  "Pan left": "Sola kaydır",
+  "Pan right": "Sağa kaydır",
+  "Reset camera": "Kamerayı sıfırla",
+  "Zoom in": "Yakınlaştır",
+  "Zoom out": "Uzaklaştır",
   "Layer {depth}/{max} · zoom in to reveal deeper levels":
     "Katman {depth}/{max} · derin katmanlar için yakınlaştırın",
   "{count} nodes · {symbols} symbols across the full project":

@@ -116,7 +116,9 @@ The UI is **English by default** and ships with Turkish, German, French, Spanish
 - **Force-directed layout:** a local 3D force simulation for exploring call and dependency networks (220-node focused subset).
 - **Zoom-based LOD:** the scene starts with modules only and reveals folders, files, and functions as you zoom in. Selecting a node also reveals its next layer.
 - **Edge semantics:** imports, calls, routes, and data flows keep their certainty styling; selecting a node distinguishes outgoing calls (turquoise), incoming calls (orange), unresolved links (dashed), and dims unrelated nodes.
-- **Interaction-only animation:** a small light packet travels along selected call edges. There is no ambient flashing or constant scene motion.
+- **Flow-first labels:** by default only the selected node and its flow neighbors show labels. A **Labels → All labels** toggle reveals every label when you want the full map.
+- **Right-side navigation pad:** pan up/down/left/right, zoom in/out, and reset the camera without fighting mouse orbit. The pad sits on the right edge of the 3D scene.
+- **Interaction-only animation:** a larger, high-contrast light packet travels along selected call edges. There is no ambient flashing or constant scene motion.
 - **Technical workspace:** no stars. A subtle perspective grid, translucent module platforms, neon selection outlines, low ambient light, and distance-faded links replace the space background.
 - **Consistent palette:** project, module/folder, file, function, route, database, and event colors follow the fixed UI palette; certainty is communicated through line style, not node color.
 - **Performance:** full-project graph capped at 1,000 nodes / 3,000 edges; visible layers are filtered by LOD, edges are aggregated to visible ancestors, and the Force layout uses a focused 220-node subset.
@@ -428,6 +430,7 @@ Manual browser verification covers folder browsing, all views, PHP/Python projec
 | 3D hybrid / hierarchical / clustered / force layouts | ✅ |
 | 3D zoom LOD + aggregated edges + interaction-only flow animation | ✅ |
 | 3D stays active while inspecting; explicit 2D handoff | ✅ |
+| 3D navigation pad + flow-only labels toggle | ✅ |
 | 2D up / parent navigation | ✅ |
 | PHP / Python symbol, import, call, and route support | ✅ core |
 | Git last commit + recent history in Changes | ✅ |

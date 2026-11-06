@@ -4067,6 +4067,98 @@ button.canvas-stat {
   border-color: rgba(110, 168, 254, 0.45);
 }
 
+.u3d-label-toggle {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 7px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: rgba(7, 12, 19, 0.6);
+  color: var(--muted-2);
+  font-size: 8.5px;
+  text-align: left;
+}
+
+.u3d-label-toggle:hover {
+  border-color: rgba(110, 168, 254, 0.3);
+  color: var(--text-soft);
+}
+
+.u3d-label-toggle.is-active {
+  border-color: rgba(167, 139, 250, 0.34);
+  background: rgba(124, 58, 237, 0.12);
+  color: #d8ccff;
+}
+
+.u3d-label-toggle svg {
+  flex: none;
+}
+
+.universe-3d-nav {
+  position: absolute;
+  right: 14px;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 7px;
+  border: 1px solid rgba(82, 112, 146, 0.32);
+  border-radius: 10px;
+  background: linear-gradient(180deg, rgba(10, 17, 27, 0.9), rgba(7, 12, 20, 0.84));
+  backdrop-filter: blur(10px);
+  box-shadow: 0 14px 36px -24px #000, inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.u3d-nav-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 27px);
+  grid-template-rows: repeat(3, 27px);
+  gap: 3px;
+}
+
+.u3d-nav-grid button,
+.u3d-nav-zoom button {
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: rgba(148, 163, 184, 0.045);
+  color: #8ba8ce;
+  padding: 0;
+}
+
+.u3d-nav-grid button:hover,
+.u3d-nav-zoom button:hover {
+  border-color: rgba(110, 168, 254, 0.34);
+  background: rgba(59, 130, 246, 0.12);
+  color: #c5dcff;
+}
+
+.u3d-nav-grid button:active,
+.u3d-nav-zoom button:active {
+  transform: translateY(1px);
+}
+
+.u3d-nav-grid .u3d-nav-reset {
+  border-color: rgba(167, 139, 250, 0.22);
+  background: rgba(124, 58, 237, 0.1);
+  color: #c9b9ff;
+}
+
+.u3d-nav-zoom {
+  display: flex;
+  gap: 3px;
+}
+
+.u3d-nav-zoom button {
+  flex: 1;
+  height: 23px;
+}
+
 .universe-3d-legend {
   position: absolute;
   left: 12px;
@@ -4108,6 +4200,12 @@ button.canvas-stat {
     left: 8px;
     right: 8px;
     width: auto;
+  }
+
+  .universe-3d-nav {
+    right: 8px;
+    transform: translateY(-50%) scale(0.92);
+    transform-origin: right center;
   }
 }
 
