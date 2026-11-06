@@ -3,6 +3,8 @@ import type {
   ChangeReport,
   CodeSearchResponse,
   FolderListing,
+  GitCommitDetail,
+  GitCommitHistory,
   GitDiffResult,
   GitStatus,
   GraphNodeKind,
@@ -69,6 +71,21 @@ export const api = {
     const params = new URLSearchParams({ file });
     if (base) params.set("base", base);
     return request<GitDiffResult>(`/api/projects/${id}/git/diff?${params.toString()}`);
+  },
+
+  gitCommits: (id: string, limit = 20, skip = 0) => {
+    const params = new URLSearchParams({ limit: String(limit), skip: String(skip) });
+    return request<GitCommitHistory>(`/api/projects/${id}/git/commits?${params.toString()}`);
+  },
+
+  gitCommit: (id: string, hash: string) =>
+    request<GitCommitDetail>(`/api/projects/${id}/git/commits/${encodeURIComponent(hash)}`),
+
+  gitCommitDiff: (id: string, hash: string, file: string) => {
+    const params = new URLSearchParams({ file });
+    return request<GitDiffResult>(
+      `/api/projects/${id}/git/commits/${encodeURIComponent(hash)}/diff?${params.toString()}`,
+    );
   },
 
   changes: (id: string) =>
@@ -203,6 +220,8 @@ export type {
   ChangeReport,
   CodeSearchResponse,
   FolderListing,
+  GitCommitDetail,
+  GitCommitHistory,
   GitDiffResult,
   GitStatus,
   GraphNodeKind,

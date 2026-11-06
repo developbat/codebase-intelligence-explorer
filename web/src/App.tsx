@@ -5,6 +5,7 @@ import {
   FolderOpen,
   FolderTree,
   GitBranch,
+  GitCommitHorizontal,
   GitCompareArrows,
   Loader2,
   Lock,
@@ -27,13 +28,15 @@ import { AiChatDrawer } from "./components/AiChatDrawer";
 import { AiReviewDialog } from "./components/AiReviewDialog";
 import { AiFlowsDialog } from "./components/AiFlowsDialog";
 import { GitSummary } from "./components/GitSummary";
+import { GitHistory } from "./components/GitHistory";
+import { GitCommitDialog } from "./components/GitCommitDialog";
 import { TourButton } from "./components/TourButton";
 import type { AiSettingsPublic } from "../../shared/ai";
-import { buildViewGraph, type ViewMode } from "./lib/viewGraph";
+import { buildViewGraph, type CommitHighlight, type ViewMode } from "./lib/viewGraph";
 import { formatNumber } from "./lib/constants";
 import { useI18n } from "./i18n";
 import { activeProvider } from "./lib/ai";
-import type { GraphNode } from "../../shared/types";
+import type { GitChangedFile, GitCommit, GraphNode } from "../../shared/types";
 
 const LAST_PROJECT_KEY = "cie:last-project";
 const LAST_PATH_KEY = "cie:last-path";
@@ -99,6 +102,8 @@ export default function App() {
   const [changeReport, setChangeReport] = useState<ChangeReport | null>(null);
   const [gitLoading, setGitLoading] = useState(false);
   const [changeBusy, setChangeBusy] = useState(false);
+  const [commitDialog, setCommitDialog] = useState<{ hash: string; subject: string } | null>(null);
+  const [commitHighlight, setCommitHighlight] = useState<CommitHighlight | null>(null);
   const [aiSettings, setAiSettings] = useState<AiSettingsPublic | null>(null);
   const [aiSettingsOpen, setAiSettingsOpen] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
@@ -229,6 +234,8 @@ export default function App() {
     setAnalysis(result);
     setGitStatus(null);
     setChangeReport(null);
+    setCommitDialog(null);
+    setCommitHighlight(null);
     localStorage.setItem(LAST_PROJECT_KEY, result.id);
     setRecent((current) => [toRecent(result), ...current.filter((project) => project.id !== result.id)].slice(0, 20));
 
@@ -309,6 +316,8 @@ export default function App() {
       setAnalysis(result);
       setChangeReport(null);
       setGitStatus(null);
+      setCommitDialog(null);
+      setCommitHighlight(null);
       setWorkspaceUpdate(null);
       setRecent((current) => [toRecent(result), ...current.filter((project) => project.id !== result.id)].slice(0, 20));
     } catch (requestError) {
@@ -454,6 +463,20 @@ export default function App() {
     }
   }
 
+  function showCommitOnMap(files: GitChangedFile[], commit: GitCommit) {
+    setCommitHighlight({ hash: commit.hash, subject: commit.subject, files });
+    setCommitDialog(null);
+    setMode("files");
+    setSelectedFolder(null);
+    setSelectedFile(null);
+    setFocusNodeId(null);
+    setSelectedEdgeId(null);
+    setFullTree(true);
+    const first = files[0];
+    setSelectedNodeId(first ? `file:${first.path}` : "project");
+    setInspectorOpen(true);
+  }
+
   const view = useMemo(() => {
     if (!analysis) return null;
     return buildViewGraph({
@@ -465,14 +488,15 @@ export default function App() {
       depth,
       changeReport,
       gitStatus,
+      commitHighlight,
       clusterFunctions,
       fullTree,
       t,
       tn,
     });
-  }, [analysis, mode, selectedFolder, selectedFile, focusNodeId, depth, changeReport, gitStatus, clusterFunctions, fullTree, t, tn]);
+  }, [analysis, mode, selectedFolder, selectedFile, focusNodeId, depth, changeReport, gitStatus, commitHighlight, clusterFunctions, fullTree, t, tn]);
 
-  const viewKey = `${analysis?.id ?? "none"}|${mode}|${selectedFolder ?? ""}|${selectedFile ?? ""}|${focusNodeId ?? ""}|${depth}|${changeReport?.generatedAt ?? gitStatus?.head ?? ""}|${clusterFunctions ? "cluster" : "flat"}|${fullTree ? "full" : "direct"}`;
+  const viewKey = `${analysis?.id ?? "none"}|${mode}|${selectedFolder ?? ""}|${selectedFile ?? ""}|${focusNodeId ?? ""}|${depth}|${changeReport?.generatedAt ?? gitStatus?.head ?? ""}|${clusterFunctions ? "cluster" : "flat"}|${fullTree ? "full" : "direct"}|${commitHighlight?.hash ?? ""}`;
 
   const breadcrumbs = useMemo(() => {
     const parts: { label: string; path?: string }[] = [];
@@ -693,7 +717,40 @@ export default function App() {
                   ) : null}
                 </div>
               </div>
-              {mode === "changes" && gitStatus ? <GitSummary status={gitStatus} /> : null}
+              {commitHighlight ? (
+                <div className="commit-highlight-bar">
+                  <GitCommitHorizontal size={12} />
+                  <span>
+                    {t("Commit {hash} highlighted on the map", {
+                      hash: commitHighlight.hash.slice(0, 8),
+                    })}
+                  </span>
+                  <span className="commit-highlight-count">
+                    {t("{count} changed files", { count: commitHighlight.files.length })}
+                  </span>
+                  <button
+                    className="icon-button subtle"
+                    onClick={() => setCommitHighlight(null)}
+                    title={t("Clear commit highlight")}
+                    aria-label={t("Clear commit highlight")}
+                  >
+                    <X size={12} />
+                  </button>
+                </div>
+              ) : null}
+              {mode === "changes" && gitStatus ? (
+                <>
+                  <GitSummary status={gitStatus} />
+                  {gitStatus.available ? (
+                    <GitHistory
+                      projectId={analysis.id}
+                      head={gitStatus.head}
+                      branch={gitStatus.branch}
+                      onSelectCommit={(commit) => setCommitDialog({ hash: commit.hash, subject: commit.subject })}
+                    />
+                  ) : null}
+                </>
+              ) : null}
               {mode === "changes" ? (
                 <div className="change-strip">
                   <button className="change-action primary" onClick={analyzeChanges} disabled={changeBusy}>
@@ -941,6 +998,16 @@ export default function App() {
             setAiSettingsOpen(true);
           }}
           onOpenFile={openFile}
+        />
+      ) : null}
+
+      {analysis ? (
+        <GitCommitDialog
+          open={commitDialog !== null}
+          analysis={analysis}
+          commitHash={commitDialog?.hash ?? null}
+          onClose={() => setCommitDialog(null)}
+          onShowOnMap={showCommitOnMap}
         />
       ) : null}
 

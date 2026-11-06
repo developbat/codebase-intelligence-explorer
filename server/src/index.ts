@@ -15,7 +15,7 @@ import {
 import { listProviderModels, testProvider } from "./ai/providers";
 import { getPublicSettings, updateAiSettings } from "./ai/settings";
 import { buildChangeReport } from "./changes";
-import { getFileDiff, getGitStatus } from "./git";
+import { getCommitDetail, getCommitFileDiff, getCommitLog, getFileDiff, getGitStatus } from "./git";
 import { listFolders } from "./fsbrowse";
 import { searchCode } from "./search";
 import { subscribeProjectEvents } from "./watcher";
@@ -362,6 +362,40 @@ app.get("/api/projects/:id/git", async (req, res) => {
     const analysis = await loadAnalysis(req.params.id);
     const status = await getGitStatus(analysis.rootPath, analysis);
     res.json(status);
+  } catch (error) {
+    handleError(res, error);
+  }
+});
+
+app.get("/api/projects/:id/git/commits", async (req, res) => {
+  try {
+    const analysis = await loadAnalysis(req.params.id);
+    const limit = Number(req.query.limit) || 20;
+    const skip = Number(req.query.skip) || 0;
+    res.json(await getCommitLog(analysis.rootPath, { limit, skip }));
+  } catch (error) {
+    handleError(res, error);
+  }
+});
+
+app.get("/api/projects/:id/git/commits/:hash", async (req, res) => {
+  try {
+    const analysis = await loadAnalysis(req.params.id);
+    res.json(await getCommitDetail(analysis.rootPath, req.params.hash, analysis));
+  } catch (error) {
+    handleError(res, error);
+  }
+});
+
+app.get("/api/projects/:id/git/commits/:hash/diff", async (req, res) => {
+  try {
+    const analysis = await loadAnalysis(req.params.id);
+    const file = typeof req.query.file === "string" ? req.query.file : "";
+    if (!file) {
+      res.status(400).json({ error: "A file path is required." });
+      return;
+    }
+    res.json(await getCommitFileDiff(analysis.rootPath, req.params.hash, file));
   } catch (error) {
     handleError(res, error);
   }

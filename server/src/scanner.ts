@@ -3,7 +3,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import crypto from "node:crypto";
 
-export type SourceLanguage = "typescript" | "tsx" | "javascript" | "jsx" | "php" | "python";
+export type SourceLanguage = "typescript" | "tsx" | "javascript" | "jsx" | "php" | "python" | "other";
 
 export interface ScannedFile {
   absPath: string;
@@ -16,6 +16,60 @@ export interface ScannedFile {
 }
 
 const SOURCE_EXTENSIONS = [".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".mts", ".cts", ".php", ".py"];
+
+/**
+ * Additional source formats. These appear in the file map and Git impact
+ * views, but their symbols are not parsed yet.
+ */
+const GENERIC_SOURCE_EXTENSIONS = new Set([
+  ".go",
+  ".rs",
+  ".java",
+  ".kt",
+  ".kts",
+  ".cs",
+  ".c",
+  ".h",
+  ".cpp",
+  ".cc",
+  ".cxx",
+  ".hpp",
+  ".hxx",
+  ".m",
+  ".mm",
+  ".rb",
+  ".swift",
+  ".scala",
+  ".sh",
+  ".bash",
+  ".zsh",
+  ".ps1",
+  ".lua",
+  ".r",
+  ".dart",
+  ".ex",
+  ".exs",
+  ".erl",
+  ".hrl",
+  ".clj",
+  ".cljs",
+  ".fs",
+  ".fsx",
+  ".vb",
+  ".sql",
+  ".vue",
+  ".svelte",
+  ".astro",
+  ".html",
+  ".htm",
+  ".css",
+  ".scss",
+  ".sass",
+  ".less",
+  ".graphql",
+  ".gql",
+  ".proto",
+]);
 
 /** Folders that never carry first-party source code. */
 const IGNORED_GLOBS = [
@@ -98,6 +152,7 @@ export interface PackageManifest {
 
 function toLanguage(filePath: string): SourceLanguage | null {
   const ext = path.extname(filePath).toLowerCase();
+  if (GENERIC_SOURCE_EXTENSIONS.has(ext)) return "other";
   if (!SOURCE_EXTENSIONS.includes(ext)) return null;
   switch (ext) {
     case ".tsx":
@@ -192,7 +247,7 @@ export async function scanProject(inputPath: string, options: ScanOptions = {}):
   }
   if (skippedLarge > 0) warnings.push(`${skippedLarge} files were skipped because they exceed the 1.5 MB limit.`);
   if (skippedUnsupported > 0) {
-    warnings.push(`${skippedUnsupported} unsupported (non-TS/JS) files were skipped.`);
+    warnings.push(`${skippedUnsupported} unsupported files were skipped.`);
   }
 
   const files: ScannedFile[] = [];

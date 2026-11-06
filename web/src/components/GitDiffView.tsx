@@ -7,9 +7,10 @@ interface GitDiffViewProps {
   analysisId: string;
   filePath: string;
   base?: string;
+  commitHash?: string;
 }
 
-export function GitDiffView({ analysisId, filePath, base }: GitDiffViewProps) {
+export function GitDiffView({ analysisId, filePath, base, commitHash }: GitDiffViewProps) {
   const { t } = useI18n();
   const [diff, setDiff] = useState<GitDiffResult | null>(null);
   const [loading, setLoading] = useState(true);
@@ -19,8 +20,10 @@ export function GitDiffView({ analysisId, filePath, base }: GitDiffViewProps) {
     let cancelled = false;
     setLoading(true);
     setError(null);
-    api
-      .gitDiff(analysisId, filePath, base)
+    const request = commitHash
+      ? api.gitCommitDiff(analysisId, commitHash, filePath)
+      : api.gitDiff(analysisId, filePath, base);
+    request
       .then((result) => {
         if (!cancelled) setDiff(result);
       })
@@ -33,7 +36,7 @@ export function GitDiffView({ analysisId, filePath, base }: GitDiffViewProps) {
     return () => {
       cancelled = true;
     };
-  }, [analysisId, filePath, base, t]);
+  }, [analysisId, filePath, base, commitHash, t]);
 
   const lines = useMemo(() => {
     if (!diff?.diff) return [];
@@ -54,7 +57,7 @@ export function GitDiffView({ analysisId, filePath, base }: GitDiffViewProps) {
         <span className="git-diff-title">
           <FileDiff size={12} /> {filePath.split("/").pop()}
         </span>
-        <span className="git-diff-base">{base ? base.slice(0, 8) : "HEAD"}</span>
+        <span className="git-diff-base">{(commitHash ?? base)?.slice(0, 8) ?? "HEAD"}</span>
       </div>
       {loading ? (
         <div className="source-loading">

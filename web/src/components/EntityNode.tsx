@@ -50,10 +50,12 @@ function EntityNodeComponent({ data, selected }: NodeProps<EntityFlowNode>) {
   const fileCount = node.metadata?.fileCount;
   const symbolCount = node.metadata?.symbolCount;
   const qualified = node.metadata?.qualifiedName;
+  const commitChanged =
+    typeof node.metadata?.commitChanged === "string" ? node.metadata.commitChanged : undefined;
 
   return (
     <div
-      className={`entity-node kind-${node.kind} ${selected ? "is-selected" : ""} ${neighbor ? "is-neighbor" : ""} ${dimmed ? "is-dimmed" : ""} ${node.metadata?.unresolved ? "is-unresolved" : ""}`}
+      className={`entity-node kind-${node.kind} ${selected ? "is-selected" : ""} ${neighbor ? "is-neighbor" : ""} ${dimmed ? "is-dimmed" : ""} ${node.metadata?.unresolved ? "is-unresolved" : ""} ${commitChanged ? "is-commit-changed" : ""}`}
       style={{ "--node-color": color } as React.CSSProperties}
     >
       <Handle type="target" position={Position.Left} className="entity-handle" />
@@ -93,6 +95,14 @@ function EntityNodeComponent({ data, selected }: NodeProps<EntityFlowNode>) {
         </div>
       </div>
       {node.metadata?.async ? <span className="entity-node-badge">async</span> : null}
+      {commitChanged ? (
+        <span
+          className={`entity-node-commit status-${commitChanged}`}
+          title={t("Changed in commit {hash}", { hash: String(node.metadata?.commitHash ?? "").slice(0, 8) })}
+        >
+          {commitChanged.slice(0, 1).toUpperCase()}
+        </span>
+      ) : null}
       {typeof node.metadata?.callerCount === "number" && node.metadata.callerCount > 0 ? (
         <span className="entity-node-count" title={t("{count} callers", { count: node.metadata.callerCount })}>
           {node.metadata.callerCount}↘

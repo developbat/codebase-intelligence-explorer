@@ -39,6 +39,7 @@ The UI is **English by default** and ships with Turkish, German, French, Spanish
 - **Read-only scanning:** source files are read; the analysis engine has no write, delete, move, or execute path.
 - **TypeScript Compiler API:** real AST, symbols, types, imports, and call resolution for TypeScript and JavaScript.
 - **PHP and Python parser layer:** Lezer-based parsing for classes, interfaces, traits, enums, functions, methods, imports, calls, and framework routes without requiring a PHP or Python runtime.
+- **File-level language coverage:** Go, Rust, Java, Kotlin, C#, C/C++, Ruby, Swift, Scala, shell, Lua, R, Dart, Elixir, Erlang, Clojure/F#, SQL, Vue, Svelte, Astro, HTML/CSS, GraphQL, and Protobuf files appear in the file map and Git impact views. Their symbols are not parsed yet.
 - **Symbol extraction:** functions, methods, classes, interfaces, type aliases, enums, arrow functions, nested functions, and CommonJS exports.
 - **Knowledge graph:** files, folders, classes, functions, routes, database objects, events, packages, and their relationships.
 - **Evidence and certainty:** every relationship carries source evidence and is marked `confirmed`, `inferred`, or `unresolved`.
@@ -69,12 +70,16 @@ The UI is **English by default** and ships with Turkish, German, French, Spanish
 
 - Branch, HEAD, subject, dirty state captured at analysis time.
 - **Last commit and recent history:** the Changes view always shows the current branch, shortened HEAD, last commit subject/author/date, and the most recent commits—even when the working tree is clean.
+- **Commit graph:** a Git-style commit tree with branch/merge lanes, paginated 20 commits at a time. **Load older commits** walks backwards through history without loading everything at once.
+- **Commit detail:** click a commit to inspect its metadata, file/line totals, changed files, per-file diff, and impact on the current analyzed graph.
+- **Changed-file tree:** commit details rebuild the project folder hierarchy for that commit, with added/modified/deleted/renamed markers.
+- **Show on map:** highlight all changed files from a commit, or a single file, directly on the 2D map. Changed nodes show an accent badge until the highlight is cleared.
 - Changes since analysis: working tree, commits since the saved HEAD, and only files whose content really changed.
 - Unified diff viewer, including synthetic diffs for untracked files.
 - Structural diff: added, removed, and changed symbols and edge counts per file.
 - Impact analysis: direct/transitive callers, importers, affected routes, and related tests.
 - Change graph and changed-file strip.
-- **Read-only Git usage:** only `status`, `diff`, `log`, `rev-parse`, and `rev-list`. No checkout, commit, reset, or write command.
+- **Read-only Git usage:** only `status`, `diff`, `log`, `show`, `rev-parse`, and `rev-list`. No checkout, commit, reset, or write command.
 
 ### Optional AI layer (MVP 3)
 
@@ -237,6 +242,8 @@ web/
       Inspector.tsx              Entity details, source, Git diff, AI panels
       ProjectProfile.tsx         Non-AI stack/counts/entry-point inference
       GitSummary.tsx             Branch, HEAD, last commit, recent history
+      GitHistory.tsx             Paginated Git commit graph
+      GitCommitDialog.tsx        Commit file tree, diff, and graph impact
       TourButton.tsx             driver.js guided tour
       SourcePreview.tsx          Read-only highlighted source
       GitDiffView.tsx            Unified diff viewer
@@ -397,9 +404,13 @@ Manual browser verification covers folder browsing, all views, PHP/Python projec
 | MVP 5 — 3D project explorer | ✅ core |
 | PHP / Python symbol, import, call, and route support | ✅ core |
 | Git last commit + recent history in Changes | ✅ |
+| Git commit graph, pagination, commit detail, diffs | ✅ |
+| Highlight commit-changed files on the 2D map | ✅ |
 | Full-tree Files view and expanded tree by default | ✅ |
 | Non-AI project profile | ✅ |
 | Guided tour | ✅ |
+| File-level map for many additional languages | ✅ files only |
+| Symbol-level support for every language | ⏳ TS/JS, PHP, Python today |
 | Folder browser | ✅ |
 | English UI + 9 languages | ✅ core translations with English fallback |
 | Desktop packaging | ⏳ local web app |
@@ -408,8 +419,10 @@ Manual browser verification covers folder browsing, all views, PHP/Python projec
 
 ### Remaining / future work
 
-- **Deeper PHP/Python precision:** classes, functions, methods, imports, calls, and common framework routes are detected, but resolution is syntax-based rather than type-checked. Dynamic dispatch, dependency-injection bindings, and generated code may remain unresolved or inferred.
+- **Symbol-level parsers for more languages:** Go, Rust, Java, Kotlin, C#, C/C++, Ruby, Swift, and others currently appear as file-level nodes only. TS/JS, PHP, and Python have symbol/call/route extraction today.
 - **More PHP/Python framework adapters:** Laravel routes and Flask/FastAPI decorators are covered; deeper Django, Symfony, and WordPress route/ORM conventions are next.
+- **Cross-language call resolution:** calls between different runtimes (for example PHP → JavaScript or Python → SQL) are not resolved as typed symbols.
+- **Deeper PHP/Python precision:** classes, functions, methods, imports, calls, and common framework routes are detected, but resolution is syntax-based rather than type-checked. Dynamic dispatch, dependency-injection bindings, and generated code may remain unresolved or inferred.
 - **Neural embeddings** and provider-backed vector search (the current index is local TF-IDF, not a neural embedding model).
 - **True streaming** AI responses, cancellation, and precise provider-specific cost estimates (tokens are shown today).
 - **Fully incremental parser**; the watcher triggers a safe full re-analysis, while file hashes and AI caches prevent unnecessary AI work.

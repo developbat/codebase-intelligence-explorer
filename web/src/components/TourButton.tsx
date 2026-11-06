@@ -69,7 +69,7 @@ export function TourButton() {
         popover: {
           title: t("Review changes"),
           description: t(
-            "Changes shows the current branch, HEAD, the last commit, working-tree state, structural diff, and impact analysis.",
+            "Changes shows the current branch, HEAD, the last commit, the commit graph, working-tree state, structural diff, and impact analysis.",
           ),
           side: "right",
         },

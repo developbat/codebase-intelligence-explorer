@@ -2,6 +2,7 @@ import type {
   AnalysisResult,
   Certainty,
   ChangeReport,
+  GitChangedFile,
   GitStatus,
   GraphEdge,
   GraphNode,
@@ -21,6 +22,12 @@ export interface ViewGraph {
   notice?: string;
 }
 
+export interface CommitHighlight {
+  hash: string;
+  subject: string;
+  files: GitChangedFile[];
+}
+
 interface BuildOptions {
   mode: ViewMode;
   analysis: AnalysisResult;
@@ -30,6 +37,7 @@ interface BuildOptions {
   depth: number;
   changeReport?: ChangeReport | null;
   gitStatus?: GitStatus | null;
+  commitHighlight?: CommitHighlight | null;
   clusterFunctions?: boolean;
   fullTree?: boolean;
   t: Translate;
@@ -59,22 +67,61 @@ function folderLabel(path: string): string {
 }
 
 export function buildViewGraph(options: BuildOptions): ViewGraph {
-  const { mode, analysis, selectedFolder, selectedFile, focusNodeId, depth, changeReport, gitStatus, clusterFunctions, fullTree, t, tn } = options;
+  const {
+    mode,
+    analysis,
+    selectedFolder,
+    selectedFile,
+    focusNodeId,
+    depth,
+    changeReport,
+    gitStatus,
+    commitHighlight,
+    clusterFunctions,
+    fullTree,
+    t,
+    tn,
+  } = options;
   const nodeById = new Map(analysis.nodes.map((node) => [node.id, node]));
 
-  if (mode === "universe") return buildUniverse(analysis, nodeById, t, tn);
-  if (mode === "files") return buildFiles(analysis, nodeById, selectedFolder, Boolean(fullTree), t, tn);
-  if (mode === "architecture") return buildArchitecture(analysis, nodeById, t, tn);
-  if (mode === "changes") return buildChanges(analysis, nodeById, changeReport ?? null, gitStatus ?? null, t, tn);
-  if (mode === "3d") {
+  let view: ViewGraph;
+  if (mode === "universe") view = buildUniverse(analysis, nodeById, t, tn);
+  else if (mode === "files") view = buildFiles(analysis, nodeById, selectedFolder, Boolean(fullTree), t, tn);
+  else if (mode === "architecture") view = buildArchitecture(analysis, nodeById, t, tn);
+  else if (mode === "changes") view = buildChanges(analysis, nodeById, changeReport ?? null, gitStatus ?? null, t, tn);
+  else if (mode === "3d") {
     const base = selectedFile ? "functions" : selectedFolder ? "files" : "universe";
-    return base === "functions"
-      ? buildFunctions(analysis, nodeById, selectedFile, focusNodeId, depth, Boolean(clusterFunctions), t, tn)
-      : base === "files"
-        ? buildFiles(analysis, nodeById, selectedFolder, Boolean(fullTree), t, tn)
-        : buildUniverse(analysis, nodeById, t, tn);
+    view =
+      base === "functions"
+        ? buildFunctions(analysis, nodeById, selectedFile, focusNodeId, depth, Boolean(clusterFunctions), t, tn)
+        : base === "files"
+          ? buildFiles(analysis, nodeById, selectedFolder, Boolean(fullTree), t, tn)
+          : buildUniverse(analysis, nodeById, t, tn);
+  } else {
+    view = buildFunctions(analysis, nodeById, selectedFile, focusNodeId, depth, Boolean(clusterFunctions), t, tn);
   }
-  return buildFunctions(analysis, nodeById, selectedFile, focusNodeId, depth, Boolean(clusterFunctions), t, tn);
+
+  return applyCommitHighlight(view, commitHighlight ?? null);
+}
+
+function applyCommitHighlight(view: ViewGraph, highlight: CommitHighlight | null): ViewGraph {
+  if (!highlight || highlight.files.length === 0) return view;
+  const statusByPath = new Map(highlight.files.map((file) => [file.path, file.status]));
+  return {
+    ...view,
+    nodes: view.nodes.map((node) => {
+      const status = node.filePath ? statusByPath.get(node.filePath) : undefined;
+      if (!status) return node;
+      return {
+        ...node,
+        metadata: {
+          ...node.metadata,
+          commitChanged: status,
+          commitHash: highlight.hash,
+        },
+      };
+    }),
+  };
 }
 
 function buildUniverse(

@@ -7,6 +7,9 @@ import type {
   AnalysisResult,
   GitChangedFile,
   GitCommit,
+  GitCommitDetail,
+  GitCommitHistory,
+  GitGraphRow,
   GitSnapshotSummary,
   GitStatus,
 } from "../../shared/types";
@@ -110,22 +113,44 @@ async function numstatMap(root: string, from?: string): Promise<Map<string, { ad
   return map;
 }
 
+const COMMIT_FORMAT = "%x00%H%x00%h%x00%s%x00%an%x00%aI%x00%P%x00%D";
+
+function parseCommitLine(line: string): GitCommit | null {
+  const separator = line.indexOf("\0");
+  const graph = separator >= 0 ? line.slice(0, separator) : "";
+  const payload = separator >= 0 ? line.slice(separator + 1) : line;
+  const [hash, shortHash, subject, author, date, parents, refs] = payload.split("\0");
+  if (!hash) return null;
+  return {
+    hash,
+    shortHash,
+    subject,
+    author,
+    date,
+    refs: refs || undefined,
+    parents: parents ? parents.split(" ").filter(Boolean) : [],
+    graph: graph.replace(/\s+$/, "") || undefined,
+  };
+}
+
+function parseCommitOutput(output: string): GitCommit[] {
+  return output
+    .split("\n")
+    .filter((line) => line.includes("\0"))
+    .map(parseCommitLine)
+    .filter((commit): commit is GitCommit => Boolean(commit));
+}
+
 async function commitsBetween(root: string, from: string, to: string): Promise<GitCommit[]> {
   if (!from || from === to) return [];
   try {
     const output = await git(root, [
       "log",
-      `--format=%H%x00%h%x00%s%x00%an%x00%aI%x00%D`,
+      `--format=${COMMIT_FORMAT}`,
       "--max-count=50",
       `${from}..${to}`,
     ]);
-    return output
-      .split("\n")
-      .filter(Boolean)
-      .map((line) => {
-        const [hash, shortHash, subject, author, date, refs] = line.split("\0");
-        return { hash, shortHash, subject, author, date, refs: refs || undefined };
-      });
+    return parseCommitOutput(output);
   } catch {
     return [];
   }
@@ -167,21 +192,211 @@ function nodeImpact(analysis: AnalysisResult, changedPath: string, changedPaths:
 
 async function recentCommits(root: string, limit = 8): Promise<GitCommit[]> {
   try {
-    const output = await git(root, [
-      "log",
-      `--max-count=${limit}`,
-      "--format=%H%x00%h%x00%s%x00%an%x00%aI%x00%D",
-    ]);
-    return output
-      .split("\n")
-      .filter(Boolean)
-      .map((line) => {
-        const [hash, shortHash, subject, author, date, refs] = line.split("\0");
-        return { hash, shortHash, subject, author, date, refs: refs || undefined };
-      });
+    const output = await git(root, ["log", `--max-count=${limit}`, `--format=${COMMIT_FORMAT}`]);
+    return parseCommitOutput(output);
   } catch {
     return [];
   }
+}
+
+export async function getCommitLog(
+  rootPath: string,
+  options: { limit?: number; skip?: number } = {},
+): Promise<GitCommitHistory> {
+  const limit = Math.min(Math.max(options.limit ?? 20, 1), 60);
+  const skip = Math.max(options.skip ?? 0, 0);
+  const snapshot = await getGitSnapshot(rootPath);
+  if (!snapshot.available) {
+    return { commits: [], hasMore: false, nextSkip: skip, message: "Git is not available for this project." };
+  }
+
+  try {
+    const output = await git(rootPath, [
+      "log",
+      "--graph",
+      "--no-color",
+      "--decorate=short",
+      `--max-count=${limit + 1}`,
+      `--skip=${skip}`,
+      `--format=${COMMIT_FORMAT}`,
+      "HEAD",
+    ]);
+    const parsed = parseCommitOutput(output);
+    const graphRows: GitGraphRow[] = [];
+    let commitCount = 0;
+    for (const line of output.split("\n")) {
+      if (!line.trim()) continue;
+      if (line.includes("\0")) {
+        const commit = parseCommitLine(line);
+        if (!commit) continue;
+        graphRows.push({ graph: commit.graph ?? "", commit });
+        commitCount += 1;
+        if (commitCount > limit) break;
+      } else {
+        graphRows.push({ graph: line.replace(/\s+$/, "") });
+      }
+    }
+    const commitRows = graphRows.filter((row) => row.commit);
+    if (commitRows.length > limit) {
+      const cutoff = graphRows.findIndex((row) => row.commit === commitRows[limit].commit);
+      if (cutoff >= 0) graphRows.splice(cutoff);
+    }
+    const hasMore = parsed.length > limit;
+    return {
+      commits: graphRows.filter((row) => row.commit).map((row) => row.commit!),
+      rows: graphRows,
+      hasMore,
+      nextSkip: skip + limit,
+      branch: snapshot.branch,
+      head: snapshot.head,
+    };
+  } catch {
+    return {
+      commits: [],
+      hasMore: false,
+      nextSkip: skip,
+      branch: snapshot.branch,
+      head: snapshot.head,
+      message: "Commit history could not be read.",
+    };
+  }
+}
+
+function parseNumstat(output: string): Map<string, { additions: number; deletions: number }> {
+  const map = new Map<string, { additions: number; deletions: number }>();
+  for (const line of output.split("\n")) {
+    if (!line.trim()) continue;
+    const [additions, deletions, ...pathParts] = line.split("\t");
+    if (!pathParts.length) continue;
+    let filePath = pathParts.join("\t");
+    if (filePath.includes("=>")) {
+      filePath = filePath
+        .replace(/\{[^{}]*=> ([^{}]*)\}/, "$1")
+        .replace(/^.* => /, "")
+        .trim();
+    }
+    map.set(filePath.replace(/\\/g, "/"), {
+      additions: Number.parseInt(additions, 10) || 0,
+      deletions: Number.parseInt(deletions, 10) || 0,
+    });
+  }
+  return map;
+}
+
+function enrichCommitFiles(
+  files: GitChangedFile[],
+  analysis: AnalysisResult | undefined,
+): GitChangedFile[] {
+  const changedPaths = new Set(files.map((file) => file.path));
+  return files.map((file) => {
+    const affectedNodes = analysis ? nodeImpact(analysis, file.path, changedPaths) : undefined;
+    const dependentCount =
+      affectedNodes?.filter((node) => node.kind === "function" || node.kind === "method").length ?? 0;
+    return {
+      ...file,
+      affectedNodes,
+      impactLevel: dependentCount > 5 ? ("high" as const) : dependentCount > 0 ? ("medium" as const) : ("low" as const),
+    };
+  });
+}
+
+export async function getCommitDetail(
+  rootPath: string,
+  hash: string,
+  analysis?: AnalysisResult,
+): Promise<GitCommitDetail> {
+  if (!/^[a-f0-9]{4,40}$/i.test(hash)) throw new Error("Invalid commit hash.");
+  const inside = await git(rootPath, ["rev-parse", "--is-inside-work-tree"]).catch(() => "");
+  if (inside.trim() !== "true") throw new Error("This project is not a Git repository.");
+
+  const [metaOutput, statusOutput, numstatOutput] = await Promise.all([
+    git(rootPath, ["show", "-s", "--no-color", `--format=${COMMIT_FORMAT}`, hash]),
+    git(rootPath, ["show", "--first-parent", "--name-status", "--format=", "--find-renames", hash]),
+    git(rootPath, ["show", "--first-parent", "--numstat", "--format=", hash]),
+  ]);
+
+  const commit = parseCommitOutput(metaOutput)[0];
+  if (!commit) throw new Error("Commit not found.");
+
+  const statsByPath = parseNumstat(numstatOutput);
+  const files: GitChangedFile[] = [];
+  for (const line of statusOutput.split("\n")) {
+    if (!line.trim()) continue;
+    const [code, ...pathParts] = line.split("\t");
+    if (!pathParts.length) continue;
+    const filePath = pathParts[pathParts.length - 1].replace(/\\/g, "/");
+    if (!filePath) continue;
+    const status: GitChangedFile["status"] = code.startsWith("A")
+      ? "added"
+      : code.startsWith("D")
+        ? "deleted"
+        : code.startsWith("R")
+          ? "renamed"
+          : code.startsWith("C")
+            ? "added"
+            : "modified";
+    const numbers = statsByPath.get(filePath) ?? (code.startsWith("R") ? statsByPath.get(pathParts[0]) : undefined);
+    files.push({
+      path: filePath,
+      oldPath: code.startsWith("R") || code.startsWith("C") ? pathParts[0] : undefined,
+      status,
+      additions: numbers?.additions,
+      deletions: numbers?.deletions,
+      committed: true,
+      sinceAnalysis: true,
+    });
+  }
+
+  const enriched = enrichCommitFiles(files, analysis).sort((a, b) => a.path.localeCompare(b.path));
+  return {
+    commit,
+    parents: commit.parents ?? [],
+    files: enriched,
+    stats: {
+      files: enriched.length,
+      additions: enriched.reduce((sum, file) => sum + (file.additions ?? 0), 0),
+      deletions: enriched.reduce((sum, file) => sum + (file.deletions ?? 0), 0),
+    },
+    merge: (commit.parents?.length ?? 0) > 1,
+  };
+}
+
+export async function getCommitFileDiff(
+  rootPath: string,
+  hash: string,
+  filePath: string,
+): Promise<GitDiffResult> {
+  if (!/^[a-f0-9]{4,40}$/i.test(hash)) throw new Error("Invalid commit hash.");
+  const relative = filePath.replace(/^\/+/, "");
+  const absolute = path.resolve(rootPath, relative);
+  if (!isWithin(rootPath, absolute)) throw new Error("Access outside the project root was denied.");
+
+  let diff = "";
+  try {
+    diff = await git(rootPath, [
+      "show",
+      "--first-parent",
+      "--format=",
+      "--no-color",
+      "--unified=3",
+      "--find-renames",
+      hash,
+      "--",
+      relative,
+    ]);
+  } catch {
+    diff = "";
+  }
+
+  const limit = 240_000;
+  const truncated = diff.length > limit;
+  return {
+    filePath: relative,
+    base: hash.slice(0, 8),
+    diff: truncated ? `${diff.slice(0, limit)}\n… diff truncated …` : diff,
+    truncated,
+    untracked: false,
+  };
 }
 
 export async function getGitStatus(rootPath: string, analysis?: AnalysisResult): Promise<GitStatus> {

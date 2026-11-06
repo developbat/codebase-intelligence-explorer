@@ -36,8 +36,8 @@ export const tr: Dictionary = {
   "The inspector shows the source, relationships, Git diff, and optional AI explanation for the selected entity.":
     "Denetçi seçili varlığın kaynağını, ilişkilerini, Git diff'ini ve isteğe bağlı AI açıklamasını gösterir.",
   "Review changes": "Değişiklikleri inceleyin",
-  "Changes shows the current branch, HEAD, the last commit, working-tree state, structural diff, and impact analysis.":
-    "Changes mevcut branch'i, HEAD'i, son commit'i, çalışma ağacı durumunu, yapısal farkı ve etki analizini gösterir.",
+  "Changes shows the current branch, HEAD, the last commit, the commit graph, working-tree state, structural diff, and impact analysis.":
+    "Changes mevcut branch'i, HEAD'i, son commit'i, commit ağacını, çalışma ağacı durumunu, yapısal farkı ve etki analizini gösterir.",
   "Optional AI layer": "İsteğe bağlı AI katmanı",
   "Connect OpenAI, Claude, DeepSeek, OpenRouter, Gemini, NVIDIA, or a custom endpoint. Keys stay local.":
     "OpenAI, Claude, DeepSeek, OpenRouter, Gemini, NVIDIA veya özel bir endpoint bağlayın. Anahtarlar yerelde kalır.",
@@ -117,6 +117,35 @@ export const tr: Dictionary = {
   "Uncommitted changes exist. Run Analyze changes to inspect their structural impact.":
     "Commit edilmemiş değişiklikler var. Yapısal etkiyi görmek için Değişiklikleri analiz et'i çalıştırın.",
   "Analysis snapshot": "Analiz anı",
+  "Commit history": "Commit geçmişi",
+  "Git history": "Git geçmişi",
+  "{count} commits loaded": "{count} commit yüklendi",
+  "Reload commit history": "Commit geçmişini yenile",
+  "Reading commit graph…": "Commit ağacı okunuyor…",
+  "Could not load commit history": "Commit geçmişi yüklenemedi",
+  "Could not load older commits": "Daha eski commit'ler yüklenemedi",
+  "No commits were found in this repository.": "Bu depoda commit bulunamadı.",
+  "Load older commits": "Daha eski commit'leri yükle",
+  "Commit details": "Commit ayrıntıları",
+  "merge": "merge",
+  "Reading commit changes…": "Commit değişiklikleri okunuyor…",
+  "Commit could not be loaded": "Commit yüklenemedi",
+  "high-impact files": "yüksek etkili dosya",
+  "Impact is measured against the current analyzed graph.":
+    "Etki, mevcut analiz edilmiş graph'a göre ölçülür.",
+  "This commit does not change any files in the analyzed project.":
+    "Bu commit analiz edilen projede herhangi bir dosyayı değiştirmiyor.",
+  "Changed files": "Değişen dosyalar",
+  "Show on map": "Haritada göster",
+  "Affected in the current graph": "Mevcut graph'da etkilenenler",
+  "+{count} more": "+{count} daha",
+  "Select a changed file to inspect its diff.":
+    "Diff'ini incelemek için değişen bir dosya seçin.",
+  "Show all changed files on map": "Tüm değişen dosyaları haritada göster",
+  "Commit {hash} highlighted on the map": "{hash} commit'i haritada işaretlendi",
+  "Clear commit highlight": "Commit işaretini temizle",
+  "Changed in commit {hash}": "{hash} commit'inde değişti",
+  "impact": "etki",
   "Run “Analyze changes” to compute the structural diff and impacted callers.":
     "Yapısal farkı ve etkilenen çağıranları hesaplamak için “Değişiklikleri analiz et”i çalıştırın.",
   "Universe": "Proje",

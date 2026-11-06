@@ -6,7 +6,7 @@ import path from "node:path";
 import test from "node:test";
 import { analyzeProject } from "./analyzer";
 import { buildChangeReport } from "./changes";
-import { getFileDiff, getGitStatus } from "./git";
+import { getCommitDetail, getCommitFileDiff, getCommitLog, getFileDiff, getGitStatus } from "./git";
 import { saveAnalysis } from "./store";
 
 async function write(root: string, relative: string, content: string): Promise<void> {
@@ -156,6 +156,17 @@ test("Git status, diff, and structural change report work on a real repository",
     const statusClean = await getGitStatus(root, initial);
     assert.equal(statusClean.available, true);
     assert.equal(statusClean.files.length, 0);
+
+    const history = await getCommitLog(root, { limit: 10 });
+    assert.equal(history.commits.length, 1);
+    assert.equal(history.commits[0].subject, "initial");
+    assert.ok(history.rows && history.rows.length >= 1);
+
+    const detail = await getCommitDetail(root, initial.git?.head ?? "HEAD", initial);
+    assert.equal(detail.stats.files, 3);
+    assert.ok(detail.files.some((file) => file.path === "src/math.ts" && file.status === "added"));
+    const commitDiff = await getCommitFileDiff(root, initial.git?.head ?? "HEAD", "src/math.ts");
+    assert.ok(commitDiff.diff.includes("+export function add"));
 
     await write(
       root,

@@ -172,6 +172,36 @@ export interface GitCommit {
   author: string;
   date: string;
   refs?: string;
+  parents?: string[];
+  /** Compact git-log graph prefix for the commit row. */
+  graph?: string;
+}
+
+export interface GitGraphRow {
+  graph: string;
+  commit?: GitCommit;
+}
+
+export interface GitCommitHistory {
+  commits: GitCommit[];
+  rows?: GitGraphRow[];
+  hasMore: boolean;
+  nextSkip: number;
+  branch?: string;
+  head?: string;
+  message?: string;
+}
+
+export interface GitCommitDetail {
+  commit: GitCommit;
+  parents: string[];
+  files: GitChangedFile[];
+  stats: {
+    files: number;
+    additions: number;
+    deletions: number;
+  };
+  merge: boolean;
 }
 
 export interface GitChangedFile {
