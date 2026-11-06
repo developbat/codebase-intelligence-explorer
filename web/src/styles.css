@@ -4251,6 +4251,32 @@ button.canvas-stat {
   height: 23px;
 }
 
+.u3d-nav-vertical {
+  display: flex;
+  gap: 3px;
+}
+
+.u3d-nav-vertical button {
+  flex: 1;
+  height: 23px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: rgba(148, 163, 184, 0.045);
+  color: #8ba8ce;
+  font-size: 7.5px;
+  padding: 0;
+}
+
+.u3d-nav-vertical button:hover {
+  border-color: rgba(110, 168, 254, 0.34);
+  background: rgba(59, 130, 246, 0.12);
+  color: #c5dcff;
+}
+
 .universe-3d-legend {
   position: absolute;
   left: 12px;

@@ -118,7 +118,7 @@ The UI is **English by default** and ships with Turkish, German, French, Spanish
 - **Edge semantics:** imports, calls, routes, and data flows keep their certainty styling; selecting a node distinguishes outgoing calls (turquoise), incoming calls (orange), unresolved links (dashed), and dims unrelated nodes.
 - **Flow-first labels:** by default only the selected node and its flow neighbors show labels. A **Labels → All labels** toggle reveals every label when you want the full map. The label control stays outside the layout popover so it is never covered.
 - **Collapsible layout menu:** the layout selector appears large when 3D opens, then collapses into a compact **Layout: Hybrid** button. Click it to reopen the four layout choices.
-- **Right-side navigation pad:** smoothly animated pan up/down/left/right, zoom in/out, and camera reset without fighting mouse orbit. The pad sits on the right edge of the 3D scene.
+- **Right-side navigation pad:** smoothly animated free movement — forward/back along the current view direction, strafe left/right, vertical up/down, zoom in/out, and camera reset. Movement always starts from the current camera position, even after orbiting with the mouse.
 - **Interaction-only animation:** a larger, high-contrast light packet travels along selected call edges. There is no ambient flashing or constant scene motion.
 - **Technical workspace:** no stars. A subtle perspective grid, translucent module platforms, neon selection outlines, low ambient light, and distance-faded links replace the space background.
 - **Consistent palette:** project, module/folder, file, function, route, database, and event colors follow the fixed UI palette; certainty is communicated through line style, not node color.
@@ -432,7 +432,7 @@ Manual browser verification covers folder browsing, all views, PHP/Python projec
 | 3D zoom LOD + aggregated edges + interaction-only flow animation | ✅ |
 | 3D stays active while inspecting; explicit 2D handoff | ✅ |
 | 3D navigation pad + flow-only labels toggle | ✅ |
-| Smooth 3D pan/zoom + collapsible layout menu | ✅ |
+| Smooth 3D free movement + collapsible layout menu | ✅ |
 | 2D up / parent navigation | ✅ |
 | PHP / Python symbol, import, call, and route support | ✅ core |
 | Git last commit + recent history in Changes | ✅ |

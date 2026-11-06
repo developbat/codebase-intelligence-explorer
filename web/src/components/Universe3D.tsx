@@ -4,6 +4,8 @@ import { Edges, Grid, Line, OrbitControls, RoundedBox } from "@react-three/drei"
 import { Bloom, EffectComposer, Vignette } from "@react-three/postprocessing";
 import * as THREE from "three";
 import {
+  ArrowDown,
+  ArrowUp,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
@@ -182,7 +184,7 @@ function CameraRig({ center, radius }: { center: [number, number, number]; radiu
 }
 
 type NavCommand =
-  | { type: "pan"; horizontal: number; vertical: number }
+  | { type: "move"; forward: number; right: number; vertical: number }
   | { type: "zoom"; factor: number }
   | { type: "reset" };
 
@@ -213,18 +215,30 @@ function NavigationBridge({
     desiredTarget.current.copy(controls.target);
     animating.current = false;
 
-    const pan = (horizontal: number, vertical: number) => {
+    const syncIfIdle = () => {
+      if (animating.current) return;
+      desiredPosition.current.copy(camera.position);
+      desiredTarget.current.copy(controls.target);
+    };
+
+    const move = (forward: number, right: number, vertical: number) => {
+      syncIfIdle();
       const distance = desiredPosition.current.distanceTo(desiredTarget.current);
-      const step = Math.max(0.28, distance * 0.055);
-      const right = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
-      const up = new THREE.Vector3(0, 1, 0).applyQuaternion(camera.quaternion);
-      const delta = right.multiplyScalar(horizontal * step).add(up.multiplyScalar(vertical * step));
+      const step = Math.max(0.35, distance * 0.058);
+      const forwardVector = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+      const rightVector = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
+      const upVector = new THREE.Vector3(0, 1, 0).applyQuaternion(camera.quaternion);
+      const delta = forwardVector
+        .multiplyScalar(forward * step)
+        .add(rightVector.multiplyScalar(right * step))
+        .add(upVector.multiplyScalar(vertical * step));
       desiredPosition.current.add(delta);
       desiredTarget.current.add(delta);
       animating.current = true;
     };
 
     const zoom = (factor: number) => {
+      syncIfIdle();
       const direction = desiredPosition.current.clone().sub(desiredTarget.current);
       const distance = direction.length();
       const next = THREE.MathUtils.clamp(
@@ -250,7 +264,7 @@ function NavigationBridge({
     const handler = (event: Event) => {
       const command = (event as CustomEvent<NavCommand>).detail;
       if (!command) return;
-      if (command.type === "pan") pan(command.horizontal, command.vertical);
+      if (command.type === "move") move(command.forward, command.right, command.vertical);
       else if (command.type === "zoom") zoom(command.factor);
       else reset();
     };
@@ -1087,17 +1101,17 @@ export default function Universe3D({
         <div className="u3d-nav-grid">
           <span />
           <button
-            onClick={() => sendNavCommand({ type: "pan", horizontal: 0, vertical: 1 })}
-            title={t("Pan up")}
-            aria-label={t("Pan up")}
+            onClick={() => sendNavCommand({ type: "move", forward: 1, right: 0, vertical: 0 })}
+            title={t("Move forward")}
+            aria-label={t("Move forward")}
           >
-            <ChevronUp size={14} />
+            <ArrowUp size={14} />
           </button>
           <span />
           <button
-            onClick={() => sendNavCommand({ type: "pan", horizontal: -1, vertical: 0 })}
-            title={t("Pan left")}
-            aria-label={t("Pan left")}
+            onClick={() => sendNavCommand({ type: "move", forward: 0, right: -1, vertical: 0 })}
+            title={t("Strafe left")}
+            aria-label={t("Strafe left")}
           >
             <ChevronLeft size={14} />
           </button>
@@ -1110,21 +1124,37 @@ export default function Universe3D({
             <LocateFixed size={13} />
           </button>
           <button
-            onClick={() => sendNavCommand({ type: "pan", horizontal: 1, vertical: 0 })}
-            title={t("Pan right")}
-            aria-label={t("Pan right")}
+            onClick={() => sendNavCommand({ type: "move", forward: 0, right: 1, vertical: 0 })}
+            title={t("Strafe right")}
+            aria-label={t("Strafe right")}
           >
             <ChevronRight size={14} />
           </button>
           <span />
           <button
-            onClick={() => sendNavCommand({ type: "pan", horizontal: 0, vertical: -1 })}
-            title={t("Pan down")}
-            aria-label={t("Pan down")}
+            onClick={() => sendNavCommand({ type: "move", forward: -1, right: 0, vertical: 0 })}
+            title={t("Move backward")}
+            aria-label={t("Move backward")}
           >
-            <ChevronDown size={14} />
+            <ArrowDown size={14} />
           </button>
           <span />
+        </div>
+        <div className="u3d-nav-vertical">
+          <button
+            onClick={() => sendNavCommand({ type: "move", forward: 0, right: 0, vertical: 1 })}
+            title={t("Move up")}
+            aria-label={t("Move up")}
+          >
+            <ChevronUp size={12} /> {t("Up")}
+          </button>
+          <button
+            onClick={() => sendNavCommand({ type: "move", forward: 0, right: 0, vertical: -1 })}
+            title={t("Move down")}
+            aria-label={t("Move down")}
+          >
+            <ChevronDown size={12} /> {t("Down")}
+          </button>
         </div>
         <div className="u3d-nav-zoom">
           <button
