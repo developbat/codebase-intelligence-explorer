@@ -1,5 +1,6 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import {
+  ArrowUp,
   BrainCircuit,
   ChevronRight,
   FolderOpen,
@@ -405,6 +406,22 @@ export default function App() {
   }
 
   function revealNode(node: GraphNode) {
+    if (mode === "3d") {
+      if (node.filePath) {
+        if (node.kind === "folder") {
+          setSelectedFolder(node.filePath);
+          setSelectedFile(null);
+        } else {
+          setSelectedFile(node.filePath);
+          setSelectedFolder(folderOf(node.filePath));
+        }
+      }
+      setSelectedNodeId(node.id);
+      setSelectedEdgeId(null);
+      setFocusNodeId(null);
+      setInspectorOpen(true);
+      return;
+    }
     if (node.kind === "folder" && node.filePath) {
       openFolder(node.filePath);
       return;
@@ -431,6 +448,23 @@ export default function App() {
   }
 
   function focusNode(id: string) {
+    if (mode === "3d") {
+      const node = analysis?.nodes.find((item) => item.id === id);
+      if (node?.filePath) {
+        if (node.kind === "folder") {
+          setSelectedFolder(node.filePath);
+          setSelectedFile(null);
+        } else {
+          setSelectedFile(node.filePath);
+          setSelectedFolder(folderOf(node.filePath));
+        }
+      }
+      setSelectedNodeId(id);
+      setSelectedEdgeId(null);
+      setFocusNodeId(null);
+      setInspectorOpen(true);
+      return;
+    }
     const node = analysis?.nodes.find((item) => item.id === id);
     if (node?.filePath) {
       setSelectedFolder(folderOf(node.filePath));
@@ -462,6 +496,52 @@ export default function App() {
     } else {
       setSelectedNodeId(selectedFile ? `file:${selectedFile}` : null);
     }
+  }
+
+  function goUp() {
+    if (!analysis) return;
+    if (mode === "functions" && selectedFile) {
+      openFolder(folderOf(selectedFile) ?? "");
+      return;
+    }
+    if (mode === "files" && selectedFolder) {
+      const parent = selectedFolder.includes("/")
+        ? selectedFolder.slice(0, selectedFolder.lastIndexOf("/"))
+        : "";
+      openFolder(parent);
+      return;
+    }
+    setSelectedFile(null);
+    setFocusNodeId(null);
+    setSelectedEdgeId(null);
+    setMode("universe");
+    setSelectedNodeId("project");
+  }
+
+  function openFileFromSidebar(filePath: string) {
+    if (mode === "3d") {
+      setSelectedFile(filePath);
+      setSelectedFolder(folderOf(filePath));
+      setSelectedNodeId(`file:${filePath}`);
+      setSelectedEdgeId(null);
+      setFocusNodeId(null);
+      setInspectorOpen(true);
+      return;
+    }
+    openFile(filePath);
+  }
+
+  function openFolderFromSidebar(folderPath: string) {
+    if (mode === "3d") {
+      setSelectedFolder(folderPath || null);
+      setSelectedFile(null);
+      setSelectedNodeId(folderPath ? `folder:${folderPath}` : "project");
+      setSelectedEdgeId(null);
+      setFocusNodeId(null);
+      setInspectorOpen(true);
+      return;
+    }
+    openFolder(folderPath);
   }
 
   function showCommitOnMap(files: GitChangedFile[], commit: GitCommit) {
@@ -555,6 +635,16 @@ export default function App() {
         </div>
 
         <div className="breadcrumbs">
+          {analysis && mode !== "universe" && mode !== "3d" ? (
+            <button
+              className="breadcrumb-back"
+              onClick={goUp}
+              title={t("Go up one level")}
+              aria-label={t("Go up one level")}
+            >
+              <ArrowUp size={13} />
+            </button>
+          ) : null}
           {analysis
             ? breadcrumbs.map((part, index) => {
                 const isLast = index === breadcrumbs.length - 1;
@@ -629,8 +719,8 @@ export default function App() {
           selectedFolder={selectedFolder}
           selectedFile={selectedFile}
           onModeChange={changeMode}
-          onOpenFolder={openFolder}
-          onOpenFile={openFile}
+          onOpenFolder={openFolderFromSidebar}
+          onOpenFile={openFileFromSidebar}
           onRevealNode={revealNode}
           onOpenDialog={() => setDialogOpen(true)}
           onLoadRecent={loadRecent}
@@ -668,6 +758,11 @@ export default function App() {
                   <p>{displaySubtitle}</p>
                 </div>
                 <div className="canvas-toolbar-actions">
+                  {mode !== "universe" && mode !== "3d" ? (
+                    <button className="ghost-button toolbar-action" onClick={goUp} title={t("Go up one level")}>
+                      <ArrowUp size={13} /> {t("Up")}
+                    </button>
+                  ) : null}
                   {mode === "3d" ? (
                     <button
                       className="ghost-button toolbar-action"
@@ -868,8 +963,8 @@ export default function App() {
               setSelectedNodeId(id);
               setSelectedEdgeId(null);
             }}
-            onOpenFile={openFile}
-            onOpenFolder={openFolder}
+            onOpenFile={openFileFromSidebar}
+            onOpenFolder={openFolderFromSidebar}
             onFocusNode={focusNode}
             onClose={() => setInspectorOpen(false)}
           />

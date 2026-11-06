@@ -111,7 +111,6 @@ function LabelSprite({
   connected,
   y,
   onSelect,
-  onOpen,
 }: {
   node: GraphNode;
   color: string;
@@ -119,7 +118,6 @@ function LabelSprite({
   connected: boolean;
   y: number;
   onSelect: (id: string) => void;
-  onOpen: (node: GraphNode) => void;
 }) {
   const texture = useMemo(
     () => makeLabelTexture(node.label, color, selected, connected),
@@ -149,10 +147,6 @@ function LabelSprite({
       onClick={(event) => {
         event.stopPropagation();
         onSelect(node.id);
-      }}
-      onDoubleClick={(event) => {
-        event.stopPropagation();
-        onOpen(node);
       }}
     >
       <spriteMaterial map={texture} transparent depthTest={false} depthWrite={false} />
@@ -469,7 +463,6 @@ function NodeMesh({
   dimmed,
   showLabel,
   onSelect,
-  onOpen,
 }: {
   item: Positioned3D;
   selected: boolean;
@@ -477,7 +470,6 @@ function NodeMesh({
   dimmed: boolean;
   showLabel: boolean;
   onSelect: (id: string) => void;
-  onOpen: (node: GraphNode) => void;
 }) {
   const { node } = item;
   const [hovered, setHovered] = useState(false);
@@ -509,10 +501,6 @@ function NodeMesh({
           event.stopPropagation();
           onSelect(node.id);
         }}
-        onDoubleClick={(event) => {
-          event.stopPropagation();
-          onOpen(node);
-        }}
       >
         <NodeGeometry item={item} color={color} selected={selected} connected={connected} dimmed={dimmed} />
       </group>
@@ -524,7 +512,6 @@ function NodeMesh({
           connected={connected}
           y={labelY}
           onSelect={onSelect}
-          onOpen={onOpen}
         />
       ) : null}
     </group>
@@ -826,10 +813,9 @@ export default function Universe3D({
   const cellSize = Math.max(1, Math.round((layout.radius / 18) * 10) / 10);
   const sectionSize = Math.max(4, Math.round(cellSize * 5));
 
-  function openNode(node: GraphNode) {
+  function openIn2D(node: GraphNode) {
     if (node.kind === "file" && node.filePath) onOpenFile(node.filePath);
     else if (node.kind === "folder" && node.filePath) onOpenFolder(node.filePath);
-    else onSelectNode(node.id);
   }
 
   return (
@@ -894,7 +880,6 @@ export default function Universe3D({
             dimmed={Boolean(selectedNodeId) && item.node.id !== selectedNodeId && !neighborIds.has(item.node.id)}
             showLabel={showAllLabels}
             onSelect={onSelectNode}
-            onOpen={openNode}
           />
         ))}
 
@@ -943,6 +928,13 @@ export default function Universe3D({
                 max: layout.maxLevel,
               })}
         </div>
+        {selectedItem &&
+        (selectedItem.node.kind === "file" || selectedItem.node.kind === "folder") &&
+        selectedItem.node.filePath ? (
+          <button className="u3d-open2d" onClick={() => openIn2D(selectedItem.node)}>
+            {t("Open selected item in 2D")}
+          </button>
+        ) : null}
       </div>
 
       <div className="universe-3d-hud">

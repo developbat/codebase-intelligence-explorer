@@ -120,7 +120,8 @@ The UI is **English by default** and ships with Turkish, German, French, Spanish
 - **Technical workspace:** no stars. A subtle perspective grid, translucent module platforms, neon selection outlines, low ambient light, and distance-faded links replace the space background.
 - **Consistent palette:** project, module/folder, file, function, route, database, and event colors follow the fixed UI palette; certainty is communicated through line style, not node color.
 - **Performance:** full-project graph capped at 1,000 nodes / 3,000 edges; visible layers are filtered by LOD, edges are aggregated to visible ancestors, and the Force layout uses a focused 220-node subset.
-- Orbit, pan, zoom, click-to-inspect, double-click to open files/folders in 2D.
+- **Stay in 3D:** clicking a node selects it and reveals its next layer without switching to 2D. Use the explicit **Open selected item in 2D** button when you want to leave the 3D scene.
+- Orbit, pan, zoom, click-to-inspect.
 - Labels show the entity name only; type is conveyed by color, shape, the legend, and the inspector.
 - The sidebar button toggles between **3D** and **2D** in place.
 - Legend, layered HUD, and inspector integration.
@@ -130,6 +131,7 @@ The UI is **English by default** and ships with Turkish, German, French, Spanish
 - **Project profile:** the inspector opens with a non-AI overview: detected stack, counts, likely entry points, largest modules, and sample routes.
 - **Full project tree by default:** every folder branch is expanded when a project opens. Expand-all and collapse-all buttons are always available.
 - **Full-tree 2D view:** the Files view shows the complete folder/file hierarchy in one graph instead of only direct children. The toolbar toggles between **Full tree** and **Direct children**.
+- **Up navigation:** in 2D, a back/up control in the topbar and toolbar walks from a file → its folder → parent folder → project universe. Breadcrumb parent links remain clickable.
 - **Guided tour:** the help button in the topbar starts a short tour through opening a project, view tabs, the tree, the graph, the inspector, Git changes, AI setup, and 3D.
 
 ### Project selection
@@ -418,6 +420,8 @@ Manual browser verification covers folder browsing, all views, PHP/Python projec
 | MVP 5 — 3D project explorer | ✅ core |
 | 3D hybrid / hierarchical / clustered / force layouts | ✅ |
 | 3D zoom LOD + aggregated edges + interaction-only flow animation | ✅ |
+| 3D stays active while inspecting; explicit 2D handoff | ✅ |
+| 2D up / parent navigation | ✅ |
 | PHP / Python symbol, import, call, and route support | ✅ core |
 | Git last commit + recent history in Changes | ✅ |
 | Git commit graph, pagination, commit detail, diffs | ✅ |

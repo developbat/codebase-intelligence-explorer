@@ -72,6 +72,9 @@ export const tr: Dictionary = {
   "Large project: the 3D graph is capped for performance.":
     "Büyük proje: 3D graph performans için sınırlandırıldı.",
   "Back to 2D": "2D'ye dön",
+  "Up": "Yukarı",
+  "Go up one level": "Bir üst seviyeye çık",
+  "Open selected item in 2D": "Seçili öğeyi 2D'de aç",
   "Preparing 3D scene…": "3D sahne hazırlanıyor…",
   "Drag to orbit · scroll to zoom · click to inspect":
     "Döndürmek için sürükle · yakınlaştırmak için kaydır · incelemek için tıkla",
