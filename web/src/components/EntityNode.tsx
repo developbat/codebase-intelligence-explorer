@@ -57,6 +57,8 @@ function EntityNodeComponent({ data, selected }: NodeProps<EntityFlowNode>) {
     typeof node.metadata?.heatScore === "number" ? node.metadata.heatScore : undefined;
   const impactDepth =
     typeof node.metadata?.impactDepth === "number" ? node.metadata.impactDepth : undefined;
+  const flowDepth =
+    typeof node.metadata?.flowDepth === "number" ? node.metadata.flowDepth : undefined;
 
   return (
     <div
@@ -107,6 +109,11 @@ function EntityNodeComponent({ data, selected }: NodeProps<EntityFlowNode>) {
       {impactDepth !== undefined && impactDepth > 0 ? (
         <span className="entity-node-impact" title={t("Impact depth {depth}", { depth: impactDepth })}>
           D{impactDepth}
+        </span>
+      ) : null}
+      {flowDepth !== undefined && flowDepth > 0 ? (
+        <span className="entity-node-flow" title={t("Flow step {depth}", { depth: flowDepth })}>
+          F{flowDepth}
         </span>
       ) : null}
       {node.metadata?.async ? <span className="entity-node-badge">async</span> : null}

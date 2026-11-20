@@ -18,6 +18,7 @@ export type ViewMode =
   | "changes"
   | "impact"
   | "heatmap"
+  | "flows"
   | "3d";
 
 type TranslatePlural = (count: number, one: string, other: string, vars?: Record<string, string | number>) => string;
@@ -45,6 +46,7 @@ interface BuildOptions {
   focusNodeId: string | null;
   depth: number;
   focusMode?: boolean;
+  flowMode?: "data" | "business";
   changeReport?: ChangeReport | null;
   gitStatus?: GitStatus | null;
   commitHighlight?: CommitHighlight | null;
@@ -86,6 +88,7 @@ export function buildViewGraph(options: BuildOptions): ViewGraph {
     focusNodeId,
     depth,
     focusMode,
+    flowMode,
     changeReport,
     gitStatus,
     commitHighlight,
@@ -103,7 +106,17 @@ export function buildViewGraph(options: BuildOptions): ViewGraph {
   else if (mode === "changes") view = buildChanges(analysis, nodeById, changeReport ?? null, gitStatus ?? null, t, tn);
   else if (mode === "impact") view = buildImpact(analysis, nodeById, selectedNodeId, Math.max(1, depth), t);
   else if (mode === "heatmap") view = buildHeatmap(analysis, nodeById, t);
-  else if (mode === "3d") {
+  else if (mode === "flows") {
+    view =
+      flowMode === "business"
+        ? {
+            nodes: [],
+            edges: [],
+            title: t("Business flow explorer"),
+            subtitle: t("AI interpretation grounded in routes, calls, database access, and events"),
+          }
+        : buildDataFlow(analysis, nodeById, selectedNodeId, Math.max(1, depth), t);
+  } else if (mode === "3d") {
     const base = selectedFile ? "functions" : selectedFolder ? "files" : "universe";
     view =
       base === "functions"
@@ -718,6 +731,137 @@ function heatColor(ratio: number): string {
   const local = value < 0.5 ? value * 2 : (value - 0.5) * 2;
   const rgb = from.map((channel, index) => Math.round(channel + (to[index] - channel) * local));
   return `rgb(${rgb[0]}, ${rgb[1]}, ${rgb[2]})`;
+}
+
+export function findDataFlowStart(analysis: AnalysisResult): GraphNode | undefined {
+  const flowKinds = new Set([
+    "ROUTES_TO",
+    "CALLS",
+    "READS_FROM",
+    "WRITES_TO",
+    "PUBLISHES",
+    "SUBSCRIBES_TO",
+    "MAPS_TO",
+  ]);
+  const outgoing = new Map<string, number>();
+  for (const edge of analysis.edges) {
+    if (!flowKinds.has(edge.kind)) continue;
+    outgoing.set(edge.source, (outgoing.get(edge.source) ?? 0) + 1);
+  }
+
+  const routes = analysis.nodes
+    .filter((node) => node.kind === "route")
+    .map((route) => {
+      const routesTo = analysis.edges.find(
+        (edge) => edge.source === route.id && edge.kind === "ROUTES_TO",
+      );
+      const downstream = routesTo ? outgoing.get(routesTo.target) ?? 0 : 0;
+      return { route, score: downstream + (routesTo ? 1 : 0) };
+    })
+    .sort((a, b) => b.score - a.score);
+
+  if (routes.length > 0 && routes[0].score > 0) return routes[0].route;
+
+  const functions = analysis.nodes
+    .filter((node) => node.kind === "function" || node.kind === "method")
+    .sort((a, b) => (outgoing.get(b.id) ?? 0) - (outgoing.get(a.id) ?? 0));
+
+  return routes[0]?.route ?? functions[0];
+}
+
+function buildDataFlow(
+  analysis: AnalysisResult,
+  nodeById: Map<string, GraphNode>,
+  selectedNodeId: string | null,
+  depth: number,
+  t: Translate,
+): ViewGraph {
+  const flowKinds = new Set([
+    "ROUTES_TO",
+    "CALLS",
+    "READS_FROM",
+    "WRITES_TO",
+    "PUBLISHES",
+    "SUBSCRIBES_TO",
+    "MAPS_TO",
+  ]);
+  const root =
+    (selectedNodeId ? nodeById.get(selectedNodeId) : undefined) ??
+    findDataFlowStart(analysis);
+
+  if (!root) {
+    return {
+      nodes: analysis.nodes.filter((node) => node.id === "project"),
+      edges: [],
+      title: t("Data flow explorer"),
+      subtitle: t("No route or function data flow was found"),
+      notice: t("Select a route or function to trace its data flow."),
+    };
+  }
+
+  const included = new Map<string, GraphNode>([[root.id, root]]);
+  const flowDepth = new Map<string, number>([[root.id, 0]]);
+  let frontier = [root.id];
+  const maxDepth = Math.max(1, Math.min(5, depth));
+
+  for (let level = 1; level <= maxDepth; level += 1) {
+    const next: string[] = [];
+    for (const id of frontier) {
+      for (const edge of analysis.edges) {
+        if (edge.source !== id || !flowKinds.has(edge.kind)) continue;
+        if (included.has(edge.target)) continue;
+        const target = nodeById.get(edge.target);
+        if (!target) continue;
+        included.set(target.id, target);
+        flowDepth.set(target.id, level);
+        next.push(target.id);
+      }
+    }
+    frontier = next;
+    if (frontier.length === 0) break;
+  }
+
+  const MAX_FLOW_NODES = 260;
+  const capped = [...included.values()].slice(0, MAX_FLOW_NODES);
+  const includedIds = new Set(capped.map((node) => node.id));
+  const nodes = capped.map((node) => ({
+    ...node,
+    metadata: {
+      ...node.metadata,
+      flowDepth: flowDepth.get(node.id) ?? 0,
+    },
+  }));
+  const edges = analysis.edges
+    .filter((edge) => flowKinds.has(edge.kind) && includedIds.has(edge.source) && includedIds.has(edge.target))
+    .slice(0, 400);
+  const calls = edges.filter((edge) => edge.kind === "CALLS").length;
+  const reads = edges.filter((edge) => edge.kind === "READS_FROM").length;
+  const writes = edges.filter((edge) => edge.kind === "WRITES_TO").length;
+  const events = edges.filter(
+    (edge) => edge.kind === "PUBLISHES" || edge.kind === "SUBSCRIBES_TO",
+  ).length;
+  const dataEdges = edges.filter((edge) => edge.kind !== "ROUTES_TO").length;
+
+  return {
+    nodes,
+    edges,
+    title: t("Data flow: {label}", { label: root.metadata?.qualifiedName ?? root.label }),
+    subtitle: t("{nodes} steps · {calls} calls · {reads} reads · {writes} writes · {events} events", {
+      nodes: nodes.length,
+      calls,
+      reads,
+      writes,
+      events,
+    }),
+    notice:
+      included.size > MAX_FLOW_NODES
+        ? t("Data-flow graph is capped at {count} nodes for performance.", { count: MAX_FLOW_NODES })
+        : edges.length === 0
+          ? t("No downstream data relationships were found for this node.")
+          : dataEdges === 0
+            ? t("Only the route binding was resolved; no downstream calls or data access were found.")
+            : t("Static data-flow estimate. Runtime branches may differ."),
+  };
 }
 
 function buildImpact(

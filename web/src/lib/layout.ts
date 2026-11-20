@@ -24,7 +24,7 @@ async function getElk(): Promise<ElkInstance> {
 export async function computeLayout(
   nodes: GraphNode[],
   edges: GraphEdge[],
-  mode: "universe" | "files" | "functions" | "architecture" | "changes" | "impact" | "heatmap" | "3d",
+  mode: "universe" | "files" | "functions" | "architecture" | "changes" | "impact" | "heatmap" | "flows" | "3d",
 ): Promise<Map<string, { x: number; y: number }>> {
   const positions = new Map<string, { x: number; y: number }>();
   if (nodes.length === 0) return positions;

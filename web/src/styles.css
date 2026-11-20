@@ -1420,6 +1420,38 @@ button.canvas-stat {
   color: #c5dcff;
 }
 
+.flow-mode-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  height: 25px;
+  padding: 2px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: rgba(148, 163, 184, 0.04);
+}
+
+.flow-mode-toggle button {
+  height: 19px;
+  padding: 0 7px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted-2);
+  font-size: 8.5px;
+}
+
+.flow-mode-toggle button:hover {
+  background: rgba(148, 163, 184, 0.08);
+  color: var(--text-soft);
+}
+
+.flow-mode-toggle button.is-active {
+  border-color: rgba(110, 168, 254, 0.3);
+  background: rgba(59, 130, 246, 0.13);
+  color: #c5dcff;
+}
+
 .git-summary {
   flex: none;
   display: flex;
@@ -7006,4 +7038,124 @@ button.canvas-stat {
   .showcase-caption-brand {
     display: none;
   }
+}
+
+/* ------------------------------------------------------------------ */
+/* Data and business flow explorer                                     */
+/* ------------------------------------------------------------------ */
+
+.business-flow-panel {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 22px 26px 40px;
+  background:
+    radial-gradient(700px 400px at 20% 0%, rgba(59, 130, 246, 0.05), transparent 70%),
+    #080c13;
+}
+
+.business-flow-panel-head,
+.business-flow-toolbar,
+.business-flow-panel > .flows-result,
+.business-flow-panel > .ai-setup-callout,
+.business-flow-panel > .source-error,
+.business-flow-empty {
+  width: min(980px, 100%);
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.business-flow-panel-head {
+  margin-bottom: 16px;
+}
+
+.flow-panel-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: #a78bfa;
+  font-size: 8px;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.business-flow-panel-head h2 {
+  margin: 6px 0 0;
+  color: #eaf2fd;
+  font-size: 24px;
+  line-height: 1.2;
+  letter-spacing: -0.025em;
+}
+
+.business-flow-panel-head p {
+  max-width: 720px;
+  margin: 7px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.business-flow-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  margin-bottom: 12px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: rgba(10, 17, 27, 0.62);
+}
+
+.business-flow-panel .flows-result {
+  padding-top: 0;
+}
+
+.business-flow-disclaimer {
+  margin-left: auto;
+  color: #d0a86b;
+  font-size: 8px;
+}
+
+.business-flow-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 7px;
+  margin-top: 12px;
+  padding: 52px 20px;
+  border: 1px dashed var(--line);
+  border-radius: 12px;
+  color: var(--muted-2);
+  text-align: center;
+}
+
+.business-flow-empty svg {
+  color: #8ba8ce;
+}
+
+.business-flow-empty strong {
+  color: var(--text-soft);
+  font-size: 13px;
+  font-weight: 550;
+}
+
+.business-flow-empty span {
+  max-width: 500px;
+  color: var(--muted-2);
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.entity-node-flow {
+  flex: none;
+  align-self: flex-start;
+  padding: 1px 4px;
+  border-radius: 4px;
+  color: #93c5fd;
+  background: rgba(59, 130, 246, 0.1);
+  border: 1px solid rgba(59, 130, 246, 0.2);
+  font-family: var(--mono);
+  font-size: 7.5px;
 }

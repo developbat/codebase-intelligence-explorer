@@ -34,9 +34,10 @@ import { GitSummary } from "./components/GitSummary";
 import { GitHistory } from "./components/GitHistory";
 import { GitCommitDialog } from "./components/GitCommitDialog";
 import { ShowcaseDemo, type ShowcaseActions } from "./components/ShowcaseDemo";
+import { BusinessFlowPanel } from "./components/BusinessFlowPanel";
 import { TourButton } from "./components/TourButton";
 import type { AiSettingsPublic } from "../../shared/ai";
-import { buildViewGraph, type CommitHighlight, type ViewMode } from "./lib/viewGraph";
+import { buildViewGraph, findDataFlowStart, type CommitHighlight, type ViewMode } from "./lib/viewGraph";
 import { build3DGraph } from "./lib/threeGraph";
 import { formatNumber } from "./lib/constants";
 import { useI18n } from "./i18n";
@@ -55,6 +56,7 @@ const MODE_LABEL: Record<ViewMode, string> = {
   changes: "Changes since analysis",
   impact: "Impact analysis",
   heatmap: "Dependency heatmap",
+  flows: "Data & business flows",
   "3d": "3D Explorer",
 };
 
@@ -120,6 +122,7 @@ export default function App() {
   const [clusterFunctions, setClusterFunctions] = useState(false);
   const [fullTree, setFullTree] = useState(true);
   const [focusMode, setFocusMode] = useState(false);
+  const [flowMode, setFlowMode] = useState<"data" | "business">("data");
   const [workspaceUpdate, setWorkspaceUpdate] = useState<{
     createdAt: string;
     changedPaths: string[];
@@ -534,6 +537,18 @@ export default function App() {
       }
     } else if (next === "heatmap") {
       setSelectedNodeId(null);
+    } else if (next === "flows") {
+      setDepth((current) => Math.max(2, current));
+      if (selectedFile) {
+        setSelectedNodeId(`file:${selectedFile}`);
+      } else if (selectedNodeId && selectedNodeId !== "project") {
+        setSelectedNodeId(selectedNodeId);
+      } else if (analysis) {
+        const candidate = findDataFlowStart(analysis);
+        setSelectedNodeId(candidate?.id ?? "project");
+      } else {
+        setSelectedNodeId("project");
+      }
     } else if (next === "3d") {
       setSelectedNodeId(
         selectedFile ? `file:${selectedFile}` : selectedFolder ? `folder:${selectedFolder}` : "project",
@@ -605,7 +620,10 @@ export default function App() {
     setInspectorOpen(true);
   }
 
-  const viewSelectionKey = focusMode || mode === "impact" ? selectedNodeId : null;
+  const viewSelectionKey =
+    focusMode || mode === "impact" || (mode === "flows" && flowMode === "data")
+      ? selectedNodeId
+      : null;
   const view = useMemo(() => {
     if (!analysis) return null;
     return buildViewGraph({
@@ -617,6 +635,7 @@ export default function App() {
       focusNodeId,
       depth,
       focusMode,
+      flowMode,
       changeReport,
       gitStatus,
       commitHighlight,
@@ -625,10 +644,13 @@ export default function App() {
       t,
       tn,
     });
-  }, [analysis, mode, selectedFolder, selectedFile, viewSelectionKey, focusNodeId, depth, focusMode, changeReport, gitStatus, commitHighlight, clusterFunctions, fullTree, t, tn]);
+  }, [analysis, mode, selectedFolder, selectedFile, viewSelectionKey, focusNodeId, depth, focusMode, flowMode, changeReport, gitStatus, commitHighlight, clusterFunctions, fullTree, t, tn]);
 
-  const selectionLayoutKey = focusMode || mode === "impact" ? selectedNodeId ?? "" : "";
-  const viewKey = `${analysis?.id ?? "none"}|${mode}|${selectedFolder ?? ""}|${selectedFile ?? ""}|${selectionLayoutKey}|${focusNodeId ?? ""}|${depth}|${focusMode ? "focus" : "full"}|${changeReport?.generatedAt ?? gitStatus?.head ?? ""}|${clusterFunctions ? "cluster" : "flat"}|${fullTree ? "full" : "direct"}|${commitHighlight?.hash ?? ""}`;
+  const selectionLayoutKey =
+    focusMode || mode === "impact" || (mode === "flows" && flowMode === "data")
+      ? selectedNodeId ?? ""
+      : "";
+  const viewKey = `${analysis?.id ?? "none"}|${mode}|${flowMode}|${selectedFolder ?? ""}|${selectedFile ?? ""}|${selectionLayoutKey}|${focusNodeId ?? ""}|${depth}|${focusMode ? "focus" : "full"}|${changeReport?.generatedAt ?? gitStatus?.head ?? ""}|${clusterFunctions ? "cluster" : "flat"}|${fullTree ? "full" : "direct"}|${commitHighlight?.hash ?? ""}`;
 
   const threeGraph = useMemo(
     () => (analysis ? build3DGraph(analysis) : null),
@@ -845,6 +867,7 @@ export default function App() {
                   mode !== "impact" &&
                   mode !== "heatmap" &&
                   mode !== "changes" &&
+                  mode !== "flows" &&
                   selectedNodeId &&
                   selectedNodeId !== "project" ? (
                     <button
@@ -855,7 +878,23 @@ export default function App() {
                       <Crosshair size={13} /> {focusMode ? t("Exit focus") : t("Focus")}
                     </button>
                   ) : null}
-                  {mode === "impact" || focusMode ? (
+                  {mode === "flows" ? (
+                    <span className="flow-mode-toggle">
+                      <button
+                        className={flowMode === "data" ? "is-active" : ""}
+                        onClick={() => setFlowMode("data")}
+                      >
+                        {t("Data flow")}
+                      </button>
+                      <button
+                        className={flowMode === "business" ? "is-active" : ""}
+                        onClick={() => setFlowMode("business")}
+                      >
+                        {t("Business flow")}
+                      </button>
+                    </span>
+                  ) : null}
+                  {mode === "impact" || focusMode || (mode === "flows" && flowMode === "data") ? (
                     <span className="depth-selector">
                       <span>{t("Depth")}</span>
                       {[1, 2, 3].map((value) => (
@@ -880,9 +919,11 @@ export default function App() {
                       {analysis.git.dirty ? ` · ${t("dirty")}` : ` · ${t("clean")}`}
                     </button>
                   ) : null}
-                  <span className="canvas-stat">
-                    <Network size={12} /> {t("{count} nodes", { count: displayNodeCount })}
-                  </span>
+                  {!(mode === "flows" && flowMode === "business") ? (
+                    <span className="canvas-stat">
+                      <Network size={12} /> {t("{count} nodes", { count: displayNodeCount })}
+                    </span>
+                  ) : null}
                   {mode === "architecture" ? (
                     <button className="ghost-button toolbar-action" onClick={() => setFlowsOpen(true)}>
                       <BrainCircuit size={13} /> {t("Business flows")}
@@ -996,7 +1037,14 @@ export default function App() {
                   ))}
                 </div>
               ) : null}
-              {mode === "3d" ? (
+              {mode === "flows" && flowMode === "business" ? (
+                <BusinessFlowPanel
+                  analysis={analysis}
+                  settings={aiSettings}
+                  onOpenSettings={() => setAiSettingsOpen(true)}
+                  onOpenFile={openFile}
+                />
+              ) : mode === "3d" ? (
                 <Suspense
                   fallback={
                     <div className="app-loading">

@@ -17,6 +17,7 @@ import {
   Orbit,
   Plus,
   Search,
+  Waypoints,
   Workflow,
   X,
 } from "lucide-react";
@@ -368,6 +369,14 @@ export function Sidebar({
               >
                 <Flame size={15} />
                 <span>{t("Heatmap")}</span>
+              </button>
+              <button
+                className={mode === "flows" ? "is-active" : ""}
+                onClick={() => onModeChange("flows")}
+                title={t("Data & business flows")}
+              >
+                <Waypoints size={15} />
+                <span>{t("Flows")}</span>
               </button>
               {mode === "3d" ? (
                 <button

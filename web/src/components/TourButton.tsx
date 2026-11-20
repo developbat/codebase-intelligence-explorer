@@ -37,9 +37,9 @@ export function TourButton() {
       {
         element: '[data-tour="view-tabs"]',
         popover: {
-          title: t("Eight ways to explore"),
+          title: t("Nine ways to explore"),
           description: t(
-            "Universe shows modules, Files shows the tree, Calls shows functions, Architecture shows routes and data, Changes shows Git impact, Impact shows dependents, Heatmap shows structural hotspots, and 3D gives you the spatial view.",
+            "Universe shows modules, Files shows the tree, Calls shows functions, Architecture shows routes and data, Changes shows Git impact, Impact shows dependents, Heatmap shows structural hotspots, Flows shows data and business paths, and 3D gives you the spatial view.",
           ),
           side: "right",
         },

@@ -29,6 +29,9 @@ export const tr: Dictionary = {
   "Eight ways to explore": "Sekiz keşif yolu",
   "Universe shows modules, Files shows the tree, Calls shows functions, Architecture shows routes and data, Changes shows Git impact, Impact shows dependents, Heatmap shows structural hotspots, and 3D gives you the spatial view.":
     "Universe modülleri, Files ağacı, Calls fonksiyonları, Architecture route ve verileri, Changes Git etkisini, Impact bağımlılıkları, Heatmap yapısal yoğunlukları, 3D ise mekânsal görünümü gösterir.",
+  "Nine ways to explore": "Dokuz keşif yolu",
+  "Universe shows modules, Files shows the tree, Calls shows functions, Architecture shows routes and data, Changes shows Git impact, Impact shows dependents, Heatmap shows structural hotspots, Flows shows data and business paths, and 3D gives you the spatial view.":
+    "Universe modülleri, Files ağacı, Calls fonksiyonları, Architecture route ve verileri, Changes Git etkisini, Impact bağımlılıkları, Heatmap yapısal yoğunlukları, Flows veri ve iş akışlarını, 3D ise mekânsal görünümü gösterir.",
   "The full project tree is open": "Tüm proje ağacı açık",
   "All branches start expanded. Use the chevrons to expand or collapse everything, and click a file to jump into its function map.":
     "Tüm dallar açık başlar. Tümünü açmak/kapatmak için okları kullanın; fonksiyon haritasına gitmek için bir dosyaya tıklayın.",
@@ -548,6 +551,35 @@ export const tr: Dictionary = {
   "Structural degree": "Yapısal derece",
   "Impact depth {depth}": "Etki derinliği {depth}",
   "Impact graph is capped at {count} nodes for performance.": "Etki grafiği performans için {count} düğümle sınırlandırıldı.",
+  "Flows": "Akışlar",
+  "Data & business flows": "Veri ve iş akışları",
+  "Data flow": "Veri akışı",
+  "Business flow": "İş akışı",
+  "Data flow explorer": "Veri akışı kaşifi",
+  "Business flow explorer": "İş akışı kaşifi",
+  "AI interpretation grounded in routes, calls, database access, and events": "Route, çağrı, veritabanı erişimi ve olaylara dayanan AI yorumu",
+  "AI interpretation grounded in routes, calls, database access, and events. Every step links back to source evidence.":
+    "Route, çağrı, veritabanı erişimi ve olaylara dayanan AI yorumu. Her adım kaynak kanıta bağlanır.",
+  "No route or function data flow was found": "Route veya fonksiyon veri akışı bulunamadı",
+  "Select a route or function to trace its data flow.": "Veri akışını izlemek için bir route veya fonksiyon seçin.",
+  "Data flow: {label}": "Veri akışı: {label}",
+  "{nodes} steps · {reads} reads · {writes} writes · {events} events":
+    "{nodes} adım · {reads} okuma · {writes} yazma · {events} olay",
+  "{nodes} steps · {calls} calls · {reads} reads · {writes} writes · {events} events":
+    "{nodes} adım · {calls} çağrı · {reads} okuma · {writes} yazma · {events} olay",
+  "Data-flow graph is capped at {count} nodes for performance.":
+    "Veri akışı grafiği performans için {count} düğümle sınırlandırıldı.",
+  "No downstream data relationships were found for this node.":
+    "Bu düğüm için aşağı yönlü veri ilişkisi bulunamadı.",
+  "Static data-flow estimate. Runtime branches may differ.":
+    "Statik veri akışı tahmini. Çalışma zamanı dalları farklı olabilir.",
+  "Only the route binding was resolved; no downstream calls or data access were found.":
+    "Yalnızca route bağlantısı çözümlendi; aşağı yönlü çağrı veya veri erişimi bulunamadı.",
+  "Flow step {depth}": "Akış adımı {depth}",
+  "No business flows discovered yet.": "Henüz iş akışı keşfedilmedi.",
+  "Run discovery to let the model read the project’s real routes, calls, data access, and events.":
+    "Modelin gerçek route, çağrı, veri erişimi ve olayları okuması için keşfi çalıştırın.",
+  "AI interpretation — verify against source evidence.": "AI yorumu — kaynak kanıtla doğrulayın.",
   "Focus graph is capped at {count} nodes for performance.": "Odak grafiği performans için {count} düğümle sınırlandırıldı.",
   "Incoming relationships": "Gelen ilişkiler",
   "Outgoing relationships": "Giden ilişkiler",

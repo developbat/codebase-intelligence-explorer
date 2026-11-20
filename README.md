@@ -131,6 +131,12 @@ The UI is **English by default** and ships with Turkish, German, French, Spanish
 - The sidebar button toggles between **3D** and **2D** in place.
 - Legend, layered HUD, and inspector integration.
 
+### Data and business flows
+
+- **Data flow explorer (static):** starting from a route or function, follows `ROUTES_TO`, `CALLS`, `READS_FROM`, `WRITES_TO`, and event edges forward through the graph. Default depth is 2, adjustable to 1–3. Steps carry `F1`/`F2`/`F3` badges, and the subtitle reports calls, reads, writes, and events. The view is explicitly labeled as a static estimate and capped at 260 nodes.
+- **Business flow explorer (AI):** the AI layer follows real routes, controllers, services, database access, and events, then returns flows with steps, confidence, risks, and source file/line links. Results are cached and clearly labeled as AI interpretation rather than static proof.
+- **One Flows view:** switch between **Data flow** and **Business flow** from the toolbar without leaving the view.
+
 ### Focus, impact, and dependency heatmap
 
 - **Focus mode:** select any function, class, file, folder, or route and focus on it; the map shows the selected node, its parent context, and its 1–3 step neighborhood. **Exit focus** restores the normal view.
@@ -209,7 +215,7 @@ Open **http://localhost:5173**.
 1. Click **Open Project** (or **Browse…**) and choose a TypeScript/JavaScript, PHP, or Python project folder.
 2. Or click **Open sample project** to explore `fixtures/sample-app`.
 3. Use the **active project card** at the top of the sidebar to switch between saved analyses. Switching opens the cached graph instantly; it does not rescan.
-4. Use **Universe**, **Files**, **Calls**, **Architecture**, **Changes**, **Impact**, **Heatmap**, and **3D** from the sidebar.
+4. Use **Universe**, **Files**, **Calls**, **Architecture**, **Changes**, **Impact**, **Heatmap**, **Flows**, and **3D** from the sidebar.
 5. All tree branches are expanded by default; use the chevrons to expand or collapse everything. The help button starts a guided tour.
 6. Select any node to inspect it and highlight its direct connections. In 2D, **Up** walks from file → folder → project. In 3D, selection stays in 3D; use **Open selected item in 2D** for an explicit handoff.
 7. Open **AI setup** to connect an optional provider.
@@ -274,6 +280,7 @@ web/
       GitSummary.tsx             Branch, HEAD, last commit, recent history
       GitHistory.tsx             Paginated Git commit graph
       GitCommitDialog.tsx        Commit file tree, diff, and graph impact
+      BusinessFlowPanel.tsx      AI business-flow explorer with source steps
       TourButton.tsx             driver.js guided tour
       ShowcaseDemo.tsx           Automated promo tour with captions and controls
       SourcePreview.tsx          Read-only highlighted source
@@ -446,6 +453,7 @@ Manual browser verification covers folder browsing, all views, PHP/Python projec
 | 2D up / parent navigation | ✅ |
 | Inspector back stack for previous list/detail | ✅ |
 | Focus mode + Impact analysis + Dependency heatmap | ✅ |
+| Static data flow + AI business flow explorer | ✅ |
 | PHP / Python symbol, import, call, and route support | ✅ core |
 | Git last commit + recent history in Changes | ✅ |
 | Git commit graph, pagination, commit detail, diffs | ✅ |
