@@ -717,5 +717,59 @@ export const tr: Dictionary = {
   "Source code could not be read": "Kaynak kod okunamadı",
   "Show full file": "Tüm dosyayı göster",
   "Back to symbol": "Sembol çevresine dön",
-  "Source code loading…": "Kaynak kod yükleniyor…"
+  "Source code loading…": "Kaynak kod yükleniyor…",
+  // Code Studio
+  "Product": "Ürün",
+  "Intelligence": "İnceleme",
+  "Intelligence Explorer": "İnceleme Kaşifi",
+  "Code Studio": "Kod Stüdyosu",
+  "Write mode": "Yazma modu",
+  "Save": "Kaydet",
+  "Run": "Çalıştır",
+  "Terminal": "Terminal",
+  "AI edit": "AI düzenleme",
+  "exit": "çıkış",
+  "text": "metin",
+  "line count": "{count} satır",
+  "no Git": "Git yok",
+  "files": "dosya",
+  "symbols": "sembol",
+  "functions": "fonksiyon",
+  "Could not open the file": "Dosya açılamadı",
+  "Saved. A local backup was created before writing.":
+    "Kaydedildi. Yazmadan önce yerel bir yedek oluşturuldu.",
+  "Saved.": "Kaydedildi.",
+  "Could not save the file": "Dosya kaydedilemedi",
+  "Command failed to start": "Komut başlatılamadı",
+  "Save the file before generating an AI edit.": "AI düzenlemesi üretmeden önce dosyayı kaydedin.",
+  "AI edit failed": "AI düzenlemesi başarısız oldu",
+  "AI edit applied and saved.": "AI düzenlemesi uygulandı ve kaydedildi.",
+  "Could not apply the edit": "Düzenleme uygulanamadı",
+  "Graph stale — rescan": "Graph güncel değil — yeniden tara",
+  "Select a file from the project tree to start editing.":
+    "Düzenlemeye başlamak için proje ağacından bir dosya seçin.",
+  "Opening file…": "Dosya açılıyor…",
+  "Type a command and press Enter…": "Komut yazın ve Enter'a basın…",
+  "Commands run locally in the project root.":
+    "Komutlar proje kökünde yerel olarak çalışır.",
+  "No command output yet.": "Henüz komut çıktısı yok.",
+  "Ask AI to edit the active file": "AI'dan aktif dosyayı düzenlemesini isteyin",
+  "Configure an AI provider to enable code edits.":
+    "Kod düzenlemelerini açmak için bir AI sağlayıcısı yapılandırın.",
+  "Example: add input validation and return a clear error message.":
+    "Örnek: input doğrulaması ekle ve açık bir hata mesajı döndür.",
+  "Generate edit": "Düzenleme üret",
+  "Apply & save": "Uygula ve kaydet",
+  "Discard": "Vazgeç",
+  "AI explanation": "AI açıklaması",
+  "The model returns a complete replacement for the selected file. You review the diff before anything is written.":
+    "Model seçili dosyanın tamamını yeni içerik olarak döndürür. Hiçbir şey yazılmadan önce diff'i incelersiniz.",
+  "Code Studio writes to disk. Every save creates a local backup under ~/.codebase-intelligence-explorer/editor-backups.":
+    "Kod Stüdyosu diske yazar. Her kayıt ~/.codebase-intelligence-explorer/editor-backups altında yerel bir yedek oluşturur.",
+  "Rescan project analysis": "Proje analizini yeniden tara",
+  "Preparing Code Studio…": "Kod Stüdyosu hazırlanıyor…",
+  "Shortcuts": "Kısayollar",
+  "Save file": "Dosyayı kaydet",
+  "Run commands from the terminal tab.": "Komutları terminal sekmesinden çalıştırın."
+
 };

@@ -5,7 +5,7 @@
 <h1 align="center">Codebase Intelligence Explorer</h1>
 
 <p align="center">
-  <strong>Read-only code intelligence for TypeScript/JavaScript, PHP, and Python: a symbol-level knowledge graph, Git impact analysis, optional multi-provider AI, semantic search, and 2D/3D project exploration.</strong>
+  <strong>Read-only code intelligence for TypeScript/JavaScript, PHP, and Python — plus a write-enabled Code Studio with a real editor, command runner, AI edits, and explicit save/backup workflow.</strong>
 </p>
 
 https://github.com/user-attachments/assets/829e9909-0953-4df4-bc12-10c14cf7dcc6
@@ -28,7 +28,7 @@ https://github.com/user-attachments/assets/829e9909-0953-4df4-bc12-10c14cf7dcc6
   <a href="#9-tests">Tests</a>
 </p>
 
-> **Local-first and read-only by design.** Code is never modified, executed, or uploaded unless you explicitly configure an AI provider and request an analysis.
+> **Two products, one local project.** **Intelligence** is read-only by design. **Code Studio** writes only after an explicit **Save** or **Apply & save**, keeps local backups, and never runs commands automatically.
 
 The UI is **English by default** and ships with Turkish, German, French, Spanish, Portuguese, Russian, Chinese, and Japanese. AI answers follow the selected UI language.
 
@@ -144,6 +144,16 @@ The UI is **English by default** and ships with Turkish, German, French, Spanish
 - **Dependency heatmap:** ranks the top 180 structural hotspots by weighted call, import, route, and data relationships. Node color runs from blue (cold) to red (hot), with a heat-score badge and a cold→hot legend. This is structural degree, not runtime performance.
 - **Graph-wide depth controls:** focus and impact views share a compact depth selector in the toolbar.
 
+### Code Studio (write-enabled)
+
+- **Two products, one project session:** switch between **Intelligence** (read-only analysis) and **Code Studio** from the topbar without reopening the project.
+- **Real code editor:** CodeMirror 6 with TypeScript/JavaScript/TSX/JSX, Python, and PHP language support, tabs, folding, bracket matching, and autocomplete.
+- **Explicit save model:** no autosave. Every save writes through a path-validated server endpoint and creates a timestamped backup under `~/.codebase-intelligence-explorer/editor-backups/`.
+- **Command runner:** run user-entered commands in the project root, with quick commands for `npm test`, `pytest`, `php artisan test`, and PHPUnit. Exit code, stdout/stderr, duration, timeout, and truncation are returned.
+- **AI single-file edit:** select a file, describe the change, and review the generated line diff before **Apply & save** or **Discard**. The model returns a full replacement for that one file; no automatic apply.
+- **Stale-analysis awareness:** after a save or AI apply, Code Studio marks the graph stale and offers a rescan.
+- **Separate safety boundary:** Intelligence remains read-only. Code Studio writes only after an explicit user action and stays inside the project root.
+
 ### Project profile, full tree, and guided tour
 
 - **Project profile:** the inspector opens with a non-AI overview: detected stack, counts, likely entry points, largest modules, and sample routes.
@@ -215,10 +225,11 @@ Open **http://localhost:5173**.
 1. Click **Open Project** (or **Browse…**) and choose a TypeScript/JavaScript, PHP, or Python project folder.
 2. Or click **Open sample project** to explore `fixtures/sample-app`.
 3. Use the **active project card** at the top of the sidebar to switch between saved analyses. Switching opens the cached graph instantly; it does not rescan.
-4. Use **Universe**, **Files**, **Calls**, **Architecture**, **Changes**, **Impact**, **Heatmap**, **Flows**, and **3D** from the sidebar.
-5. All tree branches are expanded by default; use the chevrons to expand or collapse everything. The help button starts a guided tour.
-6. Select any node to inspect it and highlight its direct connections. In 2D, **Up** walks from file → folder → project. In 3D, selection stays in 3D; use **Open selected item in 2D** for an explicit handoff.
-7. Open **AI setup** to connect an optional provider.
+4. Switch between **Intelligence** (read-only analysis) and **Code Studio** (editor, commands, AI edit) from the topbar product switcher.
+5. Use **Universe**, **Files**, **Calls**, **Architecture**, **Changes**, **Impact**, **Heatmap**, **Flows**, and **3D** from the sidebar.
+6. All tree branches are expanded by default; use the chevrons to expand or collapse everything. The help button starts a guided tour.
+7. Select any node to inspect it and highlight its direct connections. In 2D, **Up** walks from file → folder → project. In 3D, selection stays in 3D; use **Open selected item in 2D** for an explicit handoff.
+8. Open **AI setup** to connect an optional provider.
 
 ### Production build
 
@@ -281,6 +292,7 @@ web/
       GitHistory.tsx             Paginated Git commit graph
       GitCommitDialog.tsx        Commit file tree, diff, and graph impact
       BusinessFlowPanel.tsx      AI business-flow explorer with source steps
+      CodeStudio.tsx             CodeMirror editor, tabs, terminal, AI edit
       TourButton.tsx             driver.js guided tour
       ShowcaseDemo.tsx           Automated promo tour with captions and controls
       SourcePreview.tsx          Read-only highlighted source
@@ -299,6 +311,7 @@ server/src/
   analyzer.ts                    AST, symbols, calls, routes, databases, events
   languages.ts                   PHP/Python Lezer parsing, imports, calls, routes
   icons.ts                       Safe local favicon/logo discovery
+  editor.ts                      Safe file read/write, backups, command runner
   git.ts                         Read-only Git status/log/diff
   changes.ts                     Structural diff + impact analysis
   search.ts                      Local TF-IDF vector index and ranking
@@ -339,6 +352,9 @@ fixtures/sample-app/             End-to-end sample order project
 | `POST /api/projects/:id/rescan` | Re-analyze |
 | `DELETE /api/projects/:id` | Remove cached analysis |
 | `GET /api/projects/:id/source` | Read-only source range |
+| `GET /api/projects/:id/file` | Full file content for Code Studio |
+| `PUT /api/projects/:id/file` | Path-validated write with local backup |
+| `POST /api/projects/:id/run` | Run a user command in the project root |
 | `POST /api/projects/:id/search` | Local vector search |
 | `GET /api/projects/:id/events` | SSE watcher stream |
 | `GET /api/projects/:id/git` | Branch, HEAD, changed files, commits |
@@ -358,6 +374,7 @@ fixtures/sample-app/             End-to-end sample order project
 | `POST /api/projects/:id/ai/review` | Review pending changes |
 | `POST /api/projects/:id/ai/unresolved` | Classify an unresolved target |
 | `POST /api/projects/:id/ai/chat` | Graph-grounded Q&A |
+| `POST /api/projects/:id/ai/edit` | Single-file AI edit proposal with diff review |
 | `GET /api/health` | Health check |
 
 All endpoints bind to `127.0.0.1`.
@@ -406,7 +423,11 @@ Every AI request carries the selected UI locale. The server appends an explicit 
 
 ## 8. Security model
 
-- Read-only project access.
+- **Intelligence:** read-only project access.
+- **Code Studio:** path-validated writes only after an explicit user action.
+- Every Code Studio save creates a timestamped local backup first.
+- Commands are user-entered and never run automatically.
+- AI edit proposals are never applied without user approval.
 - `.env`, keys, certificates, and secret files excluded before reading.
 - Source preview cannot escape the project root; symlinks re-validated with `realpath`.
 - Git uses argument arrays, never a shell.
@@ -423,16 +444,17 @@ Every AI request carries the selected UI locale. The server appends an explicit 
 npm test
 ```
 
-Current coverage (6 tests):
+Current coverage (7 tests):
 
 1. Fixture call graph and evidence.
 2. CommonJS `require()` / `exports.x`.
 3. Secret and `node_modules` exclusion.
 4. MVP 2 adapters: NestJS/Express routes, Prisma relations, ORM queries, events.
 5. Git status, diff, commits since analysis, commit graph/detail/diff, structural diff, impact.
-6. AI service: real source prompt, structured result, cache, language instruction, grounded chat.
+6. AI service: real source prompt, structured result, cache, language instruction, grounded chat, single-file AI edit.
+7. Code Studio: safe write, backup, command runner, path sandbox.
 
-Manual browser verification covers folder browsing, all views, PHP/Python projects, the guided tour, the project profile, Git last-commit history and commit detail, 3D hybrid/hierarchical/clustered/force layouts, 3D LOD selection, 2D up navigation, semantic search, Git changes, AI panels, and language switching.
+Manual browser verification covers folder browsing, all views, PHP/Python projects, the guided tour, the project profile, Git last-commit history and commit detail, 3D hybrid/hierarchical/clustered/force layouts, 3D LOD selection, 2D up navigation, semantic search, Git changes, AI panels, Code Studio editor/terminal, and language switching.
 
 ---
 
@@ -454,6 +476,9 @@ Manual browser verification covers folder browsing, all views, PHP/Python projec
 | Inspector back stack for previous list/detail | ✅ |
 | Focus mode + Impact analysis + Dependency heatmap | ✅ |
 | Static data flow + AI business flow explorer | ✅ |
+| Code Studio: editor, save + backups, command runner | ✅ |
+| AI single-file edit with diff review and explicit apply | ✅ |
+| Multi-file patch studio / agent test loop | ⏳ next |
 | PHP / Python symbol, import, call, and route support | ✅ core |
 | Git last commit + recent history in Changes | ✅ |
 | Git commit graph, pagination, commit detail, diffs | ✅ |

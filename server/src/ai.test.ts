@@ -8,6 +8,7 @@ import {
   analyzeSymbol,
   askProject,
   discoverBusinessFlows,
+  editSourceFile,
   summarizeProject,
   summarizeScope,
 } from "./ai/service";
@@ -53,6 +54,11 @@ test("AI service sends real source and parses structured results through an Open
             dependencies: ["OrderRepository", "PaymentService"],
             risks: ["Payment and email are direct side effects."],
             evidence: [{ file: "src/services/order.service.ts", start_line: 15, end_line: 41 }],
+          });
+        } else if (prompt.includes("precise code editor")) {
+          content = JSON.stringify({
+            explanation: "Added a guard before the database write.",
+            content: "export const edited = true;\n",
           });
         } else if (prompt.includes("business-flow analyst")) {
           content = JSON.stringify({
@@ -145,6 +151,12 @@ test("AI service sends real source and parses structured results through an Open
     assert.ok(project.summary.length > 0);
     assert.ok(project.keyFlows.length > 0);
     assert.ok(project.entryPoints.length > 0);
+
+    const edit = await editSourceFile(analysis.id, "src/services/order.service.ts", "Add a guard");
+    assert.equal(edit.provider, "custom");
+    assert.equal(edit.newContent, "export const edited = true;\n");
+    assert.ok(edit.explanation.length > 0);
+    assert.ok(received.some((prompt) => prompt.includes("precise code editor")));
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
     if (previousDataDir === undefined) delete process.env.CIE_DATA_DIR;

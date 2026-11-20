@@ -4,6 +4,7 @@ import {
   BrainCircuit,
   ChevronRight,
   Clapperboard,
+  Code2,
   Crosshair,
   FolderOpen,
   FolderTree,
@@ -47,6 +48,9 @@ import type { GitChangedFile, GitCommit, GraphNode } from "../../shared/types";
 const LAST_PROJECT_KEY = "cie:last-project";
 const LAST_PATH_KEY = "cie:last-path";
 const Universe3D = lazy(() => import("./components/Universe3D"));
+const CodeStudio = lazy(() =>
+  import("./components/CodeStudio").then((module) => ({ default: module.CodeStudio })),
+);
 
 const MODE_LABEL: Record<ViewMode, string> = {
   universe: "Project Universe",
@@ -90,12 +94,19 @@ export default function App() {
   const { t, tn, locale, localeInfo, locales, setLocale } = useI18n();
   const analysisSteps = ANALYSIS_STEP_KEYS.map((key) => t(key));
   const [logoVersion] = useState(() => Date.now().toString(36));
+  const [product, setProduct] = useState<"intelligence" | "studio">(() =>
+    localStorage.getItem("cie:product") === "studio" ? "studio" : "intelligence",
+  );
 
   useEffect(() => {
     for (const link of document.querySelectorAll<HTMLLinkElement>('link[rel="icon"], link[rel="apple-touch-icon"]')) {
       link.href = `/cbe.png?v=${logoVersion}`;
     }
   }, [logoVersion]);
+
+  useEffect(() => {
+    localStorage.setItem("cie:product", product);
+  }, [product]);
   const [analysis, setAnalysis] = useState<AnalysisResult | null>(null);
   const [recent, setRecent] = useState<RecentProject[]>([]);
   const [mode, setMode] = useState<ViewMode>("universe");
@@ -503,6 +514,14 @@ export default function App() {
     setInspectorOpen(true);
   }
 
+  function changeProduct(next: "intelligence" | "studio") {
+    setProduct(next);
+    if (next === "studio") {
+      setShowcaseOpen(false);
+      setInspectorOpen(false);
+    }
+  }
+
   function changeMode(next: ViewMode) {
     setMode(next);
     setSelectedEdgeId(null);
@@ -719,36 +738,65 @@ export default function App() {
           </div>
         </div>
 
+        <div className="product-switcher" role="tablist" aria-label={t("Product")}>
+          <button
+            className={product === "intelligence" ? "is-active" : ""}
+            onClick={() => changeProduct("intelligence")}
+            title={t("Intelligence Explorer")}
+          >
+            <Network size={13} />
+            <span>{t("Intelligence")}</span>
+          </button>
+          <button
+            className={product === "studio" ? "is-active" : ""}
+            onClick={() => changeProduct("studio")}
+            title={t("Code Studio")}
+          >
+            <Code2 size={13} />
+            <span>{t("Code Studio")}</span>
+          </button>
+        </div>
+
         <div className="breadcrumbs">
-          {analysis && mode !== "universe" && mode !== "3d" ? (
-            <button
-              className="breadcrumb-back"
-              onClick={goUp}
-              title={t("Go up one level")}
-              aria-label={t("Go up one level")}
-            >
-              <ArrowUp size={13} />
-            </button>
-          ) : null}
-          {analysis
-            ? breadcrumbs.map((part, index) => {
-                const isLast = index === breadcrumbs.length - 1;
-                return (
-                  <span key={`${part.label}-${index}`} className="breadcrumb-item">
-                    {index > 0 ? <ChevronRight size={12} className="breadcrumb-sep" /> : null}
-                    {part.path !== undefined && !isLast ? (
-                      <button onClick={() => openFolder(part.path ?? "")}>{part.label}</button>
-                    ) : (
-                      <span className="is-current">{part.label}</span>
-                    )}
-                  </span>
-                );
-              })
-            : null}
+          {product === "studio" ? (
+            <span className="breadcrumb-item">
+              <Code2 size={12} className="breadcrumb-sep" />
+              <span className="is-current">{analysis?.projectName ?? t("Code Studio")}</span>
+              <span className="studio-top-pill">{t("Write mode")}</span>
+            </span>
+          ) : (
+            <>
+              {analysis && mode !== "universe" && mode !== "3d" ? (
+                <button
+                  className="breadcrumb-back"
+                  onClick={goUp}
+                  title={t("Go up one level")}
+                  aria-label={t("Go up one level")}
+                >
+                  <ArrowUp size={13} />
+                </button>
+              ) : null}
+              {analysis
+                ? breadcrumbs.map((part, index) => {
+                    const isLast = index === breadcrumbs.length - 1;
+                    return (
+                      <span key={`${part.label}-${index}`} className="breadcrumb-item">
+                        {index > 0 ? <ChevronRight size={12} className="breadcrumb-sep" /> : null}
+                        {part.path !== undefined && !isLast ? (
+                          <button onClick={() => openFolder(part.path ?? "")}>{part.label}</button>
+                        ) : (
+                          <span className="is-current">{part.label}</span>
+                        )}
+                      </span>
+                    );
+                  })
+                : null}
+            </>
+          )}
         </div>
 
         <div className="topbar-actions">
-          <TourButton />
+          {product === "intelligence" ? <TourButton /> : null}
           <button
             className={`icon-button topbar-icon ${aiConfigured ? "is-active" : ""}`}
             onClick={() => setAiSettingsOpen(true)}
@@ -775,7 +823,7 @@ export default function App() {
               <Lock size={11} /> {t("Read-only")}
             </span>
           ) : null}
-          {analysis ? (
+          {analysis && product === "intelligence" ? (
             <button
               className={`icon-button topbar-icon ${inspectorOpen ? "is-active" : ""}`}
               onClick={() => setInspectorOpen((value) => !value)}
@@ -785,7 +833,7 @@ export default function App() {
               <PanelRight size={15} />
             </button>
           ) : null}
-          {analysis ? (
+          {analysis && product === "intelligence" ? (
             <button className="ghost-button demo-start-button" onClick={() => setShowcaseOpen(true)}>
               <Clapperboard size={14} /> {t("Demo")}
             </button>
@@ -801,6 +849,23 @@ export default function App() {
         </div>
       </header>
 
+      {product === "studio" && analysis ? (
+        <Suspense
+          fallback={
+            <div className="app-loading">
+              <Loader2 size={20} className="spin" />
+              <span>{t("Preparing Code Studio…")}</span>
+            </div>
+          }
+        >
+          <CodeStudio
+            analysis={analysis}
+            aiSettings={aiSettings}
+            onOpenSettings={() => setAiSettingsOpen(true)}
+            onRescan={rescan}
+          />
+        </Suspense>
+      ) : (
       <div className="workspace">
         <Sidebar
           analysis={analysis}
@@ -1123,18 +1188,30 @@ export default function App() {
           />
         ) : null}
       </div>
+      )}
 
       <footer className="statusbar">
         <span className="status-left">
           {analysis ? (
-            <>
-              <span className="status-dot" />
-              {t("Analysis ready")}
-              <span className="status-sep" />
-              <span className="status-muted">
-                {new Date(analysis.createdAt).toLocaleString(localeInfo.dateLocale)}
-              </span>
-            </>
+            product === "studio" ? (
+              <>
+                <span className="status-dot" />
+                {t("Code Studio")} · {t("Write mode")}
+                <span className="status-sep" />
+                <span className="status-muted">
+                  {analysis.projectName}
+                </span>
+              </>
+            ) : (
+              <>
+                <span className="status-dot" />
+                {t("Analysis ready")}
+                <span className="status-sep" />
+                <span className="status-muted">
+                  {new Date(analysis.createdAt).toLocaleString(localeInfo.dateLocale)}
+                </span>
+              </>
+            )
           ) : (
             <>
               <span className="status-dot idle" />

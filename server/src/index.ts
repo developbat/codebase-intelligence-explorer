@@ -7,6 +7,7 @@ import {
   askProject,
   analyzeSymbol,
   discoverBusinessFlows,
+  editSourceFile,
   investigateUnresolved,
   reviewChanges,
   summarizeProject,
@@ -15,6 +16,7 @@ import {
 import { listProviderModels, testProvider } from "./ai/providers";
 import { getPublicSettings, updateAiSettings } from "./ai/settings";
 import { buildChangeReport } from "./changes";
+import { readSourceFile, runProjectCommand, writeSourceFile } from "./editor";
 import { getCommitDetail, getCommitFileDiff, getCommitLog, getFileDiff, getGitStatus } from "./git";
 import { findProjectIcon } from "./icons";
 import { listFolders } from "./fsbrowse";
@@ -276,6 +278,26 @@ app.post("/api/projects/:id/ai/chat", async (req, res) => {
   }
 });
 
+app.post("/api/projects/:id/ai/edit", async (req, res) => {
+  try {
+    const filePath = typeof req.body?.filePath === "string" ? req.body.filePath : "";
+    const instruction = typeof req.body?.instruction === "string" ? req.body.instruction : "";
+    if (!filePath || !instruction.trim()) {
+      res.status(400).json({ error: "A file path and edit instruction are required." });
+      return;
+    }
+    const provider = typeof req.body?.provider === "string" ? (req.body.provider as AiProviderId) : undefined;
+    const result = await editSourceFile(req.params.id, filePath, instruction, {
+      provider,
+      model: typeof req.body?.model === "string" ? req.body.model : undefined,
+      language: typeof req.body?.language === "string" ? req.body.language : undefined,
+    });
+    res.json(result);
+  } catch (error) {
+    handleError(res, error, 400);
+  }
+});
+
 app.get("/api/recent", async (_req, res) => {
   try {
     res.json({ projects: await listRecent() });
@@ -513,6 +535,50 @@ app.get("/api/projects/:id/source", async (req, res) => {
     res.json(response);
   } catch (error) {
     handleError(res, error);
+  }
+});
+
+app.get("/api/projects/:id/file", async (req, res) => {
+  try {
+    const analysis = await loadAnalysis(req.params.id);
+    const file = typeof req.query.path === "string" ? req.query.path : "";
+    if (!file) {
+      res.status(400).json({ error: "A file path is required." });
+      return;
+    }
+    res.json(await readSourceFile(analysis.rootPath, file));
+  } catch (error) {
+    handleError(res, error, 400);
+  }
+});
+
+app.put("/api/projects/:id/file", async (req, res) => {
+  try {
+    const analysis = await loadAnalysis(req.params.id);
+    const file = typeof req.body?.filePath === "string" ? req.body.filePath : "";
+    const content = typeof req.body?.content === "string" ? req.body.content : "";
+    if (!file) {
+      res.status(400).json({ error: "A file path is required." });
+      return;
+    }
+    res.json(await writeSourceFile(req.params.id, analysis.rootPath, file, content));
+  } catch (error) {
+    handleError(res, error, 400);
+  }
+});
+
+app.post("/api/projects/:id/run", async (req, res) => {
+  try {
+    const analysis = await loadAnalysis(req.params.id);
+    const command = typeof req.body?.command === "string" ? req.body.command : "";
+    const cwd = typeof req.body?.cwd === "string" ? req.body.cwd : undefined;
+    if (!command.trim()) {
+      res.status(400).json({ error: "A command is required." });
+      return;
+    }
+    res.json(await runProjectCommand(analysis.rootPath, command, cwd));
+  } catch (error) {
+    handleError(res, error, 400);
   }
 });
 

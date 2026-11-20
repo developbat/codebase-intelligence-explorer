@@ -9,11 +9,14 @@ import type {
   GitStatus,
   GraphNodeKind,
   RecentProject,
+  RunCommandResult,
+  SourceFileContent,
   SourceResponse,
 } from "../../shared/types";
 import type {
   AiBusinessFlowsResult,
   AiChatResult,
+  AiCodeEditResult,
   AiProjectSummary,
   AiScopeSummary,
   AiProviderId,
@@ -67,6 +70,23 @@ export const api = {
     if (end) params.set("end", String(end));
     return request<SourceResponse>(`/api/projects/${id}/source?${params.toString()}`);
   },
+
+  fileContent: (id: string, filePath: string) => {
+    const params = new URLSearchParams({ path: filePath });
+    return request<SourceFileContent>(`/api/projects/${id}/file?${params.toString()}`);
+  },
+
+  writeFile: (id: string, filePath: string, content: string) =>
+    request<{ filePath: string; bytes: number; backupPath?: string }>(`/api/projects/${id}/file`, {
+      method: "PUT",
+      body: JSON.stringify({ filePath, content }),
+    }),
+
+  runCommand: (id: string, command: string, cwd?: string) =>
+    request<RunCommandResult>(`/api/projects/${id}/run`, {
+      method: "POST",
+      body: JSON.stringify({ command, cwd }),
+    }),
 
   remove: (id: string) => request<{ ok: boolean }>(`/api/projects/${id}`, { method: "DELETE" }),
 
@@ -207,12 +227,26 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ question, history, provider, model, language }),
       }),
+
+    edit: (
+      projectId: string,
+      filePath: string,
+      instruction: string,
+      provider?: AiProviderId,
+      model?: string,
+      language?: string,
+    ) =>
+      request<AiCodeEditResult>(`/api/projects/${projectId}/ai/edit`, {
+        method: "POST",
+        body: JSON.stringify({ filePath, instruction, provider, model, language }),
+      }),
   },
 };
 
 export type {
   AiBusinessFlowsResult,
   AiChatResult,
+  AiCodeEditResult,
   AiProjectSummary,
   AiProviderId,
   AiReviewResult,

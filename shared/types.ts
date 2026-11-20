@@ -324,6 +324,23 @@ export interface CodeSearchResponse {
   tookMs: number;
 }
 
+export interface SourceFileContent {
+  filePath: string;
+  content: string;
+  bytes: number;
+}
+
+export interface RunCommandResult {
+  command: string;
+  cwd: string;
+  exitCode: number | null;
+  stdout: string;
+  stderr: string;
+  durationMs: number;
+  timedOut: boolean;
+  truncated: boolean;
+}
+
 export interface SourceResponse {
   filePath: string;
   language: string;

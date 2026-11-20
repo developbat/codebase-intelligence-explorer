@@ -284,6 +284,18 @@ export interface AiChatResult {
   usage?: AiUsage;
 }
 
+export interface AiCodeEditResult {
+  filePath: string;
+  instruction: string;
+  originalContent: string;
+  newContent: string;
+  explanation: string;
+  provider: string;
+  model: string;
+  createdAt: string;
+  usage?: AiUsage;
+}
+
 export interface AiTestResult {
   ok: boolean;
   provider: AiProviderId;

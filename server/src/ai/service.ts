@@ -9,6 +9,7 @@ import type {
   AiBusinessFlow,
   AiBusinessFlowsResult,
   AiChatResult,
+  AiCodeEditResult,
   AiContextFile,
   AiProjectSummary,
   AiScopeSummary,
@@ -876,6 +877,81 @@ function keywords(question: string): string[] {
       .split(/[^a-z0-9_$ğüşıöç]+/i)
       .filter((token) => token.length > 2 && !STOP_WORDS.has(token)),
   )].slice(0, 12);
+}
+
+export async function editSourceFile(
+  projectId: string,
+  filePath: string,
+  instruction: string,
+  options: { provider?: Parameters<typeof resolveProvider>[0]; model?: string; language?: string } = {},
+): Promise<AiCodeEditResult> {
+  const analysis = await loadAnalysis(projectId);
+  const relative = filePath.replace(/^\/+/, "");
+  const absolute = path.resolve(analysis.rootPath, relative);
+  if (!isWithin(analysis.rootPath, absolute)) throw new Error("Access outside the project root was denied.");
+  const [realRoot, realFile] = await Promise.all([
+    fs.realpath(analysis.rootPath),
+    fs.realpath(absolute).catch(() => absolute),
+  ]);
+  if (!isWithin(realRoot, realFile)) throw new Error("Access outside the project root was denied.");
+  const content = await fs.readFile(realFile, "utf8");
+  if (content.length > 24_000) {
+    throw new Error("This file is too large for an AI edit. Select a smaller file or edit it manually.");
+  }
+  if (!instruction.trim()) throw new Error("An edit instruction is required.");
+
+  const config = await resolveProvider(options.provider, options.model);
+  const context = [
+    `File: ${relative}`,
+    `Project: ${analysis.projectName}`,
+    `Instruction: ${instruction.trim()}`,
+    "",
+    "Current file content:",
+    "```",
+    content,
+    "```",
+  ].join("\n");
+
+  const messages: ChatMessage[] = [
+    {
+      role: "system",
+      content:
+        "You are a precise code editor. Return ONLY a JSON object with this exact shape: " +
+        '{"explanation":"short explanation","content":"the complete updated file content"}. ' +
+        "The content field must contain the entire file after the edit, not a diff and not a fragment. " +
+        "Preserve the existing style, imports, formatting, and unrelated behavior. Make the smallest correct change. " +
+        "Do not wrap the JSON in markdown fences. Do not invent APIs that are not present in the file. " +
+        "Keep code, identifiers, paths, and comments in their original language.",
+    },
+    {
+      role: "user",
+      content: context,
+    },
+  ];
+
+  const response = await chat(config, messages, {
+    maxTokens: 6000,
+    temperature: 0.1,
+    timeoutMs: 90_000,
+  });
+  const parsed = parseJsonObject(response);
+  const newContent = typeof parsed.content === "string" ? parsed.content : "";
+  if (!newContent.trim()) throw new Error("The model did not return updated file content.");
+  return {
+    filePath: relative,
+    instruction: instruction.trim(),
+    originalContent: content,
+    newContent,
+    explanation: String(parsed.explanation ?? "Updated by the selected model."),
+    provider: config.id,
+    model: config.model,
+    createdAt: new Date().toISOString(),
+    usage: {
+      inputChars: context.length,
+      estimatedTokens: Math.ceil(context.length / 4),
+      contextFiles: [{ path: relative, label: "Source file" }],
+    },
+  };
 }
 
 export async function askProject(
