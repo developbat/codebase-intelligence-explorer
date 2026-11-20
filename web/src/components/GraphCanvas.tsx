@@ -362,6 +362,15 @@ export function GraphCanvas({
         ))}
       </div>
 
+      {viewMode === "heatmap" ? (
+        <div className="heatmap-legend">
+          <span>{t("Cold")}</span>
+          <span className="heatmap-gradient" />
+          <span>{t("Hot")}</span>
+          <small>{t("Structural degree")}</small>
+        </div>
+      ) : null}
+
       <div className="canvas-hint">
         {t("Click to select · Double-click to open a file/folder or focus")}
       </div>

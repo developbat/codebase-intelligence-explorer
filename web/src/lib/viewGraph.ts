@@ -10,7 +10,15 @@ import type {
 } from "../../../shared/types";
 import type { Translate } from "../i18n";
 
-export type ViewMode = "universe" | "files" | "functions" | "architecture" | "changes" | "3d";
+export type ViewMode =
+  | "universe"
+  | "files"
+  | "functions"
+  | "architecture"
+  | "changes"
+  | "impact"
+  | "heatmap"
+  | "3d";
 
 type TranslatePlural = (count: number, one: string, other: string, vars?: Record<string, string | number>) => string;
 
@@ -33,8 +41,10 @@ interface BuildOptions {
   analysis: AnalysisResult;
   selectedFolder: string | null;
   selectedFile: string | null;
+  selectedNodeId: string | null;
   focusNodeId: string | null;
   depth: number;
+  focusMode?: boolean;
   changeReport?: ChangeReport | null;
   gitStatus?: GitStatus | null;
   commitHighlight?: CommitHighlight | null;
@@ -72,8 +82,10 @@ export function buildViewGraph(options: BuildOptions): ViewGraph {
     analysis,
     selectedFolder,
     selectedFile,
+    selectedNodeId,
     focusNodeId,
     depth,
+    focusMode,
     changeReport,
     gitStatus,
     commitHighlight,
@@ -89,6 +101,8 @@ export function buildViewGraph(options: BuildOptions): ViewGraph {
   else if (mode === "files") view = buildFiles(analysis, nodeById, selectedFolder, Boolean(fullTree), t, tn);
   else if (mode === "architecture") view = buildArchitecture(analysis, nodeById, t, tn);
   else if (mode === "changes") view = buildChanges(analysis, nodeById, changeReport ?? null, gitStatus ?? null, t, tn);
+  else if (mode === "impact") view = buildImpact(analysis, nodeById, selectedNodeId, Math.max(1, depth), t);
+  else if (mode === "heatmap") view = buildHeatmap(analysis, nodeById, t);
   else if (mode === "3d") {
     const base = selectedFile ? "functions" : selectedFolder ? "files" : "universe";
     view =
@@ -99,6 +113,10 @@ export function buildViewGraph(options: BuildOptions): ViewGraph {
           : buildUniverse(analysis, nodeById, t, tn);
   } else {
     view = buildFunctions(analysis, nodeById, selectedFile, focusNodeId, depth, Boolean(clusterFunctions), t, tn);
+  }
+
+  if (focusMode && selectedNodeId) {
+    view = buildFocus(analysis, nodeById, selectedNodeId, Math.max(1, depth), t, tn);
   }
 
   return applyCommitHighlight(view, commitHighlight ?? null);
@@ -689,6 +707,268 @@ function buildChanges(
             : t("Run “Analyze changes” to compute the structural diff and impacted callers."),
   };
 }
+
+function heatColor(ratio: number): string {
+  const value = Math.max(0, Math.min(1, ratio));
+  const cold = [96, 165, 250];
+  const mid = [245, 184, 75];
+  const hot = [248, 113, 113];
+  const from = value < 0.5 ? cold : mid;
+  const to = value < 0.5 ? mid : hot;
+  const local = value < 0.5 ? value * 2 : (value - 0.5) * 2;
+  const rgb = from.map((channel, index) => Math.round(channel + (to[index] - channel) * local));
+  return `rgb(${rgb[0]}, ${rgb[1]}, ${rgb[2]})`;
+}
+
+function buildImpact(
+  analysis: AnalysisResult,
+  nodeById: Map<string, GraphNode>,
+  selectedNodeId: string | null,
+  depth: number,
+  t: Translate,
+): ViewGraph {
+  const root = selectedNodeId ? nodeById.get(selectedNodeId) : undefined;
+  if (!root) {
+    return {
+      nodes: analysis.nodes.filter((node) => node.id === "project"),
+      edges: [],
+      title: t("Impact analysis"),
+      subtitle: t("Select a node to analyze its dependents"),
+      notice: t("Pick a function, class, file, route, or module to see what depends on it."),
+    };
+  }
+
+  const impactKinds = new Set([
+    "CALLS",
+    "IMPORTS",
+    "ROUTES_TO",
+    "READS_FROM",
+    "WRITES_TO",
+    "PUBLISHES",
+    "SUBSCRIBES_TO",
+    "EXTENDS",
+    "IMPLEMENTS",
+    "MAPS_TO",
+    "RELATES_TO",
+  ]);
+
+  const impacted = new Map<string, number>([[root.id, 0]]);
+  let frontier = [root.id];
+  const maxDepth = Math.max(1, Math.min(5, depth));
+  for (let level = 1; level <= maxDepth; level += 1) {
+    const next: string[] = [];
+    for (const id of frontier) {
+      for (const edge of analysis.edges) {
+        if (!impactKinds.has(edge.kind) || edge.target !== id) continue;
+        if (impacted.has(edge.source)) continue;
+        const source = nodeById.get(edge.source);
+        if (!source) continue;
+        impacted.set(source.id, level);
+        next.push(source.id);
+      }
+    }
+    frontier = next;
+    if (frontier.length === 0) break;
+  }
+
+  const MAX_IMPACT_NODES = 350;
+  const cappedImpact = [...impacted.entries()]
+    .sort((a, b) => a[1] - b[1])
+    .slice(0, MAX_IMPACT_NODES);
+  const nodes: GraphNode[] = [];
+  for (const [id, level] of cappedImpact) {
+    const node = nodeById.get(id);
+    if (!node) continue;
+    nodes.push({
+      ...node,
+      metadata: {
+        ...node.metadata,
+        impactDepth: level,
+      },
+    });
+  }
+
+  const included = new Set(nodes.map((node) => node.id));
+  const edges = analysis.edges
+    .filter((edge) => impactKinds.has(edge.kind) && included.has(edge.source) && included.has(edge.target))
+    .slice(0, 500);
+  const direct = [...impacted.values()].filter((level) => level === 1).length;
+  const total = impacted.size - 1;
+
+  return {
+    nodes,
+    edges,
+    title: t("Impact analysis"),
+    subtitle: t("{direct} direct dependents · {total} impacted nodes · depth {depth}", {
+      direct,
+      total,
+      depth: maxDepth,
+    }),
+    notice:
+      total === 0
+        ? t("No incoming dependencies were found for this node.")
+        : impacted.size > MAX_IMPACT_NODES
+          ? t("Impact graph is capped at {count} nodes for performance.", { count: MAX_IMPACT_NODES })
+          : t("Impact is computed from reverse calls, imports, routes, and data relationships."),
+  };
+}
+
+function buildHeatmap(
+  analysis: AnalysisResult,
+  nodeById: Map<string, GraphNode>,
+  t: Translate,
+): ViewGraph {
+  const weights: Record<string, number> = {
+    CALLS: 3,
+    IMPORTS: 2,
+    ROUTES_TO: 2,
+    READS_FROM: 1.5,
+    WRITES_TO: 1.5,
+    PUBLISHES: 1.5,
+    SUBSCRIBES_TO: 1.5,
+    EXTENDS: 2,
+    IMPLEMENTS: 2,
+    MAPS_TO: 1,
+    RELATES_TO: 1,
+  };
+  const scores = new Map<string, number>();
+  for (const edge of analysis.edges) {
+    const weight = weights[edge.kind];
+    if (!weight) continue;
+    scores.set(edge.source, (scores.get(edge.source) ?? 0) + weight);
+    scores.set(edge.target, (scores.get(edge.target) ?? 0) + weight);
+  }
+
+  const ranked = analysis.nodes
+    .filter(
+      (node) =>
+        node.kind !== "project" &&
+        node.kind !== "folder" &&
+        node.kind !== "module" &&
+        (scores.get(node.id) ?? 0) > 0,
+    )
+    .sort((a, b) => (scores.get(b.id) ?? 0) - (scores.get(a.id) ?? 0))
+    .slice(0, 180);
+
+  const maxScore = Math.max(1, ...ranked.map((node) => scores.get(node.id) ?? 0));
+  const nodes = ranked.map((node) => {
+    const score = scores.get(node.id) ?? 0;
+    return {
+      ...node,
+      metadata: {
+        ...node.metadata,
+        heatScore: Math.round(score * 10) / 10,
+        heatColor: heatColor(score / maxScore),
+        heatMetric: `heat:${score}`,
+      },
+    };
+  });
+  const included = new Set(nodes.map((node) => node.id));
+  const edges = analysis.edges
+    .filter(
+      (edge) =>
+        Boolean(weights[edge.kind]) &&
+        included.has(edge.source) &&
+        included.has(edge.target),
+    )
+    .slice(0, 550);
+
+  return {
+    nodes,
+    edges,
+    title: t("Dependency heatmap"),
+    subtitle: t("Top {count} structural hotspots by calls, imports, and routes", {
+      count: nodes.length,
+    }),
+    notice: t("Heat colors show structural degree, not runtime performance."),
+  };
+}
+
+function buildFocus(
+  analysis: AnalysisResult,
+  nodeById: Map<string, GraphNode>,
+  selectedNodeId: string,
+  depth: number,
+  t: Translate,
+  tn: TranslatePlural,
+): ViewGraph {
+  const root = nodeById.get(selectedNodeId);
+  if (!root) {
+    return {
+      nodes: analysis.nodes.filter((node) => node.id === "project"),
+      edges: [],
+      title: t("Focus"),
+      subtitle: t("Select a node to focus"),
+    };
+  }
+
+  const focusKinds = new Set([
+    "CALLS",
+    "IMPORTS",
+    "ROUTES_TO",
+    "READS_FROM",
+    "WRITES_TO",
+    "PUBLISHES",
+    "SUBSCRIBES_TO",
+    "EXTENDS",
+    "IMPLEMENTS",
+    "MAPS_TO",
+    "RELATES_TO",
+    "EXPORTS",
+  ]);
+  const included = new Map<string, GraphNode>([[root.id, root]]);
+
+  let ancestor = root;
+  for (let guard = 0; guard < 32; guard += 1) {
+    const parent = ancestor.parentId ? nodeById.get(ancestor.parentId) : undefined;
+    if (!parent) break;
+    included.set(parent.id, parent);
+    ancestor = parent;
+  }
+
+  let frontier = [root.id];
+  const maxDepth = Math.max(1, Math.min(5, depth));
+  for (let level = 1; level <= maxDepth; level += 1) {
+    const next: string[] = [];
+    for (const id of frontier) {
+      for (const edge of analysis.edges) {
+        if (!focusKinds.has(edge.kind)) continue;
+        const other = edge.source === id ? edge.target : edge.target === id ? edge.source : null;
+        if (!other || included.has(other)) continue;
+        const node = nodeById.get(other);
+        if (!node) continue;
+        included.set(other, node);
+        next.push(other);
+      }
+    }
+    frontier = next;
+    if (frontier.length === 0) break;
+  }
+
+  const MAX_FOCUS_NODES = 300;
+  const nodes = [...included.values()].slice(0, MAX_FOCUS_NODES);
+  const includedIds = new Set(nodes.map((node) => node.id));
+  const edges = analysis.edges
+    .filter((edge) => includedIds.has(edge.source) && includedIds.has(edge.target))
+    .slice(0, 600);
+
+  return {
+    nodes,
+    edges,
+    title: t("Focus: {label}", { label: root.metadata?.qualifiedName ?? root.label }),
+    subtitle: tn(
+      nodes.length,
+      "{count} node · {depth}-step focus",
+      "{count} nodes · {depth}-step focus",
+      { depth: maxDepth },
+    ),
+    notice:
+      included.size > MAX_FOCUS_NODES
+        ? t("Focus graph is capped at {count} nodes for performance.", { count: MAX_FOCUS_NODES })
+        : t("Focus mode shows the selected node, its parent context, and its neighborhood."),
+  };
+}
+
 
 function buildArchitecture(
   analysis: AnalysisResult,

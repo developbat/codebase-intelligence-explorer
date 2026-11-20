@@ -45,13 +45,18 @@ const ICONS = {
 function EntityNodeComponent({ data, selected }: NodeProps<EntityFlowNode>) {
   const { t, tn } = useI18n();
   const { node, dimmed, neighbor } = data;
-  const color = node.metadata?.unresolved ? "#fb7185" : KIND_COLOR[node.kind];
+  const heatColor = typeof node.metadata?.heatColor === "string" ? node.metadata.heatColor : undefined;
+  const color = node.metadata?.unresolved ? "#fb7185" : heatColor ?? KIND_COLOR[node.kind];
   const Icon = node.metadata?.unresolved ? TriangleAlert : ICONS[node.kind] ?? Box;
   const fileCount = node.metadata?.fileCount;
   const symbolCount = node.metadata?.symbolCount;
   const qualified = node.metadata?.qualifiedName;
   const commitChanged =
     typeof node.metadata?.commitChanged === "string" ? node.metadata.commitChanged : undefined;
+  const heatScore =
+    typeof node.metadata?.heatScore === "number" ? node.metadata.heatScore : undefined;
+  const impactDepth =
+    typeof node.metadata?.impactDepth === "number" ? node.metadata.impactDepth : undefined;
 
   return (
     <div
@@ -94,6 +99,16 @@ function EntityNodeComponent({ data, selected }: NodeProps<EntityFlowNode>) {
                       : t(KIND_LABEL[node.kind])}
         </div>
       </div>
+      {heatScore !== undefined ? (
+        <span className="entity-node-heat" title={t("Structural heat score")}>
+          {heatScore}
+        </span>
+      ) : null}
+      {impactDepth !== undefined && impactDepth > 0 ? (
+        <span className="entity-node-impact" title={t("Impact depth {depth}", { depth: impactDepth })}>
+          D{impactDepth}
+        </span>
+      ) : null}
       {node.metadata?.async ? <span className="entity-node-badge">async</span> : null}
       {commitChanged ? (
         <span

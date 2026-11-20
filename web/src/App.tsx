@@ -4,6 +4,7 @@ import {
   BrainCircuit,
   ChevronRight,
   Clapperboard,
+  Crosshair,
   FolderOpen,
   FolderTree,
   GitBranch,
@@ -52,6 +53,8 @@ const MODE_LABEL: Record<ViewMode, string> = {
   functions: "Call Graph",
   architecture: "Architecture",
   changes: "Changes since analysis",
+  impact: "Impact analysis",
+  heatmap: "Dependency heatmap",
   "3d": "3D Explorer",
 };
 
@@ -116,6 +119,7 @@ export default function App() {
   const [flowsOpen, setFlowsOpen] = useState(false);
   const [clusterFunctions, setClusterFunctions] = useState(false);
   const [fullTree, setFullTree] = useState(true);
+  const [focusMode, setFocusMode] = useState(false);
   const [workspaceUpdate, setWorkspaceUpdate] = useState<{
     createdAt: string;
     changedPaths: string[];
@@ -253,6 +257,7 @@ export default function App() {
       setSelectedNodeId("project");
       setSelectedEdgeId(null);
       setDepth(1);
+      setFocusMode(false);
     } else {
       if (selectedFolder && !result.nodes.some((node) => node.kind === "folder" && node.filePath === selectedFolder)) {
         setSelectedFolder(null);
@@ -405,6 +410,7 @@ export default function App() {
   function openFolder(path: string) {
     const normalized = path || null;
     setMode("files");
+    setFocusMode(false);
     setSelectedFolder(normalized);
     setSelectedFile(null);
     setFocusNodeId(null);
@@ -416,6 +422,7 @@ export default function App() {
     setSelectedFolder(folderOf(filePath));
     setSelectedFile(filePath);
     setMode("functions");
+    setFocusMode(false);
     setFocusNodeId(null);
     setSelectedEdgeId(null);
     setSelectedNodeId(`file:${filePath}`);
@@ -497,6 +504,7 @@ export default function App() {
     setMode(next);
     setSelectedEdgeId(null);
     setFocusNodeId(null);
+    setFocusMode(false);
     if (next === "universe") {
       setSelectedNodeId("project");
     } else if (next === "files") {
@@ -504,6 +512,27 @@ export default function App() {
     } else if (next === "architecture") {
       setSelectedNodeId(null);
     } else if (next === "changes") {
+      setSelectedNodeId(null);
+    } else if (next === "impact") {
+      if (selectedFile) {
+        setSelectedNodeId(`file:${selectedFile}`);
+      } else if (selectedNodeId && selectedNodeId !== "project") {
+        setSelectedNodeId(selectedNodeId);
+      } else if (analysis) {
+        const incoming = new Map<string, number>();
+        for (const edge of analysis.edges) {
+          if (["CALLS", "IMPORTS", "ROUTES_TO", "READS_FROM", "WRITES_TO"].includes(edge.kind)) {
+            incoming.set(edge.target, (incoming.get(edge.target) ?? 0) + 1);
+          }
+        }
+        const candidate = analysis.nodes
+          .filter((node) => node.kind !== "project" && node.kind !== "folder" && node.kind !== "module")
+          .sort((a, b) => (incoming.get(b.id) ?? 0) - (incoming.get(a.id) ?? 0))[0];
+        setSelectedNodeId(candidate?.id ?? "project");
+      } else {
+        setSelectedNodeId("project");
+      }
+    } else if (next === "heatmap") {
       setSelectedNodeId(null);
     } else if (next === "3d") {
       setSelectedNodeId(
@@ -529,6 +558,7 @@ export default function App() {
     }
     setSelectedFile(null);
     setFocusNodeId(null);
+    setFocusMode(false);
     setSelectedEdgeId(null);
     setMode("universe");
     setSelectedNodeId("project");
@@ -564,6 +594,7 @@ export default function App() {
     setCommitHighlight({ hash: commit.hash, subject: commit.subject, files });
     setCommitDialog(null);
     setMode("files");
+    setFocusMode(false);
     setSelectedFolder(null);
     setSelectedFile(null);
     setFocusNodeId(null);
@@ -574,6 +605,7 @@ export default function App() {
     setInspectorOpen(true);
   }
 
+  const viewSelectionKey = focusMode || mode === "impact" ? selectedNodeId : null;
   const view = useMemo(() => {
     if (!analysis) return null;
     return buildViewGraph({
@@ -581,8 +613,10 @@ export default function App() {
       analysis,
       selectedFolder,
       selectedFile,
+      selectedNodeId,
       focusNodeId,
       depth,
+      focusMode,
       changeReport,
       gitStatus,
       commitHighlight,
@@ -591,9 +625,10 @@ export default function App() {
       t,
       tn,
     });
-  }, [analysis, mode, selectedFolder, selectedFile, focusNodeId, depth, changeReport, gitStatus, commitHighlight, clusterFunctions, fullTree, t, tn]);
+  }, [analysis, mode, selectedFolder, selectedFile, viewSelectionKey, focusNodeId, depth, focusMode, changeReport, gitStatus, commitHighlight, clusterFunctions, fullTree, t, tn]);
 
-  const viewKey = `${analysis?.id ?? "none"}|${mode}|${selectedFolder ?? ""}|${selectedFile ?? ""}|${focusNodeId ?? ""}|${depth}|${changeReport?.generatedAt ?? gitStatus?.head ?? ""}|${clusterFunctions ? "cluster" : "flat"}|${fullTree ? "full" : "direct"}|${commitHighlight?.hash ?? ""}`;
+  const selectionLayoutKey = focusMode || mode === "impact" ? selectedNodeId ?? "" : "";
+  const viewKey = `${analysis?.id ?? "none"}|${mode}|${selectedFolder ?? ""}|${selectedFile ?? ""}|${selectionLayoutKey}|${focusNodeId ?? ""}|${depth}|${focusMode ? "focus" : "full"}|${changeReport?.generatedAt ?? gitStatus?.head ?? ""}|${clusterFunctions ? "cluster" : "flat"}|${fullTree ? "full" : "direct"}|${commitHighlight?.hash ?? ""}`;
 
   const threeGraph = useMemo(
     () => (analysis ? build3DGraph(analysis) : null),
@@ -805,6 +840,35 @@ export default function App() {
                     >
                       <Network size={13} /> {t("Back to 2D")}
                     </button>
+                  ) : null}
+                  {mode !== "3d" &&
+                  mode !== "impact" &&
+                  mode !== "heatmap" &&
+                  mode !== "changes" &&
+                  selectedNodeId &&
+                  selectedNodeId !== "project" ? (
+                    <button
+                      className={`ghost-button toolbar-action ${focusMode ? "is-active" : ""}`}
+                      onClick={() => setFocusMode((value) => !value)}
+                      title={focusMode ? t("Exit focus") : t("Focus selected")}
+                    >
+                      <Crosshair size={13} /> {focusMode ? t("Exit focus") : t("Focus")}
+                    </button>
+                  ) : null}
+                  {mode === "impact" || focusMode ? (
+                    <span className="depth-selector">
+                      <span>{t("Depth")}</span>
+                      {[1, 2, 3].map((value) => (
+                        <button
+                          key={value}
+                          className={depth === value ? "is-active" : ""}
+                          onClick={() => setDepth(value)}
+                          title={t("{count}-step neighborhood", { count: value })}
+                        >
+                          {value}
+                        </button>
+                      ))}
+                    </span>
                   ) : null}
                   {analysis.git?.available ? (
                     <button

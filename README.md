@@ -129,6 +129,13 @@ The UI is **English by default** and ships with Turkish, German, French, Spanish
 - The sidebar button toggles between **3D** and **2D** in place.
 - Legend, layered HUD, and inspector integration.
 
+### Focus, impact, and dependency heatmap
+
+- **Focus mode:** select any function, class, file, folder, or route and focus on it; the map shows the selected node, its parent context, and its 1–3 step neighborhood. **Exit focus** restores the normal view.
+- **Impact analysis:** a dedicated view traverses reverse calls, imports, routes, and data relationships. Impact depth is configurable (1–3), impacted nodes carry `D1`/`D2`/`D3` badges, and the view is capped at 350 nodes for performance.
+- **Dependency heatmap:** ranks the top 180 structural hotspots by weighted call, import, route, and data relationships. Node color runs from blue (cold) to red (hot), with a heat-score badge and a cold→hot legend. This is structural degree, not runtime performance.
+- **Graph-wide depth controls:** focus and impact views share a compact depth selector in the toolbar.
+
 ### Project profile, full tree, and guided tour
 
 - **Project profile:** the inspector opens with a non-AI overview: detected stack, counts, likely entry points, largest modules, and sample routes.
@@ -200,7 +207,7 @@ Open **http://localhost:5173**.
 1. Click **Open Project** (or **Browse…**) and choose a TypeScript/JavaScript, PHP, or Python project folder.
 2. Or click **Open sample project** to explore `fixtures/sample-app`.
 3. Use the **active project card** at the top of the sidebar to switch between saved analyses. Switching opens the cached graph instantly; it does not rescan.
-4. Use **Universe**, **Files**, **Calls**, **Architecture**, **Changes**, and **3D** from the sidebar.
+4. Use **Universe**, **Files**, **Calls**, **Architecture**, **Changes**, **Impact**, **Heatmap**, and **3D** from the sidebar.
 5. All tree branches are expanded by default; use the chevrons to expand or collapse everything. The help button starts a guided tour.
 6. Select any node to inspect it and highlight its direct connections. In 2D, **Up** walks from file → folder → project. In 3D, selection stays in 3D; use **Open selected item in 2D** for an explicit handoff.
 7. Open **AI setup** to connect an optional provider.
@@ -436,6 +443,7 @@ Manual browser verification covers folder browsing, all views, PHP/Python projec
 | Smooth 3D free movement + collapsible layout menu | ✅ |
 | 2D up / parent navigation | ✅ |
 | Inspector back stack for previous list/detail | ✅ |
+| Focus mode + Impact analysis + Dependency heatmap | ✅ |
 | PHP / Python symbol, import, call, and route support | ✅ core |
 | Git last commit + recent history in Changes | ✅ |
 | Git commit graph, pagination, commit detail, diffs | ✅ |

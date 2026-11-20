@@ -4,7 +4,9 @@ import {
   ChevronRight,
   ChevronsDown,
   ChevronsUp,
+  Crosshair,
   FileCode2,
+  Flame,
   Folder,
   FolderOpen,
   FolderTree,
@@ -350,6 +352,22 @@ export function Sidebar({
               >
                 <GitBranch size={15} />
                 <span>{t("Changes")}</span>
+              </button>
+              <button
+                className={mode === "impact" ? "is-active" : ""}
+                onClick={() => onModeChange("impact")}
+                title={t("Impact analysis")}
+              >
+                <Crosshair size={15} />
+                <span>{t("Impact")}</span>
+              </button>
+              <button
+                className={mode === "heatmap" ? "is-active" : ""}
+                onClick={() => onModeChange("heatmap")}
+                title={t("Dependency heatmap")}
+              >
+                <Flame size={15} />
+                <span>{t("Heatmap")}</span>
               </button>
               {mode === "3d" ? (
                 <button

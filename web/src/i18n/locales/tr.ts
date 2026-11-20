@@ -26,6 +26,9 @@ export const tr: Dictionary = {
   "Six ways to explore": "Altı keşif yolu",
   "Universe shows modules, Files shows the tree, Calls shows functions, Architecture shows routes and data, Changes shows Git impact, and 3D gives you the spatial view.":
     "Universe modülleri, Files ağacı, Calls fonksiyonları, Architecture route ve verileri, Changes Git etkisini, 3D ise mekânsal görünümü gösterir.",
+  "Eight ways to explore": "Sekiz keşif yolu",
+  "Universe shows modules, Files shows the tree, Calls shows functions, Architecture shows routes and data, Changes shows Git impact, Impact shows dependents, Heatmap shows structural hotspots, and 3D gives you the spatial view.":
+    "Universe modülleri, Files ağacı, Calls fonksiyonları, Architecture route ve verileri, Changes Git etkisini, Impact bağımlılıkları, Heatmap yapısal yoğunlukları, 3D ise mekânsal görünümü gösterir.",
   "The full project tree is open": "Tüm proje ağacı açık",
   "All branches start expanded. Use the chevrons to expand or collapse everything, and click a file to jump into its function map.":
     "Tüm dallar açık başlar. Tümünü açmak/kapatmak için okları kullanın; fonksiyon haritasına gitmek için bir dosyaya tıklayın.",
@@ -512,6 +515,40 @@ export const tr: Dictionary = {
   "Signature": "İmza",
   "Parameters": "Parametreler",
   "Focus depth": "Odak derinliği",
+  "Impact": "Etki",
+  "Heatmap": "Isı haritası",
+  "Impact analysis": "Etki analizi",
+  "Dependency heatmap": "Bağımlılık ısı haritası",
+  "Focus selected": "Seçileni odakla",
+  "Exit focus": "Odaktan çık",
+  "Depth": "Derinlik",
+  "{count}-step neighborhood": "{count} adım komşuluk",
+  "Select a node to analyze its dependents": "Bağımlılıkları görmek için bir düğüm seçin",
+  "Pick a function, class, file, route, or module to see what depends on it.":
+    "Neyin ona bağlı olduğunu görmek için bir fonksiyon, sınıf, dosya, route veya modül seçin.",
+  "{direct} direct dependents · {total} impacted nodes · depth {depth}":
+    "{direct} doğrudan bağımlı · {total} etkilenen düğüm · derinlik {depth}",
+  "No incoming dependencies were found for this node.":
+    "Bu düğüm için gelen bağımlılık bulunamadı.",
+  "Impact is computed from reverse calls, imports, routes, and data relationships.":
+    "Etki; ters çağrılar, importlar, route'lar ve veri ilişkilerinden hesaplanır.",
+  "Top {count} structural hotspots by calls, imports, and routes":
+    "Çağrı, import ve route'lara göre en yoğun {count} yapısal nokta",
+  "Heat colors show structural degree, not runtime performance.":
+    "Isı renkleri yapısal dereceyi gösterir; çalışma zamanı performansını değil.",
+  "Focus: {label}": "Odak: {label}",
+  "{count} node · {depth}-step focus": "{count} düğüm · {depth} adım odak",
+  "{count} nodes · {depth}-step focus": "{count} düğüm · {depth} adım odak",
+  "Focus mode shows the selected node, its parent context, and its neighborhood.":
+    "Odak modu seçili düğümü, üst bağlamını ve komşuluğunu gösterir.",
+  "Select a node to focus": "Odaklamak için bir düğüm seçin",
+  "Structural heat score": "Yapısal ısı puanı",
+  "Cold": "Soğuk",
+  "Hot": "Sıcak",
+  "Structural degree": "Yapısal derece",
+  "Impact depth {depth}": "Etki derinliği {depth}",
+  "Impact graph is capped at {count} nodes for performance.": "Etki grafiği performans için {count} düğümle sınırlandırıldı.",
+  "Focus graph is capped at {count} nodes for performance.": "Odak grafiği performans için {count} düğümle sınırlandırıldı.",
   "Incoming relationships": "Gelen ilişkiler",
   "Outgoing relationships": "Giden ilişkiler",
   "Members": "Üyeler",
