@@ -8,6 +8,8 @@
   <strong>Read-only code intelligence for TypeScript/JavaScript, PHP, and Python: a symbol-level knowledge graph, Git impact analysis, optional multi-provider AI, semantic search, and 2D/3D project exploration.</strong>
 </p>
 
+https://github.com/user-attachments/assets/829e9909-0953-4df4-bc12-10c14cf7dcc6
+
 <p align="center">
   <a href="https://github.com/developbat/codebase-intelligence-explorer/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/developbat/codebase-intelligence-explorer/actions/workflows/ci.yml/badge.svg" /></a>
   <a href="https://www.typescriptlang.org/"><img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-5.x-3178C6?logo=typescript&logoColor=white" /></a>
