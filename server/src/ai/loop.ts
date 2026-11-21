@@ -21,6 +21,7 @@ import { chat, type ChatMessage } from "./providers";
 import { recordUsage } from "./usage";
 import { resolveAgentRole, resolveProvider } from "./settings";
 import { pickAlternateAgentModel } from "./agents";
+import { healthKey, modelHealthByProviderModel } from "./modelStats";
 import { isFastEditTask, preferredVerificationCommand, reportsRemainingWork, runAgentTask } from "./service";
 
 const MAX_PLANNED_TASKS = 12;
@@ -434,10 +435,35 @@ export async function runProjectLoop(
 ): Promise<ProjectTaskLoopResult> {
   if (!goal.trim()) throw new Error("A task goal is required.");
   const analysis = await loadAnalysis(projectId);
-  const main = await resolveAgentRole("main", {
+  let main = await resolveAgentRole("main", {
     provider: options.provider,
     model: options.model,
   });
+  const health = await modelHealthByProviderModel();
+  if (health.get(healthKey(main.id, main.model))?.unavailable === true) {
+    const alternate = await pickAlternateAgentModel({
+      provider: main.id,
+      model: main.model,
+    }).catch(() => null);
+    if (alternate) {
+      const switched = await resolveProvider(alternate.provider, alternate.model).catch(() => null);
+      if (switched) {
+        emit({
+          type: "log",
+          entry: {
+            id: `log-${Date.now()}-model-switch`,
+            at: nowIso(),
+            level: "warn",
+            label: "Model unavailable",
+            detail: `${main.id}/${main.model} → ${switched.id}/${switched.model}`,
+          },
+        });
+        main = switched;
+        options.provider = alternate.provider;
+        options.model = alternate.model;
+      }
+    }
+  }
   const verification = preferredVerificationCommand(analysis.tooling);
   let queue = await loadQueue(analysis.rootPath, projectId);
   const sameGoal = queue?.goal.trim() === goal.trim();
@@ -572,12 +598,12 @@ export async function runProjectLoop(
           allowCommands: options.allowCommands === true,
           language: options.language,
           maxSteps: taskLooksLikeInspection(current)
-            ? 6
+            ? 5
             : current.effort === "simple"
-              ? 8
+              ? 6
               : current.effort === "hard"
-                ? 18
-                : 12,
+                ? 16
+                : 10,
           mode: "auto",
           interactive: true,
           forceFast: current.effort === "simple",
@@ -725,10 +751,11 @@ export async function runProjectLoop(
           options.provider = alternate.provider;
           options.model = alternate.model;
         }
+        const preserveEffort = unavailableModel || malformedToolReply;
         queue = markTask(queue, task.id, {
           status: "pending",
-          effort: task.effort === "simple" ? "standard" : task.effort,
-          role: "main",
+          effort: preserveEffort ? task.effort : task.effort === "simple" ? "standard" : task.effort,
+          role: preserveEffort ? task.role : "main",
           modelOverride: alternate
             ? { provider: alternate.provider, model: alternate.model }
             : undefined,

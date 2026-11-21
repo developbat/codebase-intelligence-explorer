@@ -2935,7 +2935,7 @@ export async function runAgentTask(
   const prompt = await getPrompt(promptId, projectId);
   const languageInstruction = aiLanguageInstruction(options.language ?? "en");
   const fastSuffix = fastTask
-    ? "\n\nFast task profile: this is a small, focused change. Start from the index edit map, read at most 5 files, make the edits, and finish. Complete every edit-map item (service, controller, route registration, container/DI wiring, bootstrap call site) before finishing. Do not read unrelated modules or repeat reads."
+    ? "\n\nFast task profile: this is a small, focused change. Read at most 3 files (for a CSS-only change, read only the stylesheet), make the edit, run at most one verification, and finish. Complete every edit-map item before finishing. Do not read unrelated modules, repeat reads, or keep exploring after the edit."
     : "";
   const readOnlySuffix =
     !askMode && !plan.needsWrite
@@ -4559,6 +4559,9 @@ export async function runAgentTask(
       invalidProtocolSteps >= 2 ||
       /invalid tool protocol|provider-native tool call omitted/i.test(summary || errorMessage || ""),
     emptyFailure: /empty response/i.test(summary || errorMessage || ""),
+    unavailable: /error 410\b|end of life|no longer available|model_not_found|model .* not found/i.test(
+      `${summary || ""} ${errorMessage || ""}`,
+    ),
   }).catch(() => {
     // health tracking must never break an agent run
   });

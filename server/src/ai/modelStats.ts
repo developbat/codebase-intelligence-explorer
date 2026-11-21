@@ -42,7 +42,12 @@ async function writeStats(file: ModelStatsFile): Promise<void> {
 export async function recordModelOutcome(
   provider: string,
   model: string,
-  outcome: { success: boolean; protocolFailure?: boolean; emptyFailure?: boolean },
+  outcome: {
+    success: boolean;
+    protocolFailure?: boolean;
+    emptyFailure?: boolean;
+    unavailable?: boolean;
+  },
 ): Promise<void> {
   const file = await readStats();
   const id = key(provider, model);
@@ -65,6 +70,11 @@ export async function recordModelOutcome(
   if (outcome.emptyFailure) {
     current.emptyFailures += 1;
     current.lastFailureAt = at;
+  }
+  if (outcome.unavailable) {
+    current.unavailable = true;
+    current.lastFailureAt = at;
+    current.lastUnavailableAt = at;
   }
   file.models[id] = current;
   file.updatedAt = at;
@@ -100,6 +110,7 @@ export function isModelUnhealthy(
 ): boolean {
   if (!health) return false;
   return (
+    health.unavailable === true ||
     health.protocolFailures >= settings.protocolFailureLimit ||
     health.emptyFailures >= settings.emptyFailureLimit
   );

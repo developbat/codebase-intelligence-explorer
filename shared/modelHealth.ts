@@ -4,8 +4,10 @@ export interface ModelHealth {
   successCount: number;
   protocolFailures: number;
   emptyFailures: number;
+  unavailable?: boolean;
   lastSuccessAt?: string;
   lastFailureAt?: string;
+  lastUnavailableAt?: string;
 }
 
 export interface ModelHealthReport {
