@@ -19,7 +19,7 @@ import {
 } from "../tasks";
 import { chat, type ChatMessage } from "./providers";
 import { recordUsage } from "./usage";
-import { resolveAgentRole, resolveProvider } from "./settings";
+import { getPublicSettings, resolveAgentRole, resolveProvider } from "./settings";
 import { pickAlternateAgentModel } from "./agents";
 import { healthKey, modelHealthByProviderModel } from "./modelStats";
 import { isFastEditTask, preferredVerificationCommand, reportsRemainingWork, runAgentTask } from "./service";
@@ -435,12 +435,19 @@ export async function runProjectLoop(
 ): Promise<ProjectTaskLoopResult> {
   if (!goal.trim()) throw new Error("A task goal is required.");
   const analysis = await loadAnalysis(projectId);
+  const settings = await getPublicSettings().catch(() => null);
+  const autoSwitchModels = settings?.autoSwitchModels !== false;
   let main = await resolveAgentRole("main", {
     provider: options.provider,
     model: options.model,
   });
   const health = await modelHealthByProviderModel();
   if (health.get(healthKey(main.id, main.model))?.unavailable === true) {
+    if (!autoSwitchModels) {
+      throw new Error(
+        `The selected model ${main.id}/${main.model} is unavailable. Choose another model or enable "Automatic model switching" in Settings → General.`,
+      );
+    }
     const alternate = await pickAlternateAgentModel({
       provider: main.id,
       model: main.model,
@@ -448,6 +455,7 @@ export async function runProjectLoop(
     if (alternate) {
       const switched = await resolveProvider(alternate.provider, alternate.model).catch(() => null);
       if (switched) {
+        const from = { provider: main.id, model: main.model };
         emit({
           type: "log",
           entry: {
@@ -455,8 +463,14 @@ export async function runProjectLoop(
             at: nowIso(),
             level: "warn",
             label: "Model unavailable",
-            detail: `${main.id}/${main.model} → ${switched.id}/${switched.model}`,
+            detail: `${from.provider}/${from.model} → ${switched.id}/${switched.model}`,
           },
+        });
+        emit({
+          type: "model",
+          from,
+          to: { provider: switched.id, model: switched.model },
+          reason: "The selected model is unavailable (end of life or removed).",
         });
         main = switched;
         options.provider = alternate.provider;
@@ -566,7 +580,7 @@ export async function runProjectLoop(
         model: options.model,
       }).catch(() => taskConfig);
     }
-    if (avoidModels.has(`${taskConfig.id}::${taskConfig.model}`)) {
+    if (autoSwitchModels && avoidModels.has(`${taskConfig.id}::${taskConfig.model}`)) {
       const alternate = await pickAlternateAgentModel({
         provider: taskConfig.id,
         model: taskConfig.model,
@@ -742,12 +756,24 @@ export async function runProjectLoop(
           `Retry · ${task.id}`,
           "Previous attempt hit the step limit with no file changes. Retrying with the fast profile and an edit-first instruction.",
         );
+      } else if (!autoSwitchModels) {
+        queue = markTask(queue, task.id, {
+          status: "failed",
+          notes:
+            "Automatic model switching is disabled. Choose another model or enable it in Settings → General.",
+        });
       } else {
         const alternate = await pickAlternateAgentModel({
           provider: taskConfig.id,
           model: taskConfig.model,
         }).catch(() => null);
         if (alternate) {
+          emit({
+            type: "model",
+            from: { provider: taskConfig.id, model: taskConfig.model },
+            to: { provider: alternate.provider, model: alternate.model },
+            reason: `The task failed with ${taskConfig.id}/${taskConfig.model}; retrying with a working model.`,
+          });
           options.provider = alternate.provider;
           options.model = alternate.model;
         }

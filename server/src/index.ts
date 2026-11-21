@@ -293,6 +293,8 @@ app.put("/api/ai/settings", async (req, res) => {
       customProvider,
       removeProviderId:
         typeof body.removeProviderId === "string" ? body.removeProviderId : undefined,
+      autoSwitchModels:
+        typeof body.autoSwitchModels === "boolean" ? body.autoSwitchModels : undefined,
     });
     res.json(settings);
   } catch (error) {

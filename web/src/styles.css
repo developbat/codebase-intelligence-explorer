@@ -10785,6 +10785,79 @@ button.canvas-stat {
   text-decoration: underline;
 }
 
+.studio-model-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0 12px 6px;
+  padding: 8px 10px;
+  border: 1px solid rgba(110, 168, 254, 0.3);
+  border-radius: 8px;
+  background: rgba(59, 130, 246, 0.08);
+  color: #cfe1ff;
+}
+
+.studio-model-notice > svg {
+  flex: none;
+  margin-top: 1px;
+  color: #6ea8fe;
+}
+
+.studio-model-notice > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.studio-model-notice strong {
+  color: #e3efff;
+  font-size: 9px;
+}
+
+.studio-model-notice span {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  font-size: 8px;
+}
+
+.studio-model-notice code {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: rgba(7, 12, 20, 0.55);
+  color: #9fc6ff;
+  font-family: var(--mono);
+  font-size: 7.5px;
+}
+
+.studio-model-notice small {
+  color: #8fa9c9;
+  font-size: 7.5px;
+  line-height: 1.45;
+}
+
+.studio-model-notice > button {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: #8fa9c9;
+  cursor: pointer;
+}
+
+.studio-model-notice > button:hover {
+  background: rgba(148, 163, 184, 0.12);
+  color: #e7eef9;
+}
+
 .studio-clarify {
   display: flex;
   flex-direction: column;

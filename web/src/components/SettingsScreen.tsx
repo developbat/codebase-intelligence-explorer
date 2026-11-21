@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import type { AiSettingsPublic } from "../../../shared/ai";
 import { useI18n } from "../i18n";
+import { api } from "../api";
 import { AiSettingsDialog } from "./AiSettingsDialog";
 import { UsageDialog } from "./UsageDialog";
 import { PromptManagerDialog } from "./PromptManagerDialog";
@@ -122,7 +123,19 @@ export function SettingsScreen({
 }: SettingsScreenProps) {
   const { t, locale, locales, setLocale } = useI18n();
   const [tab, setTab] = useState<SettingsTab>(initialTab);
+  const [autoSwitchBusy, setAutoSwitchBusy] = useState(false);
   const screenRef = useRef<HTMLDivElement | null>(null);
+
+  async function saveAutoSwitch(value: boolean) {
+    if (!aiSettings || autoSwitchBusy) return;
+    setAutoSwitchBusy(true);
+    try {
+      const next = await api.ai.updateSettings({ autoSwitchModels: value });
+      onSettingsSaved(next);
+    } finally {
+      setAutoSwitchBusy(false);
+    }
+  }
 
   useEffect(() => {
     if (open) setTab(initialTab);
@@ -265,6 +278,20 @@ export function SettingsScreen({
                       "Delete and rename always require a fresh confirmation. Dangerous commands such as sudo, git push, git reset --hard and curl | sh remain blocked.",
                     )}
                   </p>
+                </section>
+
+                <section className="settings-section">
+                  <h3>{t("Model behavior")}</h3>
+                  <div className="settings-toggle-list">
+                    <SettingsToggle
+                      checked={aiSettings?.autoSwitchModels !== false}
+                      onChange={(value) => void saveAutoSwitch(value)}
+                      title={t("Automatic model switching")}
+                      description={t(
+                        "When the selected model is unavailable or fails, switch to a working model and show which model was selected. When off, the run stops and asks you to choose a model.",
+                      )}
+                    />
+                  </div>
                 </section>
 
                 <section className="settings-section">

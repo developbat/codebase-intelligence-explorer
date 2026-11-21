@@ -45,6 +45,7 @@ interface StoredSettings {
   customProviders: StoredCustomProvider[];
   agentRoles: StoredAgentRoles;
   modelHealth: AiModelHealthSettings;
+  autoSwitchModels: boolean;
 }
 
 export const AI_AGENT_ROLES: AiAgentRole[] = ["main", "planner", "fast", "reviewer"];
@@ -133,6 +134,7 @@ function defaults(): StoredSettings {
     customProviders: [],
     agentRoles: { main, planner: main, fast: main, reviewer: main },
     modelHealth: DEFAULT_MODEL_HEALTH,
+    autoSwitchModels: true,
   };
 }
 
@@ -202,6 +204,7 @@ async function loadStored(): Promise<StoredSettings> {
       customProviders,
       agentRoles,
       modelHealth: normalizeModelHealth(parsed.modelHealth),
+      autoSwitchModels: parsed.autoSwitchModels !== false,
     };
   } catch {
     return base;
@@ -271,6 +274,7 @@ export async function getPublicSettings(): Promise<AiSettingsPublic> {
     providers,
     agentRoles,
     modelHealth: stored.modelHealth,
+    autoSwitchModels: stored.autoSwitchModels !== false,
   };
 }
 
@@ -421,6 +425,10 @@ export async function updateAiSettings(input: AiSettingsInput): Promise<AiSettin
 
   if (input.modelHealth) {
     stored.modelHealth = normalizeModelHealth({ ...stored.modelHealth, ...input.modelHealth });
+  }
+
+  if (input.autoSwitchModels !== undefined) {
+    stored.autoSwitchModels = input.autoSwitchModels === true;
   }
 
   if (input.agentRoles) {

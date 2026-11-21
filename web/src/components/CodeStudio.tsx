@@ -560,6 +560,11 @@ export function CodeStudio({
     request: ClarificationRequest;
     original: string;
   } | null>(null);
+  const [modelNotice, setModelNotice] = useState<{
+    from: { provider: string; model: string };
+    to: { provider: string; model: string };
+    reason: string;
+  } | null>(null);
   const [taskPanelOpen, setTaskPanelOpen] = useState(false);
   const [taskLoopEnabled, setTaskLoopEnabled] = useState(
     () => localStorage.getItem("cie:task-loop") !== "off",
@@ -2130,6 +2135,7 @@ export function CodeStudio({
       }
     }
     setClarification(null);
+    setModelNotice(null);
     setChatBusy(true);
     setChatError(null);
     setChatRetryQuestion(null);
@@ -2161,6 +2167,8 @@ export function CodeStudio({
         setPermissionBusy(false);
       } else if (event.type === "clarify") {
         setClarification({ request: event.request, original: text });
+      } else if (event.type === "model") {
+        setModelNotice({ from: event.from, to: event.to, reason: event.reason });
       } else if (event.type === "task") {
         setTaskQueue(event.queue);
       } else if (event.type === "done") {
@@ -3234,6 +3242,24 @@ export function CodeStudio({
           </div>
         ) : null}
 
+        {modelNotice ? (
+          <div className="studio-model-notice">
+            <AlertTriangle size={13} />
+            <div>
+              <strong>{t("Model switched")}</strong>
+              <span>
+                <code>{modelNotice.from.provider}/{modelNotice.from.model}</code>
+                <b>→</b>
+                <code>{modelNotice.to.provider}/{modelNotice.to.model}</code>
+              </span>
+              <small>{modelNotice.reason}</small>
+            </div>
+            <button onClick={() => setModelNotice(null)} aria-label={t("Dismiss")}>
+              <X size={12} />
+            </button>
+          </div>
+        ) : null}
+
         <div className="studio-composer">
           <div className="studio-composer-perms">
             <span className="studio-session-tokens">
@@ -3249,8 +3275,15 @@ export function CodeStudio({
             >
               <ListChecks size={10} /> {t("Task loop")}
             </button>
-            <span className="studio-composer-model">
-              {active ? `${providerDisplayName(active.provider)} · ${active.model}` : t("Configure AI")}
+            <span
+              className="studio-composer-model"
+              title={modelNotice ? t("Effective model for this run") : undefined}
+            >
+              {modelNotice
+                ? `${modelNotice.to.provider} · ${modelNotice.to.model}`
+                : active
+                  ? `${providerDisplayName(active.provider)} · ${active.model}`
+                  : t("Configure AI")}
             </span>
             {chatMessages.length > 0 ? (
               <button className="studio-composer-clear" onClick={clearActiveChat}>

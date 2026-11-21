@@ -203,6 +203,7 @@ export interface AiSettingsPublic {
   providers: AiProviderState[];
   agentRoles: AiAgentRoleState[];
   modelHealth: AiModelHealthSettings;
+  autoSwitchModels: boolean;
 }
 
 export interface AiCustomProviderInput {
@@ -228,6 +229,7 @@ export interface AiSettingsInput {
   removeProviderId?: string;
   agentRoles?: Partial<Record<AiAgentRole, AiAgentRoleConfig>>;
   modelHealth?: Partial<AiModelHealthSettings>;
+  autoSwitchModels?: boolean;
 }
 
 export interface AiUsage {
@@ -635,5 +637,11 @@ export type AiAgentEvent =
   | { type: "task"; queue: ProjectTaskQueue; task?: ProjectTaskQueue["tasks"][number] }
   | { type: "permission"; request: AiAgentPermissionRequest }
   | { type: "clarify"; request: ClarificationRequest }
+  | {
+      type: "model";
+      from: { provider: string; model: string };
+      to: { provider: string; model: string };
+      reason: string;
+    }
   | { type: "done"; result: AiAgentResult }
   | { type: "error"; message: string };
