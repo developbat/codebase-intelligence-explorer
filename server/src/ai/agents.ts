@@ -8,11 +8,20 @@ import type {
 import type { CatalogModel, ModelCatalog } from "../../../shared/catalog";
 import { getPublicSettings, updateAiSettings } from "./settings";
 import { getModelCatalog } from "./catalog";
+import {
+  healthKey,
+  modelHealthByProviderModel,
+  modelHealthPenalty,
+} from "./modelStats";
 
 const FAST_HINTS = /(mini|nano|tiny|flash|haiku|small|lite|free|7b|8b|9b|1\.5b|3b|4b|qwen.*coder)/i;
 const HEAVY_HINTS = /(opus|pro|large|70b|72b|120b|405b|reasoning|reasoner|thinking|o1|o3|max)/i;
 
-function fastScore(model: string, catalogModel?: CatalogModel): number {
+function fastScore(
+  model: string,
+  catalogModel?: CatalogModel,
+  healthPenalty = 0,
+): number {
   let score = 0;
   if (FAST_HINTS.test(model)) score += 20;
   if (HEAVY_HINTS.test(model)) score -= 20;
@@ -33,7 +42,7 @@ function fastScore(model: string, catalogModel?: CatalogModel): number {
     }
     if (catalogModel.quality !== undefined) score += Math.max(-5, Math.min(6, catalogModel.quality / 20));
   }
-  return score;
+  return score + healthPenalty;
 }
 
 function catalogLookup(catalog: ModelCatalog | null, provider: string, model: string): CatalogModel | undefined {
@@ -70,6 +79,7 @@ function pickMain(providers: AiProviderState[], defaultProvider: string, default
 export async function autoConfigureAgents(): Promise<AiAgentAutoResult> {
   const settings = await getPublicSettings();
   const catalog = await getModelCatalog().catch(() => null);
+  const health = await modelHealthByProviderModel();
   const providers = settings.providers.filter((provider) => provider.hasKey || provider.custom);
   if (providers.length === 0) {
     throw new Error("Add an API key to at least one provider before auto-selecting agents.");
@@ -95,9 +105,15 @@ export async function autoConfigureAgents(): Promise<AiAgentAutoResult> {
   } else {
     warnings.push("No imported model catalog. Fast/main routing uses name heuristics only.");
   }
-
   const main = pickMain(providers, settings.defaultProvider, settings.defaultModel);
   if (!main.model) throw new Error("The main provider has no model. Add a model in Models.");
+  const mainHealth = health.get(healthKey(main.provider.id, main.model));
+  if (mainHealth && mainHealth.protocolFailures >= 2) {
+    warnings.push(
+      `Main model has ${mainHealth.protocolFailures} tool-protocol failures. Consider a different main model.`,
+    );
+  }
+
 
   let fastProvider = main.provider;
   let fastModel = main.model;
@@ -106,7 +122,11 @@ export async function autoConfigureAgents(): Promise<AiAgentAutoResult> {
     const models = catalogs.get(provider.id) ?? [];
     for (const model of models) {
       if (!model) continue;
-      let score = fastScore(model, catalogLookup(catalog, provider.id, model));
+      let score = fastScore(
+        model,
+        catalogLookup(catalog, provider.id, model),
+        modelHealthPenalty(health.get(healthKey(provider.id, model))),
+      );
       if (provider.id === main.provider.id) score += 5;
       if (score > fastBest) {
         fastBest = score;
@@ -174,6 +194,7 @@ export async function pickAlternateAgentModel(exclude?: {
 }): Promise<{ provider: string; model: string; reason: string } | null> {
   const settings = await getPublicSettings();
   const catalog = await getModelCatalog().catch(() => null);
+  const health = await modelHealthByProviderModel();
   const configured = settings.providers.filter(
     (provider) => (provider.hasKey || provider.custom) && provider.id !== exclude?.provider,
   );
@@ -213,11 +234,16 @@ export async function pickAlternateAgentModel(exclude?: {
     }
   }
   if (candidates.length === 0) return null;
-  const catalogBest = candidates.find((candidate) => {
+  const healthy = candidates.filter((candidate) => {
+    const item = health.get(healthKey(candidate.provider, candidate.model));
+    return !item || item.protocolFailures < 2;
+  });
+  const pool = healthy.length > 0 ? healthy : candidates;
+  const catalogBest = pool.find((candidate) => {
     const item = catalogLookup(catalog, candidate.provider, candidate.model);
     return item?.roles.includes("main") || item?.roles.includes("reviewer");
   });
   if (catalogBest) return catalogBest;
-  const coderFirst = candidates.find((candidate) => /coder|code|deepseek|claude|gpt/i.test(candidate.model));
-  return coderFirst ?? candidates[0];
+  const coderFirst = pool.find((candidate) => /coder|code|deepseek|claude|gpt/i.test(candidate.model));
+  return coderFirst ?? pool[0];
 }

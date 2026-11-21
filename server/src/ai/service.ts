@@ -57,6 +57,7 @@ import {
 import { chat, type ChatMessage } from "./providers";
 import { resolveProvider } from "./settings";
 import { recordUsage } from "./usage";
+import { recordModelOutcome } from "./modelStats";
 import { getPrompt, renderPrompt } from "./prompts";
 import { loadEnabledSkills, renderSkillsForPrompt } from "../skills";
 import { requestPermission } from "./permissions";
@@ -3959,6 +3960,16 @@ export async function runAgentTask(
       // conversation indexing is best-effort
     });
   }
+
+  const invalidProtocolSteps = steps.filter((step) => step.action === "invalid").length;
+  await recordModelOutcome(config.id, config.model, {
+    success: stoppedReason === "finished" && invalidProtocolSteps < 2,
+    protocolFailure:
+      invalidProtocolSteps >= 2 || /invalid tool protocol/i.test(summary || errorMessage || ""),
+    emptyFailure: /empty response/i.test(summary || errorMessage || ""),
+  }).catch(() => {
+    // health tracking must never break an agent run
+  });
 
   return {
     instruction: instruction.trim(),
