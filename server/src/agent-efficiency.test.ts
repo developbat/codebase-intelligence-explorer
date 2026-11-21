@@ -27,6 +27,8 @@ test("small edit instructions select the fast task profile", () => {
   assert.equal(isFastEditTask("projeye users get servisi oluştur", false), true);
   assert.equal(isFastEditTask("add a GET /users endpoint", false), true);
   assert.equal(isFastEditTask("fix the null check in order.service.ts", false), true);
+  assert.equal(isFastEditTask("arka planı siyah yap", false), true);
+  assert.equal(isFastEditTask("buton rengini yeşil yap", false), true);
   assert.equal(isFastEditTask("Bu projeyi analiz edilen graph üzerinden açıkla", false), false);
   assert.equal(isFastEditTask("How do I fix this?", false), false);
   assert.equal(isFastEditTask("why does the user service fail?", false), false);

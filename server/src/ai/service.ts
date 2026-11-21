@@ -1534,7 +1534,7 @@ const AGENT_MAX_STEPS = 16;
 const AGENT_MAX_ACTIONS = 40;
 const AGENT_MAX_VERIFY_ATTEMPTS = 3;
 const ACTION_INTENT =
-  /\b(ekle|oluştur|oluşturur|düzelt|güncelle|değiştir|taşı|sil|create|add|implement|fix|update|change|refactor|move|delete|build)\b/i;
+  /\b(ekle|oluştur|oluşturur|düzelt|güncelle|değiştir|taşı|sil|yap|yapar|ayarla|ayarlar|renklendir|boya|çevir|create|add|implement|fix|update|change|refactor|move|delete|build)\b/i;
 const QUESTION_INTENT =
   /\b(nasıl|neden|niçin|nedir|ne|mi|mı|mu|mü|how|why|what|where|which|explain|açıkla|anlat)\b/i;
 

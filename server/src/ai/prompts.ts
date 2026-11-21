@@ -114,6 +114,7 @@ Rules:
 - Use delegate_research for a broad read-only investigation whose intermediate file reads would pollute the main context. The subagent returns only a compact summary; do not use it for edits or commands.
 - For existing files, prefer replace_in_file for localized edits. Use replace_many for several localized edits in the same file. Use write_file only for new files or when most of the file changes.
 - If the requested behavior is already implemented, verify it, report exactly that, and do not rewrite or duplicate the work.
+- Keep the final summary concise: outcome, changed files, verification. Do not restate the whole task or paste long logs unless the user asked for detail.
 - Before finishing, update every call site of a changed signature. The app runs an automatic typecheck/build verification when one is detected; if it reports errors, fix them.
 - If the edit map lists a route registry/container or bootstrap call site, update those files in the same run. Creating a service or controller without registering and injecting it is incomplete.
 - Do not finish with "remaining", "not done", "kalan" or "yapılmadı" while turns remain; complete the wiring or explain the blocker.
