@@ -58,6 +58,7 @@ import { chat, type ChatMessage } from "./providers";
 import { resolveProvider } from "./settings";
 import { recordUsage } from "./usage";
 import { recordModelOutcome } from "./modelStats";
+import { pickAlternateAgentModel } from "./agents";
 import { getPrompt, renderPrompt } from "./prompts";
 import { loadEnabledSkills, renderSkillsForPrompt } from "../skills";
 import { requestPermission } from "./permissions";
@@ -2416,6 +2417,7 @@ export function agentToolCatalog(
     const commandApproval = commandsApproved ? "" : "  // requires user approval";
     tools.push(`{"action":"run_command","args":{"command":"npm test","cwd":"."}}${commandApproval}`);
     tools.push(`{"action":"run_project_tool","args":{"name":"ui-check"}}${commandApproval}  // runs a saved project tool/script`);
+    tools.push('{"action":"delegate_research","args":{"goal":"specific read-only question to investigate"}}  // returns a compact summary only');
   }
   tools.push('{"action":"finish","args":{"summary":"what changed and how it was verified"}}');
   return tools.map((tool) => `- ${tool}`).join("\n");
@@ -3159,6 +3161,7 @@ export async function runAgentTask(
       "browser_check",
       "list_project_tools",
       "run_project_tool",
+      "delegate_research",
       "write_file",
       "replace_in_file",
       "rename_path",
@@ -3195,6 +3198,7 @@ export async function runAgentTask(
         browser_check: "Inspecting the preview in a browser…",
         list_project_tools: "Listing saved project tools…",
         run_project_tool: "Running saved project tool…",
+        delegate_research: "Delegating read-only research…",
         write_file: "Writing file…",
         replace_in_file: "Editing file…",
         rename_path: "Moving path…",
@@ -3701,6 +3705,47 @@ export async function runAgentTask(
             tool.name,
           );
         }
+      } else if (action === "delegate_research") {
+        const goal = String(args.goal ?? "").trim();
+        if (!goal) throw new Error("A research goal is required.");
+        const alternate = await pickAlternateAgentModel({
+          provider: config.id,
+          model: config.model,
+        }).catch(() => null);
+        const delegated = await runAgentTask(
+          analysis.id,
+          `Read-only research subagent. Investigate and report a compact answer with file:line evidence. Do not modify files or run commands.\n\n${goal}`,
+          {
+            mode: "ask",
+            maxSteps: 6,
+            allowWrite: false,
+            allowCommands: false,
+            interactive: false,
+            language: options.language,
+            provider: alternate?.provider,
+            model: alternate?.model,
+          },
+          () => undefined,
+          signal,
+        );
+        observation = [
+          `Research subagent · ${delegated.stoppedReason} · ${delegated.provider}/${delegated.model}`,
+          delegated.summary,
+          delegated.usage?.contextFiles?.length
+            ? `Evidence: ${delegated.usage.contextFiles
+                .map((file) => `${file.path}${file.startLine ? `:${file.startLine}` : ""}`)
+                .join(", ")}`
+            : "",
+        ]
+          .filter(Boolean)
+          .join("\n");
+        ok = delegated.stoppedReason === "finished";
+        if (delegated.tokenUsage) {
+          tokenTotal.inputTokens += delegated.tokenUsage.inputTokens;
+          tokenTotal.outputTokens += delegated.tokenUsage.outputTokens;
+          tokenTotal.totalTokens += delegated.tokenUsage.totalTokens;
+        }
+        log("info", "Research subagent completed", goal.slice(0, 160));
       } else if (action === "write_file") {
         if (changedFiles.length >= AGENT_MAX_WRITES) throw new Error(`Write limit reached (${AGENT_MAX_WRITES} files).`);
         const filePath = normalizeAgentPath(analysis.rootPath, args.path);

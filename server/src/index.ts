@@ -19,6 +19,7 @@ import {
 import { listProviderModels, testProvider } from "./ai/providers";
 import { autoConfigureAgents } from "./ai/agents";
 import { clearModelCatalog, getModelCatalog, importModelCatalog } from "./ai/catalog";
+import { getModelHealth } from "./ai/modelStats";
 import { isBrowserCheckAvailable, runBrowserCheck } from "./browserCheck";
 import { listProjectTools } from "./projectTools";
 import { getProjectTaskQueue, planProjectTasks, runProjectLoop } from "./ai/loop";
@@ -143,6 +144,22 @@ app.get("/api/fs/list", async (req, res) => {
 app.get("/api/ai/settings", async (_req, res) => {
   try {
     res.json(await getPublicSettings());
+  } catch (error) {
+    handleError(res, error);
+  }
+});
+
+app.get("/api/ai/model-health", async (_req, res) => {
+  try {
+    const models = await getModelHealth();
+    res.json({
+      models: Object.values(models).sort(
+        (a, b) =>
+          b.protocolFailures - a.protocolFailures ||
+          b.emptyFailures - a.emptyFailures ||
+          a.provider.localeCompare(b.provider),
+      ),
+    });
   } catch (error) {
     handleError(res, error);
   }

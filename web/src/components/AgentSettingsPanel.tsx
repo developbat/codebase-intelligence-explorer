@@ -9,6 +9,7 @@ import {
   Sparkles,
   Zap,
 } from "lucide-react";
+import type { ModelHealth } from "../../../shared/modelHealth";
 import type {
   AiAgentAutoResult,
   AiAgentRole,
@@ -55,6 +56,25 @@ export function AgentSettingsPanel({ settings, onSaved }: AgentSettingsPanelProp
   const [busy, setBusy] = useState<"save" | "auto" | null>(null);
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
   const [autoResult, setAutoResult] = useState<AiAgentAutoResult | null>(null);
+  const [health, setHealth] = useState<ModelHealth[]>([]);
+  const [healthBusy, setHealthBusy] = useState(false);
+
+  async function loadHealth() {
+    setHealthBusy(true);
+    try {
+      const response = await api.ai.modelHealth();
+      setHealth(response.models);
+    } catch {
+      setHealth([]);
+    } finally {
+      setHealthBusy(false);
+    }
+  }
+
+  useEffect(() => {
+    void loadHealth();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     if (!settings) return;
@@ -223,6 +243,23 @@ export function AgentSettingsPanel({ settings, onSaved }: AgentSettingsPanelProp
                       })}`
                     : ""}
                 </small>
+                {(() => {
+                  const healthEntry = health.find(
+                    (item) =>
+                      item.provider === configured.provider && item.model === configured.model,
+                  );
+                  if (!healthEntry) return <small>{t("No agent history yet")}</small>;
+                  return (
+                    <small
+                      className={
+                        healthEntry.protocolFailures >= 2 ? "agent-health-bad" : "agent-health-good"
+                      }
+                    >
+                      {healthEntry.successCount}✓ · {healthEntry.protocolFailures} {t("protocol failures")} ·{" "}
+                      {healthEntry.emptyFailures} {t("empty responses")}
+                    </small>
+                  );
+                })()}
               </label>
             </section>
           );
@@ -254,6 +291,35 @@ export function AgentSettingsPanel({ settings, onSaved }: AgentSettingsPanelProp
           ))}
         </div>
       ) : null}
+
+      <div className="agent-health-panel">
+        <div className="agent-health-head">
+          <strong>{t("Model health")}</strong>
+          <button className="ghost-button" onClick={() => void loadHealth()} disabled={healthBusy}>
+            {healthBusy ? <Loader2 size={11} className="spin" /> : <RefreshCw size={11} />}
+            {t("Refresh")}
+          </button>
+        </div>
+        {health.length === 0 ? (
+          <p>{t("No model runs recorded yet.")}</p>
+        ) : (
+          <div className="agent-health-list">
+            {health.slice(0, 12).map((item) => (
+              <div
+                key={`${item.provider}::${item.model}`}
+                className={item.protocolFailures >= 2 ? "is-bad" : ""}
+              >
+                <code>{item.provider}</code>
+                <span>{item.model}</span>
+                <small>
+                  {item.successCount}✓ · {item.protocolFailures} {t("protocol")} · {item.emptyFailures}{" "}
+                  {t("empty")}
+                </small>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
 
       <div className="agent-settings-actions">
         <span>

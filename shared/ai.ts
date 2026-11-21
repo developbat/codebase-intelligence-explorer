@@ -511,6 +511,7 @@ export type AiAgentAction =
   | "browser_check"
   | "list_project_tools"
   | "run_project_tool"
+  | "delegate_research"
   | "write_file"
   | "rename_path"
   | "delete_file"

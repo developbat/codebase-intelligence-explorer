@@ -57,6 +57,7 @@ import type {
   BrowserCheckOptions,
   BrowserCheckResult,
 } from "../../shared/browserCheck";
+import type { ModelHealth } from "../../shared/modelHealth";
 import type { ProjectToolList } from "../../shared/projectTools";
 import type {
   SkillDetail,
@@ -552,6 +553,8 @@ export const api = {
       }),
 
     catalog: () => request<{ catalog: ModelCatalog | null }>("/api/ai/catalog"),
+
+    modelHealth: () => request<{ models: ModelHealth[] }>("/api/ai/model-health"),
 
     importCatalog: (input: { json?: string; url?: string; replace?: boolean }) =>
       request<CatalogImportResult>("/api/ai/catalog/import", {

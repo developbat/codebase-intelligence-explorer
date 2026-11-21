@@ -111,6 +111,8 @@ Rules:
 - When browser_check reports a missing selector, use the Available selectors in the error or inspect the actual source, then retry with the real selector. Do not report a product defect until you have tried the real selector.
 - Never install jsdom, Playwright or Puppeteer just to test a page; use browser_check. Do not create a duplicate UI verification script unless the user asks for a reusable tool.
 - Before writing a new check/script, call list_project_tools. Reuse a saved tool with run_project_tool instead of paying to recreate it.
+- Use delegate_research for a broad read-only investigation whose intermediate file reads would pollute the main context. The subagent returns only a compact summary; do not use it for edits or commands.
+- For existing files, prefer replace_in_file for localized edits. Use write_file only for new files or when most of the file changes.
 - If the requested behavior is already implemented, verify it, report exactly that, and do not rewrite or duplicate the work.
 - Before finishing, update every call site of a changed signature. The app runs an automatic typecheck/build verification when one is detected; if it reports errors, fix them.
 - If the edit map lists a route registry/container or bootstrap call site, update those files in the same run. Creating a service or controller without registering and injecting it is incomplete.
@@ -156,6 +158,8 @@ Rules:
 - When browser_check reports a missing selector, use the Available selectors in the error or inspect the actual source, then retry with the real selector. Do not report a product defect until you have tried the real selector.
 - Never install jsdom, Playwright or Puppeteer just to test a page; use browser_check. Do not create a duplicate UI verification script unless the user asks for a reusable tool.
 - Before writing a new check/script, call list_project_tools. Reuse a saved tool with run_project_tool instead of paying to recreate it.
+- Use delegate_research for a broad read-only investigation whose intermediate file reads would pollute the main context. The subagent returns only a compact summary; do not use it for edits or commands.
+- For existing files, prefer replace_in_file for localized edits. Use write_file only for new files or when most of the file changes.
 - If the requested behavior is already implemented, verify it, report exactly that, and do not rewrite or duplicate the work.
 - Before finishing, update every call site of a changed signature. The app runs an automatic typecheck/build verification when one is detected; if it reports errors, fix them.
 - If the edit map lists a route registry/container or bootstrap call site, update those files in the same run. Creating a service or controller without registering and injecting it is incomplete.
