@@ -27,6 +27,7 @@ export interface BrowserCheckOptions {
   mobile?: boolean;
   screenshot?: boolean;
   timeoutMs?: number;
+  measureFps?: boolean;
 }
 
 export interface BrowserCheckStepResult {
@@ -47,6 +48,10 @@ export interface BrowserCheckMetrics {
   images: number;
   brokenImages: number;
   horizontalOverflow: boolean;
+  canvases: number;
+  canvasWidth?: number;
+  canvasHeight?: number;
+  fps?: number;
   viewport: { width: number; height: number };
 }
 

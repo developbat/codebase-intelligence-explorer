@@ -57,6 +57,7 @@ import type {
   BrowserCheckOptions,
   BrowserCheckResult,
 } from "../../shared/browserCheck";
+import type { GameCheckOptions, GameCheckResult } from "../../shared/gameCheck";
 import type { ModelHealth } from "../../shared/modelHealth";
 import type {
   MobileBootResult,
@@ -550,6 +551,12 @@ export const api = {
 
   projectTools: (projectId: string) =>
     request<ProjectToolList>(`/api/projects/${projectId}/tools`),
+
+  gameCheck: (projectId: string, options: GameCheckOptions = {}) =>
+    request<GameCheckResult>(`/api/projects/${projectId}/game-check`, {
+      method: "POST",
+      body: JSON.stringify(options),
+    }),
 
   browserCheck: (projectId: string, options: BrowserCheckOptions = {}) =>
     request<BrowserCheckResult>(`/api/projects/${projectId}/browser-check`, {

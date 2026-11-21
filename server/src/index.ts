@@ -34,6 +34,7 @@ import {
 } from "./mobileDevices";
 import { createPlaceholderAsset } from "./placeholderAssets";
 import { checkToolchains, installToolchain } from "./toolchains";
+import { runGameCheck } from "./gameCheck";
 import { getProjectTaskQueue, planProjectTasks, runProjectLoop } from "./ai/loop";
 import { getPublicSettings, updateAiSettings } from "./ai/settings";
 import { getPrompt, getPromptVersion, listPrompts, renderPrompt, resetPrompt, savePrompt } from "./ai/prompts";
@@ -524,6 +525,23 @@ app.get("/api/projects/:id/tools", async (req, res) => {
 
 app.get("/api/browser-check/status", async (_req, res) => {
   res.json({ available: await isBrowserCheckAvailable() });
+});
+
+app.post("/api/projects/:id/game-check", async (req, res) => {
+  try {
+    const analysis = await loadAnalysis(req.params.id);
+    res.json(
+      await runGameCheck(req.params.id, analysis.rootPath, {
+        path: typeof req.body?.path === "string" ? req.body.path : "index.html",
+        url: typeof req.body?.url === "string" ? req.body.url : undefined,
+        steps: Array.isArray(req.body?.steps) ? req.body.steps : undefined,
+        screenshot: req.body?.screenshot !== false,
+        timeoutMs: Number(req.body?.timeoutMs) || undefined,
+      }),
+    );
+  } catch (error) {
+    handleError(res, error, 400);
+  }
 });
 
 app.post("/api/projects/:id/browser-check", async (req, res) => {

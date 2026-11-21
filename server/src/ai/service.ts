@@ -59,6 +59,7 @@ import {
 } from "../mobileDevices";
 import { createPlaceholderAsset } from "../placeholderAssets";
 import { checkToolchains, installToolchain } from "../toolchains";
+import { runGameCheck } from "../gameCheck";
 import {
   deleteProjectPath,
   readSourceFile,
@@ -1552,6 +1553,7 @@ const READ_ONLY_ACTIONS = new Set([
   "git_blame",
   "list_project_tools",
   "browser_check",
+  "game_check",
   "list_mobile_devices",
 ]);
 const AGENT_MAX_WRITES = 10;
@@ -2421,6 +2423,7 @@ export function agentToolCatalog(
     '{"action":"list_project_tools","args":{}}',
     '{"action":"list_mobile_devices","args":{}}',
     '{"action":"check_toolchains","args":{}}',
+    '{"action":"game_check","args":{"path":"index.html","steps":[{"action":"expectVisible","selector":"canvas"}]}}',
   ];
   if (!readOnly) {
     const approval = writeApproved ? "" : "  // requires user approval";
@@ -3202,6 +3205,7 @@ export async function runAgentTask(
       "mobile_check",
       "check_toolchains",
       "install_toolchain",
+      "game_check",
       "write_file",
       "replace_in_file",
       "replace_many",
@@ -3247,6 +3251,7 @@ export async function runAgentTask(
         launch_mobile_app: "Launching a mobile app…",
         mobile_check: "Checking a mobile device…",
         check_toolchains: "Checking toolchains…",
+        game_check: "Checking the game scene…",
         install_toolchain: "Installing a toolchain…",
         run_project_tool: "Running saved project tool…",
         delegate_research: "Delegating read-only research…",
@@ -3857,6 +3862,21 @@ export async function runAgentTask(
         observation = clampObservation(`Mobile logs (${logs.lines} lines):\n${logs.output}`);
         log("info", "Mobile logs read", `${platform} ${id} · ${logs.lines} lines`);
         ok = true;
+      } else if (action === "game_check") {
+        const gamePath = typeof args.path === "string" ? args.path : "index.html";
+        const gameSteps = Array.isArray(args.steps) ? args.steps : undefined;
+        const result = await runGameCheck(analysis.id, analysis.rootPath, {
+          path: gamePath,
+          url: typeof args.url === "string" ? args.url : undefined,
+          steps: gameSteps as BrowserCheckStep[] | undefined,
+          screenshot: args.screenshot !== false,
+        });
+        if (result.check.screenshotPath) {
+          evidence.push({ path: result.check.screenshotPath, label: "Game check screenshot" });
+        }
+        observation = result.summary;
+        ok = result.check.ok && result.check.metrics.canvases > 0;
+        log(result.check.ok ? "success" : "error", "Game check complete", `${result.engine} · ${result.check.metrics.fps ?? "—"} fps`);
       } else if (action === "browser_check") {
         const browserPath = typeof args.path === "string" ? args.path : "index.html";
         const rawSteps = Array.isArray(args.steps) ? args.steps : [];

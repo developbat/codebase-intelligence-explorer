@@ -169,6 +169,9 @@ async function collectMetrics(page: Page, viewport: { width: number; height: num
       brokenImages: images.filter((image) => image.complete && image.naturalWidth === 0).length,
       horizontalOverflow:
         document.documentElement.scrollWidth > document.documentElement.clientWidth + 2,
+      canvases: document.querySelectorAll("canvas").length,
+      canvasWidth: document.querySelector("canvas")?.width,
+      canvasHeight: document.querySelector("canvas")?.height,
     };
   });
   return {
@@ -277,6 +280,21 @@ export async function runBrowserCheck(
     }
 
     const metrics = await collectMetrics(page, viewport);
+    if (options.measureFps && metrics.canvases > 0) {
+      metrics.fps = (await page.evaluate(`new Promise((resolve) => {
+        let frames = 0;
+        const started = performance.now();
+        const tick = (now) => {
+          frames += 1;
+          if (now - started >= 1000) {
+            resolve(Math.round((frames * 1000) / Math.max(1, now - started)));
+          } else {
+            requestAnimationFrame(tick);
+          }
+        };
+        requestAnimationFrame(tick);
+      })`)) as number;
+    }
     let screenshotPath: string | undefined;
     if (options.screenshot) {
       const relative = `.cie/agent/screenshots/check-${Date.now()}.png`;
@@ -303,7 +321,9 @@ export async function runBrowserCheck(
       !metrics.horizontalOverflow;
     const summary = [
       ok ? "Browser check passed." : "Browser check found problems.",
-      `${metrics.title || "(no title)"} · ${metrics.buttons} buttons · ${metrics.inputs} inputs`,
+      `${metrics.title || "(no title)"} · ${metrics.buttons} buttons · ${metrics.inputs} inputs${
+        metrics.canvases > 0 ? ` · ${metrics.canvases} canvas` : ""
+      }${metrics.fps ? ` · ${metrics.fps} fps` : ""}`,
       failedSteps.length > 0 ? `Failed steps: ${failedSteps.map((step) => step.index).join(", ")}` : "",
       consoleErrors.length > 0 ? `Console errors: ${consoleErrors.length}` : "",
       pageErrors.length > 0 ? `Page errors: ${pageErrors.length}` : "",

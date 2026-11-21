@@ -84,6 +84,7 @@ import {
   Eye,
   ExternalLink,
   FileCode2,
+  Gamepad2,
   Folder,
   FolderOpen,
   GripVertical,
@@ -585,6 +586,7 @@ export function CodeStudio({
   const [browserCheck, setBrowserCheck] = useState<BrowserCheckResult | null>(null);
   const [browserCheckBusy, setBrowserCheckBusy] = useState(false);
   const [browserCheckError, setBrowserCheckError] = useState<string | null>(null);
+  const [gameEngine, setGameEngine] = useState<string | null>(null);
   const [projectTools, setProjectTools] = useState<ProjectToolList | null>(null);
   const [projectToolsBusy, setProjectToolsBusy] = useState(false);
   const checkOutputRef = useRef("");
@@ -701,6 +703,7 @@ export function CodeStudio({
     setDuplication(null);
     setBrowserCheck(null);
     setBrowserCheckError(null);
+    setGameEngine(null);
     setProjectTools(null);
     testAbortRef.current?.abort();
     setTestResult(null);
@@ -1760,6 +1763,29 @@ export function CodeStudio({
     } catch (requestError) {
       setBrowserCheckError(
         requestError instanceof Error ? requestError.message : t("Browser check failed."),
+      );
+    } finally {
+      setBrowserCheckBusy(false);
+    }
+  }
+
+  async function checkGame() {
+    if (browserCheckBusy) return;
+    setBrowserCheckBusy(true);
+    setBrowserCheckError(null);
+    try {
+      const result = await api.gameCheck(analysis.id, {
+        path: effectivePreviewPath || htmlFiles[0] || "index.html",
+        url: livePreviewUrl || undefined,
+        screenshot: true,
+      });
+      setBrowserCheck(result.check);
+      setGameEngine(result.engine);
+      setBottomTab("checks");
+      setConsoleOpen(true);
+    } catch (requestError) {
+      setBrowserCheckError(
+        requestError instanceof Error ? requestError.message : t("Game check failed."),
       );
     } finally {
       setBrowserCheckBusy(false);
@@ -3757,6 +3783,14 @@ export function CodeStudio({
                         {browserCheckBusy ? <Loader2 size={10} className="spin" /> : <Eye size={10} />}
                         {t("Inspect preview")}
                       </button>
+                      <button
+                        onClick={() => void checkGame()}
+                        disabled={browserCheckBusy || (!effectivePreviewPath && !livePreviewUrl)}
+                        title={t("Check canvas, FPS and game controls")}
+                      >
+                        {browserCheckBusy ? <Loader2 size={10} className="spin" /> : <Gamepad2 size={10} />}
+                        {t("Check game")}
+                      </button>
                     </div>
                     {browserCheckError ? (
                       <div className="studio-ai-inline-error">
@@ -3771,9 +3805,15 @@ export function CodeStudio({
                             {browserCheck.ok ? t("Preview check passed") : t("Preview check found problems")}
                           </strong>
                           <span>
+                            {gameEngine ? `${gameEngine} · ` : ""}
                             {browserCheck.metrics.title || browserCheck.path} · {browserCheck.metrics.viewport.width}×
                             {browserCheck.metrics.viewport.height} · {browserCheck.metrics.buttons} {t("buttons")} ·{" "}
                             {browserCheck.metrics.inputs} {t("inputs")}
+                            {browserCheck.metrics.canvases > 0
+                              ? ` · ${browserCheck.metrics.canvases} canvas${
+                                  browserCheck.metrics.fps ? ` · ${browserCheck.metrics.fps} fps` : ""
+                                }`
+                              : ""}
                           </span>
                           <button onClick={() => setBrowserCheck(null)}>{t("Clear")}</button>
                         </div>
