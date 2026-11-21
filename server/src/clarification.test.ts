@@ -36,3 +36,24 @@ test("already clarified instructions and questions are not asked again", () => {
   );
   assert.equal(detectClarification("saat nasıl eklenir?"), null);
 });
+
+test("task detail field requests ask for the field shape before coding", () => {
+  const request = detectClarification("görev eklemeye bir alan daha ekleyelim görev detayı.");
+  assert.ok(request);
+  assert.match(request.question, /detay/i);
+  assert.deepEqual(
+    request.options.map((option) => option.id),
+    ["textarea", "panel", "both", "assume"],
+  );
+  assert.equal(detectClarification("görev detayı için textarea ekle"), null);
+});
+
+test("generic add-field requests ask which field is meant", () => {
+  const request = detectClarification("forma bir alan daha ekleyelim");
+  assert.ok(request);
+  assert.match(request.question, /Hangi alan/i);
+  assert.deepEqual(
+    request.options.map((option) => option.id),
+    ["detail", "priority", "label", "due", "assume"],
+  );
+});
