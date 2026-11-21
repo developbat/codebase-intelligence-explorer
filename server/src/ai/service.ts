@@ -2411,6 +2411,7 @@ export function agentToolCatalog(
     const approval = writeApproved ? "" : "  // requires user approval";
     tools.push(`{"action":"write_file","args":{"path":"src/new-file.ts","content":"complete final file content"}}${approval}`);
     tools.push(`{"action":"replace_in_file","args":{"path":"src/app.ts","find":"exact existing snippet","replace":"replacement snippet"}}${approval}`);
+    tools.push(`{"action":"replace_many","args":{"path":"src/app.ts","edits":[{"find":"first exact snippet","replace":"first replacement"},{"find":"second exact snippet","replace":"second replacement"}]}}${approval}`);
     tools.push(`{"action":"rename_path","args":{"path":"src/old.ts","newPath":"src/new.ts"}}  // always requires confirmation`);
     tools.push(`{"action":"delete_file","args":{"path":"src/obsolete.ts"}}  // always requires confirmation`);
     tools.push(`{"action":"format_file","args":{"path":"src/app.ts"}}${approval}`);
@@ -3794,6 +3795,52 @@ export async function runAgentTask(
         invalidateReadCaches();
         observation = `Replaced one snippet in ${written.filePath} (${written.bytes} bytes).`;
         log("success", "File edited", written.filePath);
+        ok = true;
+      } else if (action === "replace_many") {
+        const filePath = normalizeAgentPath(analysis.rootPath, args.path);
+        if (!filePath) throw new Error("A file path is required.");
+        if (isSecretAgentPath(filePath)) throw new Error("Editing environment, key or Git internals files is denied.");
+        const rawEdits = Array.isArray(args.edits) ? args.edits : [];
+        const edits = rawEdits
+          .filter((item): item is Record<string, unknown> => Boolean(item && typeof item === "object"))
+          .map((item) => ({
+            find: typeof item.find === "string" ? item.find : "",
+            replace: typeof item.replace === "string" ? item.replace : "",
+          }))
+          .filter((item) => item.find);
+        if (edits.length === 0) throw new Error("At least one find/replace edit is required.");
+        if (edits.length > 20) throw new Error("At most 20 edits can be applied in one call.");
+        const file = await readSourceFile(analysis.rootPath, filePath);
+        let nextContent = file.content;
+        for (const [index, edit] of edits.entries()) {
+          const occurrences = nextContent.split(edit.find).length - 1;
+          if (occurrences === 0) {
+            throw new Error(`Edit ${index + 1}: the find snippet was not found in the file.`);
+          }
+          if (occurrences > 1) {
+            throw new Error(`Edit ${index + 1}: the find snippet occurs ${occurrences} times; make it unique.`);
+          }
+          nextContent = nextContent.replace(edit.find, edit.replace);
+        }
+        const manyAllowed = await requirePermission(
+          "write",
+          "replace_many",
+          filePath,
+          `Apply ${edits.length} localized edits in one write.`,
+          {
+            preview: edits
+              .slice(0, 3)
+              .map((edit) => `- ${edit.find.slice(0, 260)}\n+ ${edit.replace.slice(0, 260)}`)
+              .join("\n"),
+          },
+        );
+        if (!manyAllowed) throw new Error("The user denied permission to edit this file.");
+        const written = await writeSourceFile(projectId, analysis.rootPath, filePath, nextContent);
+        if (!changedFiles.includes(written.filePath)) changedFiles.push(written.filePath);
+        evidence.push({ path: written.filePath, label: "Edited by agent (multiple)" });
+        invalidateReadCaches();
+        observation = `Applied ${edits.length} localized edits to ${written.filePath} in one write (${written.bytes} bytes).`;
+        log("success", "File edited with multiple replacements", written.filePath);
         ok = true;
       } else if (action === "format_file") {
         const filePath = normalizeAgentPath(analysis.rootPath, args.path);

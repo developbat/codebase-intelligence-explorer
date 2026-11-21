@@ -896,6 +896,7 @@ export const tr: Dictionary = {
   "Console": "Konsol",
   "Current": "Güncel",
   "Details": "Detaylar",
+  "Digest": "Özet",
   "empty": "boş",
   "protocol": "protokol",
   "No model runs recorded yet.": "Henüz model çalışması kaydedilmedi.",

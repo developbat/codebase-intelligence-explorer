@@ -92,6 +92,9 @@ export function TaskQueueCard({
         <span>
           {t("Plan")}: <code>{queue.planPath}</code>
         </span>
+        <span>
+          {t("Digest")}: <code>{queue.digestPath}</code>
+        </span>
         {failed > 0 && onRetryFailed ? (
           <button
             className="task-queue-retry"

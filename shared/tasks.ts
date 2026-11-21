@@ -46,6 +46,7 @@ export interface ProjectTaskQueue {
   notesPath: string;
   planPath: string;
   contextPath: string;
+  digestPath: string;
 }
 
 export interface ProjectTaskLoopOptions {

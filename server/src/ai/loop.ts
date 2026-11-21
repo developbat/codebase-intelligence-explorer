@@ -299,7 +299,7 @@ function taskInstruction(
     task.detail,
     task.acceptance ? `Acceptance: ${task.acceptance}` : "",
     prior ? `Previous task summaries (use this before reading context.md):\n${prior}` : "",
-    "Read .cie/agent/context.md only when the summaries above are insufficient; if it is large, read only the relevant tail or search it with find_in_file. Append useful durable context if you learn something new.",
+    "Read .cie/agent/context-digest.md first for compact prior context. Read .cie/agent/context.md only when the digest and summaries are insufficient; if it is large, search it with find_in_file or read only the relevant tail. Append useful durable context if you learn something new.",
     "Do not re-read files already fully read by a previous task unless the current task needs exact content after a change.",
     "Stay scoped to this task. Do not do later tasks. Do not revert earlier work.",
     verification ? `Verification command: ${verification}` : "",

@@ -517,6 +517,7 @@ export type AiAgentAction =
   | "delete_file"
   | "format_file"
   | "replace_in_file"
+  | "replace_many"
   | "run_command"
   | "finish";
 

@@ -37,12 +37,15 @@ test("persists a task queue as JSON and human-readable Markdown", async () => {
   try {
     const created = await createQueue(root, "project-1", "Build a feature", [task("task-1")]);
     assert.equal(created.status, "idle");
+    assert.equal(created.digestPath, ".cie/agent/context-digest.md");
     const jsonPath = path.join(root, ".cie", "agent", "tasks.json");
     const markdownPath = path.join(root, ".cie", "agent", "TASKS.md");
     assert.ok((await fs.readFile(jsonPath, "utf8")).includes("Build a feature"));
     const markdown = await fs.readFile(markdownPath, "utf8");
     assert.match(markdown, /# Agent tasks — Build a feature/);
     assert.match(markdown, /task-1/);
+    const digest = await fs.readFile(path.join(root, ".cie", "agent", "context-digest.md"), "utf8");
+    assert.match(digest, /Task digest/);
 
     const loaded = await loadQueue(root, "project-1");
     assert.equal(loaded?.tasks.length, 1);

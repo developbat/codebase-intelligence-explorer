@@ -10,6 +10,7 @@ const AGENT_DIR = "agent";
 const TASKS_FILE = "tasks.json";
 const PLAN_FILE = "TASKS.md";
 const CONTEXT_FILE = "context.md";
+const DIGEST_FILE = "context-digest.md";
 const MAX_CONTEXT_BYTES = 40_000;
 
 function agentDir(rootPath: string): string {
@@ -49,6 +50,7 @@ function emptyQueue(projectId: string, goal: string): ProjectTaskQueue {
     notesPath: relativeAgentPath(CONTEXT_FILE),
     planPath: relativeAgentPath(PLAN_FILE),
     contextPath: relativeAgentPath(CONTEXT_FILE),
+    digestPath: relativeAgentPath(DIGEST_FILE),
   };
 }
 
@@ -94,6 +96,26 @@ export function queueMarkdown(queue: ProjectTaskQueue): string {
   ].join("\n");
 }
 
+export function digestMarkdown(queue: ProjectTaskQueue): string {
+  return [
+    `# Task digest — ${queue.goal}`,
+    "",
+    `Status: **${queue.status}** · Updated: ${queue.updatedAt}`,
+    "",
+    ...queue.tasks.map(
+      (task) =>
+        `- ${task.status === "done" ? "✅" : task.status === "failed" ? "❌" : task.status === "in_progress" ? "🔄" : "⏳"} ${task.id} ${task.title} · ${task.role}/${task.effort}${
+          task.resultSummary
+            ? ` — ${task.resultSummary.replace(/\n+/g, " ").slice(0, 260)}`
+            : ""
+        }${task.changedFiles.length > 0 ? ` · files: ${task.changedFiles.join(", ")}` : ""}`,
+    ),
+    "",
+    `Full notes: ${relativeAgentPath(CONTEXT_FILE)}`,
+    "",
+  ].join("\n");
+}
+
 async function writeTextAtomic(file: string, content: string): Promise<void> {
   await fs.mkdir(path.dirname(file), { recursive: true });
   const temp = `${file}.${process.pid}.${Date.now()}.tmp`;
@@ -109,10 +131,12 @@ export async function saveQueue(rootPath: string, queue: ProjectTaskQueue): Prom
     notesPath: relativeAgentPath(CONTEXT_FILE),
     planPath: relativeAgentPath(PLAN_FILE),
     contextPath: relativeAgentPath(CONTEXT_FILE),
+    digestPath: relativeAgentPath(DIGEST_FILE),
   };
   await fs.mkdir(agentDir(rootPath), { recursive: true });
   await writeTextAtomic(tasksPath(rootPath), JSON.stringify(next, null, 2));
   await writeTextAtomic(planPath(rootPath), queueMarkdown(next));
+  await writeTextAtomic(path.join(agentDir(rootPath), DIGEST_FILE), digestMarkdown(next));
   return next;
 }
 
