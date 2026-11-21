@@ -108,7 +108,12 @@ export async function createPlaceholderAsset(
   const relativeInput = (request.path ?? "").trim().replace(/^\/+/, "");
   if (!relativeInput) throw new Error("An asset path is required.");
   const kindHint = request.kind ?? "icon";
-  const defaultExt = kindHint === "sound" ? ".wav" : request.format === "png" ? ".png" : ".svg";
+  const defaultExt =
+    kindHint === "sound" || kindHint === "music"
+      ? ".wav"
+      : request.format === "png"
+        ? ".png"
+        : ".svg";
   const base = relativeInput.replace(/\.(svg|png|wav)$/i, "");
   const relative = `${base}${defaultExt}`;
   if (relative.split("/").some((segment) => segment === ".." || segment === ".git")) {
@@ -117,7 +122,7 @@ export async function createPlaceholderAsset(
   const absolute = path.resolve(rootPath, relative);
   if (!isWithin(rootPath, absolute)) throw new Error("Asset path is outside the project.");
   const kind = (request.kind ?? "icon") as PlaceholderAssetKind;
-  if (!["icon", "sprite", "spritesheet", "background", "button", "splash", "sound"].includes(kind)) {
+  if (!["icon", "sprite", "spritesheet", "background", "button", "splash", "sound", "music"].includes(kind)) {
     throw new Error("Unknown placeholder asset kind.");
   }
   const width = Math.max(32, Math.min(2048, Math.round(request.width ?? 256)));
@@ -126,11 +131,16 @@ export async function createPlaceholderAsset(
   const background = color(request.background, "#0b1220");
   const label = request.label ?? "";
 
-  if (kind === "sound") {
-    const wav = makeWav(
-      Math.max(100, Math.min(5_000, Math.round(request.durationMs ?? 600))),
-      Math.max(80, Math.min(4_000, Math.round(request.frequency ?? 440))),
+  if (kind === "sound" || kind === "music") {
+    const durationMs = Math.max(
+      100,
+      Math.min(kind === "music" ? 30_000 : 5_000, Math.round(request.durationMs ?? (kind === "music" ? 4_000 : 600))),
     );
+    const frequency = Math.max(80, Math.min(4_000, Math.round(request.frequency ?? (kind === "music" ? 220 : 440))));
+    const wav =
+      kind === "music"
+        ? makeMusicWav(durationMs, frequency, request.loop !== false)
+        : makeWav(durationMs, frequency, request.loop === true);
     await fs.mkdir(path.dirname(absolute), { recursive: true });
     await fs.writeFile(absolute, wav);
     return {
@@ -144,6 +154,32 @@ export async function createPlaceholderAsset(
   const svg = svgFor(kind, width, height, label, colorValue, background);
   await fs.mkdir(path.dirname(absolute), { recursive: true });
   const wantsPng = request.format === "png" || /\.png$/i.test(relative);
+  let metadataPath: string | undefined;
+  if (kind === "spritesheet") {
+    metadataPath = `${relative.replace(/\.(svg|png)$/i, "")}.json`;
+    const fps = Math.max(1, Math.min(60, Math.round(request.fps ?? 8)));
+    const metadata = {
+      image: relative,
+      frameWidth: Math.round(width / 4),
+      frameHeight: Math.round(height / 4),
+      columns: 4,
+      rows: 4,
+      frames: 16,
+      fps,
+      animations: {
+        idle: [0, 1, 2, 3],
+        walk: [4, 5, 6, 7],
+        run: [8, 9, 10, 11],
+        jump: [12, 13, 14, 15],
+      },
+    };
+    await fs.mkdir(path.dirname(path.resolve(rootPath, metadataPath)), { recursive: true });
+    await fs.writeFile(
+      path.resolve(rootPath, metadataPath),
+      JSON.stringify(metadata, null, 2),
+      "utf8",
+    );
+  }
   if (!wantsPng) {
     await fs.writeFile(absolute, svg, "utf8");
     return {
@@ -151,6 +187,7 @@ export async function createPlaceholderAsset(
       bytes: Buffer.byteLength(svg, "utf8"),
       mime: "image/svg+xml",
       kind,
+      metadataPath,
     };
   }
   const png = await renderSvgPng(svg, width, height);
@@ -160,6 +197,7 @@ export async function createPlaceholderAsset(
     bytes: png.length,
     mime: "image/png",
     kind,
+    metadataPath,
   };
 }
 
@@ -183,18 +221,11 @@ async function renderSvgPng(svg: string, width: number, height: number): Promise
   }
 }
 
-function makeWav(durationMs: number, frequency: number): Buffer {
-  const sampleRate = 22_050;
-  const samples = Math.floor((sampleRate * durationMs) / 1000);
-  const data = Buffer.alloc(samples * 2);
-  for (let index = 0; index < samples; index += 1) {
-    const t = index / sampleRate;
-    const fadeIn = Math.min(1, index / 220);
-    const fadeOut = Math.min(1, (samples - index) / 550);
-    const envelope = fadeIn * fadeOut * 0.35;
-    const value = Math.sin(2 * Math.PI * frequency * t) * envelope;
-    data.writeInt16LE(Math.round(value * 32767), index * 2);
-  }
+function writeWav(samples: number[], sampleRate: number): Buffer {
+  const data = Buffer.alloc(samples.length * 2);
+  samples.forEach((value, index) => {
+    data.writeInt16LE(Math.max(-32767, Math.min(32767, Math.round(value * 32767))), index * 2);
+  });
   const header = Buffer.alloc(44);
   header.write("RIFF", 0);
   header.writeUInt32LE(36 + data.length, 4);
@@ -210,4 +241,41 @@ function makeWav(durationMs: number, frequency: number): Buffer {
   header.write("data", 36);
   header.writeUInt32LE(data.length, 40);
   return Buffer.concat([header, data]);
+}
+
+function makeMusicWav(durationMs: number, rootFrequency: number, loop: boolean): Buffer {
+  const sampleRate = 22_050;
+  const noteMs = 360;
+  const pattern = [1, 1.25, 1.5, 2, 1.5, 1.25, 1, 0.75];
+  const total = Math.floor((sampleRate * durationMs) / 1000);
+  const samples: number[] = [];
+  for (let index = 0; index < total; index += 1) {
+    const timeMs = (index / sampleRate) * 1000;
+    const noteIndex = Math.floor(timeMs / noteMs) % pattern.length;
+    const within = (timeMs % noteMs) / noteMs;
+    const frequency = rootFrequency * pattern[noteIndex];
+    const attack = Math.min(1, within / 0.05);
+    const release = Math.min(1, (1 - within) / 0.12);
+    const envelope = Math.min(1, attack, release) * 0.22;
+    const fade = loop ? 1 : Math.min(1, index / 220, (total - index) / 550);
+    samples.push(Math.sin(2 * Math.PI * frequency * (index / sampleRate)) * envelope * fade);
+  }
+  return writeWav(samples, sampleRate);
+}
+
+function makeWav(durationMs: number, frequency: number, loop: boolean): Buffer {
+  const sampleRate = 22_050;
+  const sampleCount = Math.floor((sampleRate * durationMs) / 1000);
+  const cycles = Math.max(1, Math.round((frequency * durationMs) / 1000));
+  const adjustedFrequency = (cycles * 1000) / durationMs;
+  const samples: number[] = [];
+  for (let index = 0; index < sampleCount; index += 1) {
+    const fadeIn = Math.min(1, index / 220);
+    const fadeOut = loop ? 1 : Math.min(1, (sampleCount - index) / 550);
+    const envelope = fadeIn * fadeOut * 0.35;
+    samples.push(
+      Math.sin(2 * Math.PI * adjustedFrequency * (index / sampleRate)) * envelope,
+    );
+  }
+  return writeWav(samples, sampleRate);
 }

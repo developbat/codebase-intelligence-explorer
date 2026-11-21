@@ -30,6 +30,7 @@ import {
   listMobileDevices,
   openMobileUrl,
   readMobileLogs,
+  runMobileCheck,
 } from "./mobileDevices";
 import { createPlaceholderAsset } from "./placeholderAssets";
 import { getProjectTaskQueue, planProjectTasks, runProjectLoop } from "./ai/loop";
@@ -364,6 +365,25 @@ app.post("/api/projects/:id/mobile/devices/boot", async (req, res) => {
   }
 });
 
+app.post("/api/projects/:id/mobile/check", async (req, res) => {
+  try {
+    const analysis = await loadAnalysis(req.params.id);
+    res.json(
+      await runMobileCheck(analysis.rootPath, {
+        platform: req.body?.platform === "android" ? "android" : req.body?.platform === "ios" ? "ios" : undefined,
+        id: typeof req.body?.id === "string" ? req.body.id : undefined,
+        boot: req.body?.boot === true,
+        screenshot: req.body?.screenshot !== false,
+        logs: req.body?.logs === true,
+        openUrl: typeof req.body?.openUrl === "string" ? req.body.openUrl : undefined,
+        logLimit: Number(req.body?.logLimit) || undefined,
+      }),
+    );
+  } catch (error) {
+    handleError(res, error, 400);
+  }
+});
+
 app.post("/api/projects/:id/mobile/devices/install", async (req, res) => {
   try {
     const analysis = await loadAnalysis(req.params.id);
@@ -454,6 +474,8 @@ app.post("/api/projects/:id/assets/placeholder", async (req, res) => {
         format: req.body?.format === "png" ? "png" : undefined,
         durationMs: Number(req.body?.durationMs) || undefined,
         frequency: Number(req.body?.frequency) || undefined,
+        loop: req.body?.loop === true,
+        fps: Number(req.body?.fps) || undefined,
       }),
     );
   } catch (error) {

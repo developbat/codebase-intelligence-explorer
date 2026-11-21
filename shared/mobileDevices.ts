@@ -50,6 +50,26 @@ export interface MobileLaunchResult {
   message: string;
 }
 
+export interface MobileCheckOptions {
+  platform?: "ios" | "android";
+  id?: string;
+  boot?: boolean;
+  screenshot?: boolean;
+  logs?: boolean;
+  openUrl?: string;
+  logLimit?: number;
+}
+
+export interface MobileCheckResult {
+  device?: MobileDevice;
+  boot?: MobileBootResult;
+  screenshot?: MobileScreenshotResult;
+  logs?: MobileLogsResult;
+  openUrl?: MobileOpenUrlResult;
+  warnings: string[];
+  summary: string;
+}
+
 export interface MobileDeviceReport {
   ios: MobileDevice[];
   android: MobileDevice[];

@@ -7,6 +7,8 @@ import type {
   MobileInstallResult,
   MobileLaunchResult,
   MobileDevice,
+  MobileCheckOptions,
+  MobileCheckResult,
   MobileDeviceReport,
   MobileLogsResult,
   MobileOpenUrlResult,
@@ -285,4 +287,79 @@ export async function launchMobileApp(
   ]);
   if (result === null) throw new Error("Could not launch the Android app.");
   return { platform, deviceId: id, target: value, message: "Android app launched." };
+}
+
+export async function runMobileCheck(
+  rootPath: string,
+  options: MobileCheckOptions = {},
+): Promise<MobileCheckResult> {
+  const report = await listMobileDevices();
+  const all = [...report.ios, ...report.android];
+  const platform = options.platform;
+  const target =
+    (options.id ? all.find((device) => device.id === options.id) : undefined) ??
+    (platform ? all.find((device) => device.platform === platform && device.state !== "shutdown") : undefined) ??
+    all.find((device) => device.state === "booted" || device.state === "device") ??
+    all[0];
+  const warnings = [...report.warnings];
+  if (!target) {
+    return {
+      warnings,
+      summary: "No simulator, emulator or physical device was found.",
+    };
+  }
+  const result: MobileCheckResult = { device: target, warnings, summary: "" };
+  let active = target;
+  const needsBoot =
+    options.boot === true &&
+    (active.state === "shutdown" || active.state === "offline");
+  if (needsBoot) {
+    try {
+      result.boot = await bootMobileDevice(active.platform, active.id);
+      if (result.boot.state === "starting") {
+        warnings.push("Android emulator is still starting; screenshot/log steps were skipped.");
+      } else {
+        const refreshed = await listMobileDevices();
+        active =
+          [...refreshed.ios, ...refreshed.android].find((device) => device.id === active.id) ??
+          active;
+        result.device = active;
+      }
+    } catch (error) {
+      warnings.push(error instanceof Error ? error.message : "Device boot failed.");
+    }
+  }
+  const ready = active.state === "booted" || active.state === "device";
+  if (options.openUrl && ready) {
+    try {
+      result.openUrl = await openMobileUrl(active.platform, active.id, options.openUrl);
+    } catch (error) {
+      warnings.push(error instanceof Error ? error.message : "Could not open URL.");
+    }
+  }
+  if (options.screenshot !== false && ready) {
+    try {
+      result.screenshot = await captureMobileScreenshot(rootPath, active.platform, active.id);
+    } catch (error) {
+      warnings.push(error instanceof Error ? error.message : "Could not capture screenshot.");
+    }
+  }
+  if (options.logs === true && ready) {
+    try {
+      result.logs = await readMobileLogs(active.platform, active.id, options.logLimit ?? 120);
+    } catch (error) {
+      warnings.push(error instanceof Error ? error.message : "Could not read logs.");
+    }
+  }
+  result.summary = [
+    `${active.platform} · ${active.name} · ${active.state}`,
+    result.boot ? result.boot.message : "",
+    result.openUrl ? result.openUrl.message : "",
+    result.screenshot ? `Screenshot: ${result.screenshot.path}` : "",
+    result.logs ? `Logs: ${result.logs.lines} lines` : "",
+    ...warnings,
+  ]
+    .filter(Boolean)
+    .join("\n");
+  return result;
 }

@@ -60,6 +60,8 @@ import type {
 import type { ModelHealth } from "../../shared/modelHealth";
 import type {
   MobileBootResult,
+  MobileCheckOptions,
+  MobileCheckResult,
   MobileDeviceReport,
   MobileInstallResult,
   MobileLaunchResult,
@@ -508,6 +510,12 @@ export const api = {
     request<MobileLogsResult>(`/api/projects/${projectId}/mobile/devices/logs`, {
       method: "POST",
       body: JSON.stringify({ platform, id, limit }),
+    }),
+
+  mobileCheck: (projectId: string, options: MobileCheckOptions) =>
+    request<MobileCheckResult>(`/api/projects/${projectId}/mobile/check`, {
+      method: "POST",
+      body: JSON.stringify(options),
     }),
 
   mobileInstall: (projectId: string, platform: "ios" | "android", id: string, pathValue: string) =>

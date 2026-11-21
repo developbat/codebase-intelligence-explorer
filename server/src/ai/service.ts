@@ -55,6 +55,7 @@ import {
   listMobileDevices,
   openMobileUrl,
   readMobileLogs,
+  runMobileCheck,
 } from "../mobileDevices";
 import { createPlaceholderAsset } from "../placeholderAssets";
 import {
@@ -2434,12 +2435,15 @@ export function agentToolCatalog(
     tools.push(`{"action":"placeholder_asset","args":{"path":"assets/player.svg","kind":"sprite","width":128,"height":128,"label":"player"}}${approval}`);
     tools.push(`{"action":"placeholder_asset","args":{"path":"assets/icon.png","kind":"icon","format":"png","width":1024,"height":1024,"label":"App"}}${approval}`);
     tools.push(`{"action":"placeholder_asset","args":{"path":"assets/beep.wav","kind":"sound","durationMs":500,"frequency":660}}${approval}`);
+    tools.push(`{"action":"placeholder_asset","args":{"path":"assets/loop.wav","kind":"music","durationMs":4000,"frequency":220,"loop":true}}${approval}`);
+    tools.push(`{"action":"placeholder_asset","args":{"path":"assets/sheet.png","kind":"spritesheet","format":"png","width":512,"height":512,"fps":8}}${approval}`);
     tools.push(`{"action":"boot_mobile_device","args":{"platform":"ios","id":"SIMULATOR-UDID"}}${commandApproval}`);
     tools.push(`{"action":"mobile_screenshot","args":{"platform":"ios","id":"SIMULATOR-UDID"}}${commandApproval}`);
     tools.push(`{"action":"open_mobile_url","args":{"platform":"android","id":"emulator-5554","url":"http://localhost:8081"}}${commandApproval}`);
     tools.push(`{"action":"mobile_logs","args":{"platform":"android","id":"emulator-5554","limit":200}}${commandApproval}`);
     tools.push(`{"action":"install_mobile_app","args":{"platform":"android","id":"emulator-5554","path":"build/app.apk"}}${commandApproval}`);
     tools.push(`{"action":"launch_mobile_app","args":{"platform":"android","id":"emulator-5554","target":"com.example.app"}}${commandApproval}`);
+    tools.push(`{"action":"mobile_check","args":{"platform":"android","id":"emulator-5554","boot":true,"screenshot":true,"logs":true,"openUrl":"http://localhost:8081"}}${commandApproval}`);
   }
   tools.push('{"action":"finish","args":{"summary":"what changed and how it was verified"}}');
   return tools.map((tool) => `- ${tool}`).join("\n");
@@ -3192,6 +3196,7 @@ export async function runAgentTask(
       "mobile_logs",
       "install_mobile_app",
       "launch_mobile_app",
+      "mobile_check",
       "write_file",
       "replace_in_file",
       "replace_many",
@@ -3235,6 +3240,7 @@ export async function runAgentTask(
         mobile_logs: "Reading mobile logs…",
         install_mobile_app: "Installing a mobile app…",
         launch_mobile_app: "Launching a mobile app…",
+        mobile_check: "Checking a mobile device…",
         run_project_tool: "Running saved project tool…",
         delegate_research: "Delegating read-only research…",
         placeholder_asset: "Creating a placeholder asset…",
@@ -3762,6 +3768,27 @@ export async function runAgentTask(
         observation = result.message;
         log("success", "Mobile app launched", target);
         ok = true;
+      } else if (action === "mobile_check") {
+        const allowed = await requirePermission(
+          "command",
+          "mobile_check",
+          String(args.id ?? args.platform ?? "auto"),
+          "Run the unified mobile device check (boot, screenshot, logs, optional URL).",
+        );
+        if (!allowed) throw new Error("The user denied permission for the mobile check.");
+        const check = await runMobileCheck(analysis.rootPath, {
+          platform: args.platform === "android" ? "android" : args.platform === "ios" ? "ios" : undefined,
+          id: typeof args.id === "string" ? args.id : undefined,
+          boot: args.boot === true,
+          screenshot: args.screenshot !== false,
+          logs: args.logs === true,
+          openUrl: typeof args.openUrl === "string" ? args.openUrl : undefined,
+          logLimit: Number(args.logLimit) || undefined,
+        });
+        if (check.screenshot) evidence.push({ path: check.screenshot.path, label: "Mobile check screenshot" });
+        observation = check.summary;
+        ok = Boolean(check.device) && check.warnings.length === 0;
+        log(ok ? "success" : "warn", "Mobile check complete", check.device ? check.device.name : "no device");
       } else if (action === "open_mobile_url") {
         const platform = args.platform === "android" ? "android" : "ios";
         const id = String(args.id ?? "").trim();
@@ -3921,6 +3948,8 @@ export async function runAgentTask(
           format: args.format === "png" ? "png" : undefined,
           durationMs: Number(args.durationMs) || undefined,
           frequency: Number(args.frequency) || undefined,
+          loop: args.loop === true,
+          fps: Number(args.fps) || undefined,
         });
         if (!changedFiles.includes(created.path)) changedFiles.push(created.path);
         evidence.push({ path: created.path, label: "Placeholder asset" });

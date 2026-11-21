@@ -35,6 +35,13 @@ test("creates deterministic SVG placeholders and rejects escapes", async () => {
     });
     assert.equal(sheet.path, "assets/sheet.svg");
     assert.match(await fs.readFile(path.join(root, sheet.path), "utf8"), /<g transform=/);
+    assert.equal(sheet.metadataPath, "assets/sheet.json");
+    const metadata = JSON.parse(await fs.readFile(path.join(root, "assets/sheet.json"), "utf8")) as {
+      frameWidth: number;
+      columns: number;
+    };
+    assert.equal(metadata.columns, 4);
+    assert.equal(metadata.frameWidth, 128);
 
     const sound = await createPlaceholderAsset(root, {
       path: "assets/beep.wav",
@@ -46,6 +53,16 @@ test("creates deterministic SVG placeholders and rejects escapes", async () => {
     const wav = await fs.readFile(path.join(root, sound.path));
     assert.equal(wav.subarray(0, 4).toString(), "RIFF");
     assert.equal(wav.subarray(8, 12).toString(), "WAVE");
+
+    const music = await createPlaceholderAsset(root, {
+      path: "assets/loop",
+      kind: "music",
+      durationMs: 1200,
+      frequency: 220,
+      loop: true,
+    });
+    assert.equal(music.path, "assets/loop.wav");
+    assert.equal((await fs.readFile(path.join(root, music.path))).subarray(0, 4).toString(), "RIFF");
 
     await assert.rejects(
       () => createPlaceholderAsset(root, { path: "../escape.svg", kind: "icon" }),

@@ -5,7 +5,8 @@ export type PlaceholderAssetKind =
   | "background"
   | "button"
   | "splash"
-  | "sound";
+  | "sound"
+  | "music";
 
 export type PlaceholderAssetFormat = "svg" | "png";
 
@@ -20,6 +21,8 @@ export interface PlaceholderAssetRequest {
   format?: PlaceholderAssetFormat;
   durationMs?: number;
   frequency?: number;
+  loop?: boolean;
+  fps?: number;
 }
 
 export interface PlaceholderAssetResult {
@@ -27,4 +30,5 @@ export interface PlaceholderAssetResult {
   bytes: number;
   mime: "image/svg+xml" | "image/png" | "audio/wav";
   kind: PlaceholderAssetKind;
+  metadataPath?: string;
 }
