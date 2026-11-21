@@ -70,6 +70,7 @@ import {
   writeSourceFile,
 } from "../editor";
 import { chat, type ChatMessage } from "./providers";
+import { chatComplete } from "./complete";
 import { resolveProvider } from "./settings";
 import { recordUsage } from "./usage";
 import { recordModelOutcome } from "./modelStats";
@@ -1415,6 +1416,26 @@ export async function editSourceFile(
   };
 }
 
+async function chatCompleteTracked(
+  projectId: string,
+  config: Awaited<ReturnType<typeof resolveProvider>>,
+  messages: ChatMessage[],
+  options: Parameters<typeof chat>[2],
+  kind: string,
+): Promise<{ text: string; tokenUsage: AiTokenUsage; truncated: boolean }> {
+  const result = await chatComplete(config, messages, options);
+  await recordUsage({
+    projectId,
+    provider: config.id,
+    model: config.model,
+    kind,
+    inputTokens: result.tokenUsage.inputTokens,
+    outputTokens: result.tokenUsage.outputTokens,
+    totalTokens: result.tokenUsage.totalTokens,
+  });
+  return result;
+}
+
 export async function askProject(
   projectId: string,
   question: string,
@@ -1516,7 +1537,7 @@ export async function askProject(
     },
   ];
 
-  const completion = await chatTracked(projectId, config, messages, { maxTokens: 1800, temperature: 0.15 }, "chat");
+  const completion = await chatCompleteTracked(projectId, config, messages, { maxTokens: 1800, temperature: 0.15 }, "chat");
   await recordConversation(projectId, question, completion.text, config.id, config.model).catch(() => {
     // conversation indexing is best-effort
   });
@@ -4539,7 +4560,7 @@ export async function runAgentTask(
         "Prompt selected",
         `${finalPrompt.id} v${finalPrompt.version}${finalPrompt.source !== "default" ? ` · ${finalPrompt.source}` : ""}`,
       );
-      const finalCompletion = await chatTracked(
+      const finalCompletion = await chatCompleteTracked(
         projectId,
         config,
         [

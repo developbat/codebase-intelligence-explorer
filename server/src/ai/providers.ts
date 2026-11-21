@@ -6,13 +6,14 @@ export interface ChatMessage {
   content: string;
 }
 
-interface ChatOptions {
+export interface ChatOptions {
   maxTokens?: number;
   temperature?: number;
   timeoutMs?: number;
   signal?: AbortSignal;
   onUsage?: (usage: AiTokenUsage) => void;
   onToken?: (chunk: string) => void;
+  onFinishReason?: (reason: string | undefined) => void;
 }
 
 async function request(
@@ -216,6 +217,7 @@ async function readOpenAiStream(
     reader.releaseLock();
   }
 
+  options.onFinishReason?.(finishReason);
   if (usage) {
     const inputTokens = usage.prompt_tokens ?? 0;
     const outputTokens = usage.completion_tokens ?? 0;
@@ -277,8 +279,10 @@ async function chatOpenAi(config: ResolvedProvider, messages: ChatMessage[], opt
   }
   if (streaming && body.stream === true) return readOpenAiStream(response, options);
   const payload = (await response.json()) as {
+    choices?: { finish_reason?: string }[];
     usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
   };
+  options.onFinishReason?.(payload.choices?.[0]?.finish_reason);
   if (payload.usage) {
     const inputTokens = payload.usage.prompt_tokens ?? 0;
     const outputTokens = payload.usage.completion_tokens ?? 0;
@@ -323,6 +327,7 @@ async function chatAnthropic(config: ResolvedProvider, messages: ChatMessage[], 
     stop_reason?: string;
     usage?: { input_tokens?: number; output_tokens?: number };
   };
+  options.onFinishReason?.(payload.stop_reason);
   if (payload.usage) {
     const inputTokens = payload.usage.input_tokens ?? 0;
     const outputTokens = payload.usage.output_tokens ?? 0;
@@ -372,6 +377,7 @@ async function chatGemini(config: ResolvedProvider, messages: ChatMessage[], opt
       totalTokenCount?: number;
     };
   };
+  options.onFinishReason?.(payload.candidates?.[0]?.finishReason);
   if (payload.usageMetadata) {
     const inputTokens = payload.usageMetadata.promptTokenCount ?? 0;
     const outputTokens = payload.usageMetadata.candidatesTokenCount ?? 0;

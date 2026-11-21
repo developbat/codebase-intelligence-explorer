@@ -439,7 +439,7 @@ function aggregateResult(
     ...queue.tasks.map(
       (task) =>
         `- ${task.status === "done" ? "✅" : task.status === "failed" ? "❌" : task.status === "blocked" ? "⏸" : "⏳"} \`${task.id}\` ${task.title} · ${task.role}/${task.effort}${
-          task.resultSummary ? ` — ${task.resultSummary.slice(0, 240)}` : ""
+          task.resultSummary ? ` — ${task.resultSummary}` : ""
         }`,
     ),
   ].filter(Boolean);

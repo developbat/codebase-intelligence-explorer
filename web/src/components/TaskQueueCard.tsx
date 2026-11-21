@@ -84,7 +84,7 @@ export function TaskQueueCard({
                 {task.attempts > 1 ? ` · ${task.attempts} ${t("attempts")}` : ""}
                 {task.tokenUsage?.totalTokens ? ` · ${tokenLabel(task.tokenUsage.totalTokens)} ${t("tokens")}` : ""}
               </small>
-              {task.resultSummary ? <p>{task.resultSummary.slice(0, 360)}</p> : null}
+              {task.resultSummary ? <p>{task.resultSummary}</p> : null}
               {task.verification?.command ? (
                 <span className={`task-queue-verify ${task.verification.ok ? "is-ok" : "is-failed"}`}>
                   {task.verification.ok ? <CheckCircle2 size={9} /> : <MinusCircle size={9} />}
