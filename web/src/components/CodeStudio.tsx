@@ -199,6 +199,10 @@ interface CodeStudioProps {
   onInitialPromptConsumed?: () => void;
 }
 
+function isImagePreviewPath(filePath: string): boolean {
+  return /\.(svg|png|jpe?g|gif|webp|ico)$/i.test(filePath);
+}
+
 function languageExtension(filePath: string) {
   const extension = filePath.split(".").pop()?.toLowerCase() ?? "";
   const fileName = filePath.split("/").pop()?.toLowerCase() ?? "";
@@ -4150,6 +4154,17 @@ export function CodeStudio({
                   title={t("Live dev server preview")}
                   sandbox="allow-scripts allow-forms allow-same-origin allow-popups allow-modals"
                 />
+              ) : activeFile && isImagePreviewPath(activeFile) ? (
+                <div className="studio-image-preview">
+                  <img
+                    src={`/api/projects/${analysis.id}/preview/${activeFile
+                      .split("/")
+                      .map(encodeURIComponent)
+                      .join("/")}`}
+                    alt={activeFile}
+                  />
+                  <small>{activeFile}</small>
+                </div>
               ) : htmlFiles.length > 0 && effectivePreviewPath ? (
                 <>
                   <select

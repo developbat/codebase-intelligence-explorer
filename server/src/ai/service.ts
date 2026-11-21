@@ -60,6 +60,7 @@ import {
 import { createPlaceholderAsset } from "../placeholderAssets";
 import { checkToolchains, installToolchain } from "../toolchains";
 import { runGameCheck } from "../gameCheck";
+import { createGraphic } from "../graphics";
 import {
   deleteProjectPath,
   readSourceFile,
@@ -2424,6 +2425,7 @@ export function agentToolCatalog(
     '{"action":"list_mobile_devices","args":{}}',
     '{"action":"check_toolchains","args":{}}',
     '{"action":"game_check","args":{"path":"index.html","steps":[{"action":"expectVisible","selector":"canvas"}]}}',
+    '{"action":"create_graphic","args":{"path":"assets/report.svg","kind":"bar","title":"Weekly progress","data":[{"label":"Mon","value":4},{"label":"Tue","value":7},{"label":"Wed","value":5}]}}',
   ];
   if (!readOnly) {
     const approval = writeApproved ? "" : "  // requires user approval";
@@ -3206,6 +3208,7 @@ export async function runAgentTask(
       "check_toolchains",
       "install_toolchain",
       "game_check",
+      "create_graphic",
       "write_file",
       "replace_in_file",
       "replace_many",
@@ -3252,6 +3255,7 @@ export async function runAgentTask(
         mobile_check: "Checking a mobile device…",
         check_toolchains: "Checking toolchains…",
         game_check: "Checking the game scene…",
+        create_graphic: "Creating a graphic…",
         install_toolchain: "Installing a toolchain…",
         run_project_tool: "Running saved project tool…",
         delegate_research: "Delegating read-only research…",
@@ -4016,6 +4020,35 @@ export async function runAgentTask(
         evidence.push({ path: created.path, label: "Placeholder asset" });
         observation = `Created ${created.kind} SVG placeholder: ${created.path} (${created.bytes} bytes).`;
         log("success", "Placeholder asset created", created.path);
+        ok = true;
+      } else if (action === "create_graphic") {
+        const graphicPath = normalizeAgentPath(analysis.rootPath, args.path);
+        if (!graphicPath) throw new Error("A graphic path is required.");
+        if (isSecretAgentPath(graphicPath)) throw new Error("Writing environment, key or Git internals graphics is denied.");
+        const allowed = await requirePermission(
+          "write",
+          "create_graphic",
+          graphicPath,
+          "Create a deterministic SVG/PNG chart, flow or illustration.",
+          { preview: String(args.kind ?? "bar") },
+        );
+        if (!allowed) throw new Error("The user denied permission to create this graphic.");
+        const created = await createGraphic(analysis.rootPath, {
+          path: graphicPath,
+          kind: args.kind as Parameters<typeof createGraphic>[1]["kind"],
+          title: typeof args.title === "string" ? args.title : undefined,
+          subtitle: typeof args.subtitle === "string" ? args.subtitle : undefined,
+          data: Array.isArray(args.data) ? (args.data as Parameters<typeof createGraphic>[1]["data"]) : undefined,
+          steps: Array.isArray(args.steps) ? args.steps.map(String) : undefined,
+          width: Number(args.width) || undefined,
+          height: Number(args.height) || undefined,
+          colors: Array.isArray(args.colors) ? args.colors.map(String) : undefined,
+          format: args.format === "png" ? "png" : undefined,
+        });
+        if (!changedFiles.includes(created.path)) changedFiles.push(created.path);
+        evidence.push({ path: created.path, label: "Generated graphic" });
+        observation = `Created ${created.kind} graphic: ${created.path} (${created.bytes} bytes, ${created.mime}).`;
+        log("success", "Graphic created", created.path);
         ok = true;
       } else if (action === "write_file") {
         if (changedFiles.length >= AGENT_MAX_WRITES) throw new Error(`Write limit reached (${AGENT_MAX_WRITES} files).`);

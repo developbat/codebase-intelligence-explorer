@@ -201,7 +201,7 @@ export async function createPlaceholderAsset(
   };
 }
 
-async function renderSvgPng(svg: string, width: number, height: number): Promise<Buffer> {
+export async function renderSvgPng(svg: string, width: number, height: number): Promise<Buffer> {
   const executablePath = await browserExecutable();
   let browser;
   try {

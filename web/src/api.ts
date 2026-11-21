@@ -58,6 +58,7 @@ import type {
   BrowserCheckResult,
 } from "../../shared/browserCheck";
 import type { GameCheckOptions, GameCheckResult } from "../../shared/gameCheck";
+import type { GraphicRequest, GraphicResult } from "../../shared/graphics";
 import type { ModelHealth } from "../../shared/modelHealth";
 import type {
   MobileBootResult,
@@ -551,6 +552,12 @@ export const api = {
 
   projectTools: (projectId: string) =>
     request<ProjectToolList>(`/api/projects/${projectId}/tools`),
+
+  createGraphic: (projectId: string, input: GraphicRequest) =>
+    request<GraphicResult>(`/api/projects/${projectId}/graphics`, {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
 
   gameCheck: (projectId: string, options: GameCheckOptions = {}) =>
     request<GameCheckResult>(`/api/projects/${projectId}/game-check`, {

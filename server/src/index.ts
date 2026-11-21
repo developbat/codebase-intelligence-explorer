@@ -35,6 +35,7 @@ import {
 import { createPlaceholderAsset } from "./placeholderAssets";
 import { checkToolchains, installToolchain } from "./toolchains";
 import { runGameCheck } from "./gameCheck";
+import { createGraphic } from "./graphics";
 import { getProjectTaskQueue, planProjectTasks, runProjectLoop } from "./ai/loop";
 import { getPublicSettings, updateAiSettings } from "./ai/settings";
 import { getPrompt, getPromptVersion, listPrompts, renderPrompt, resetPrompt, savePrompt } from "./ai/prompts";
@@ -525,6 +526,28 @@ app.get("/api/projects/:id/tools", async (req, res) => {
 
 app.get("/api/browser-check/status", async (_req, res) => {
   res.json({ available: await isBrowserCheckAvailable() });
+});
+
+app.post("/api/projects/:id/graphics", async (req, res) => {
+  try {
+    const analysis = await loadAnalysis(req.params.id);
+    res.status(201).json(
+      await createGraphic(analysis.rootPath, {
+        path: typeof req.body?.path === "string" ? req.body.path : "",
+        kind: req.body?.kind,
+        title: typeof req.body?.title === "string" ? req.body.title : undefined,
+        subtitle: typeof req.body?.subtitle === "string" ? req.body.subtitle : undefined,
+        data: Array.isArray(req.body?.data) ? req.body.data : undefined,
+        steps: Array.isArray(req.body?.steps) ? req.body.steps : undefined,
+        width: Number(req.body?.width) || undefined,
+        height: Number(req.body?.height) || undefined,
+        colors: Array.isArray(req.body?.colors) ? req.body.colors : undefined,
+        format: req.body?.format === "png" ? "png" : undefined,
+      }),
+    );
+  } catch (error) {
+    handleError(res, error, 400);
+  }
 });
 
 app.post("/api/projects/:id/game-check", async (req, res) => {
