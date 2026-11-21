@@ -387,6 +387,9 @@ app.post("/api/projects/:id/assets/placeholder", async (req, res) => {
         label: typeof req.body?.label === "string" ? req.body.label : undefined,
         color: typeof req.body?.color === "string" ? req.body.color : undefined,
         background: typeof req.body?.background === "string" ? req.body.background : undefined,
+        format: req.body?.format === "png" ? "png" : undefined,
+        durationMs: Number(req.body?.durationMs) || undefined,
+        frequency: Number(req.body?.frequency) || undefined,
       }),
     );
   } catch (error) {

@@ -1,4 +1,13 @@
-export type PlaceholderAssetKind = "icon" | "sprite" | "background" | "button" | "splash";
+export type PlaceholderAssetKind =
+  | "icon"
+  | "sprite"
+  | "spritesheet"
+  | "background"
+  | "button"
+  | "splash"
+  | "sound";
+
+export type PlaceholderAssetFormat = "svg" | "png";
 
 export interface PlaceholderAssetRequest {
   path: string;
@@ -8,11 +17,14 @@ export interface PlaceholderAssetRequest {
   label?: string;
   color?: string;
   background?: string;
+  format?: PlaceholderAssetFormat;
+  durationMs?: number;
+  frequency?: number;
 }
 
 export interface PlaceholderAssetResult {
   path: string;
   bytes: number;
-  mime: "image/svg+xml";
+  mime: "image/svg+xml" | "image/png" | "audio/wav";
   kind: PlaceholderAssetKind;
 }

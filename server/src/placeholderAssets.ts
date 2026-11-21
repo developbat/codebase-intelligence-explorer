@@ -1,6 +1,8 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { chromium } from "playwright-core";
 import { isWithin } from "./scanner";
+import { browserExecutable } from "./browserCheck";
 import type {
   PlaceholderAssetKind,
   PlaceholderAssetRequest,
@@ -31,6 +33,25 @@ function svgFor(
 ): string {
   const safeLabel = xml(label.slice(0, 40));
   const common = `xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}"`;
+  if (kind === "spritesheet") {
+    const cols = 4;
+    const rows = 4;
+    const cellW = width / cols;
+    const cellH = height / rows;
+    const frames = Array.from({ length: cols * rows }, (_, index) => {
+      const col = index % cols;
+      const row = Math.floor(index / cols);
+      const cx = col * cellW + cellW / 2;
+      const cy = row * cellH + cellH / 2;
+      const radius = Math.min(cellW, cellH) * (0.22 + (index % 3) * 0.03);
+      return `<g transform="translate(${cx} ${cy})"><circle r="${radius}" fill="${accent}" opacity="${0.55 + (index % 4) * 0.1}"/><circle cx="${-radius * 0.25}" cy="${-radius * 0.15}" r="${Math.max(1, radius * 0.08)}" fill="${background}"/><circle cx="${radius * 0.25}" cy="${-radius * 0.15}" r="${Math.max(1, radius * 0.08)}" fill="${background}"/></g>`;
+    }).join("");
+    return `<svg ${common}>
+  <rect width="${width}" height="${height}" fill="${background}" opacity="0.35"/>
+  ${frames}
+</svg>
+`;
+  }
   if (kind === "sprite") {
     return `<svg ${common}>
   <g fill="none" stroke="${accent}" stroke-width="${Math.max(2, width / 48)}" stroke-linecap="round">
@@ -86,33 +107,107 @@ export async function createPlaceholderAsset(
 ): Promise<PlaceholderAssetResult> {
   const relativeInput = (request.path ?? "").trim().replace(/^\/+/, "");
   if (!relativeInput) throw new Error("An asset path is required.");
-  const relative = /\.svg$/i.test(relativeInput) ? relativeInput : `${relativeInput}.svg`;
-  if (!/\.svg$/i.test(relative)) throw new Error("Placeholder assets must use the .svg extension.");
+  const kindHint = request.kind ?? "icon";
+  const defaultExt = kindHint === "sound" ? ".wav" : request.format === "png" ? ".png" : ".svg";
+  const base = relativeInput.replace(/\.(svg|png|wav)$/i, "");
+  const relative = `${base}${defaultExt}`;
   if (relative.split("/").some((segment) => segment === ".." || segment === ".git")) {
     throw new Error("Asset path is outside the project.");
   }
   const absolute = path.resolve(rootPath, relative);
   if (!isWithin(rootPath, absolute)) throw new Error("Asset path is outside the project.");
   const kind = (request.kind ?? "icon") as PlaceholderAssetKind;
-  if (!["icon", "sprite", "background", "button", "splash"].includes(kind)) {
+  if (!["icon", "sprite", "spritesheet", "background", "button", "splash", "sound"].includes(kind)) {
     throw new Error("Unknown placeholder asset kind.");
   }
   const width = Math.max(32, Math.min(2048, Math.round(request.width ?? 256)));
   const height = Math.max(32, Math.min(2048, Math.round(request.height ?? width)));
-  const svg = svgFor(
-    kind,
-    width,
-    height,
-    request.label ?? "",
-    color(request.color, "#5eead4"),
-    color(request.background, "#0b1220"),
-  );
+  const colorValue = color(request.color, "#5eead4");
+  const background = color(request.background, "#0b1220");
+  const label = request.label ?? "";
+
+  if (kind === "sound") {
+    const wav = makeWav(
+      Math.max(100, Math.min(5_000, Math.round(request.durationMs ?? 600))),
+      Math.max(80, Math.min(4_000, Math.round(request.frequency ?? 440))),
+    );
+    await fs.mkdir(path.dirname(absolute), { recursive: true });
+    await fs.writeFile(absolute, wav);
+    return {
+      path: relative,
+      bytes: wav.length,
+      mime: "audio/wav",
+      kind,
+    };
+  }
+
+  const svg = svgFor(kind, width, height, label, colorValue, background);
   await fs.mkdir(path.dirname(absolute), { recursive: true });
-  await fs.writeFile(absolute, svg, "utf8");
+  const wantsPng = request.format === "png" || /\.png$/i.test(relative);
+  if (!wantsPng) {
+    await fs.writeFile(absolute, svg, "utf8");
+    return {
+      path: relative,
+      bytes: Buffer.byteLength(svg, "utf8"),
+      mime: "image/svg+xml",
+      kind,
+    };
+  }
+  const png = await renderSvgPng(svg, width, height);
+  await fs.writeFile(absolute, png);
   return {
     path: relative,
-    bytes: Buffer.byteLength(svg, "utf8"),
-    mime: "image/svg+xml",
+    bytes: png.length,
+    mime: "image/png",
     kind,
   };
+}
+
+async function renderSvgPng(svg: string, width: number, height: number): Promise<Buffer> {
+  const executablePath = await browserExecutable();
+  let browser;
+  try {
+    browser = await chromium.launch({ headless: true, executablePath, args: ["--no-sandbox"] });
+    const page = await browser.newPage({ viewport: { width, height } });
+    await page.setContent(
+      `<html><body style="margin:0;padding:0;background:transparent;overflow:hidden">${svg}</body></html>`,
+      { waitUntil: "load" },
+    );
+    return await page.screenshot({
+      type: "png",
+      omitBackground: true,
+      clip: { x: 0, y: 0, width, height },
+    });
+  } finally {
+    await browser?.close().catch(() => undefined);
+  }
+}
+
+function makeWav(durationMs: number, frequency: number): Buffer {
+  const sampleRate = 22_050;
+  const samples = Math.floor((sampleRate * durationMs) / 1000);
+  const data = Buffer.alloc(samples * 2);
+  for (let index = 0; index < samples; index += 1) {
+    const t = index / sampleRate;
+    const fadeIn = Math.min(1, index / 220);
+    const fadeOut = Math.min(1, (samples - index) / 550);
+    const envelope = fadeIn * fadeOut * 0.35;
+    const value = Math.sin(2 * Math.PI * frequency * t) * envelope;
+    data.writeInt16LE(Math.round(value * 32767), index * 2);
+  }
+  const header = Buffer.alloc(44);
+  header.write("RIFF", 0);
+  header.writeUInt32LE(36 + data.length, 4);
+  header.write("WAVE", 8);
+  header.write("fmt ", 12);
+  header.writeUInt32LE(16, 16);
+  header.writeUInt16LE(1, 20);
+  header.writeUInt16LE(1, 22);
+  header.writeUInt32LE(sampleRate, 24);
+  header.writeUInt32LE(sampleRate * 2, 28);
+  header.writeUInt16LE(2, 32);
+  header.writeUInt16LE(16, 34);
+  header.write("data", 36);
+  header.writeUInt32LE(data.length, 40);
+  return Buffer.concat([header, data]);
 }

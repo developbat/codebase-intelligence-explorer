@@ -27,6 +27,26 @@ test("creates deterministic SVG placeholders and rejects escapes", async () => {
     });
     assert.match(await fs.readFile(path.join(root, sprite.path), "utf8"), /sprite|circle|path/);
 
+    const sheet = await createPlaceholderAsset(root, {
+      path: "assets/sheet",
+      kind: "spritesheet",
+      width: 512,
+      height: 512,
+    });
+    assert.equal(sheet.path, "assets/sheet.svg");
+    assert.match(await fs.readFile(path.join(root, sheet.path), "utf8"), /<g transform=/);
+
+    const sound = await createPlaceholderAsset(root, {
+      path: "assets/beep.wav",
+      kind: "sound",
+      durationMs: 200,
+      frequency: 440,
+    });
+    assert.equal(sound.mime, "audio/wav");
+    const wav = await fs.readFile(path.join(root, sound.path));
+    assert.equal(wav.subarray(0, 4).toString(), "RIFF");
+    assert.equal(wav.subarray(8, 12).toString(), "WAVE");
+
     await assert.rejects(
       () => createPlaceholderAsset(root, { path: "../escape.svg", kind: "icon" }),
       /outside the project/i,

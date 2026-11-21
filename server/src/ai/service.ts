@@ -2428,6 +2428,8 @@ export function agentToolCatalog(
     tools.push(`{"action":"run_project_tool","args":{"name":"ui-check"}}${commandApproval}  // runs a saved project tool/script`);
     tools.push('{"action":"delegate_research","args":{"goal":"specific read-only question to investigate"}}  // returns a compact summary only');
     tools.push(`{"action":"placeholder_asset","args":{"path":"assets/player.svg","kind":"sprite","width":128,"height":128,"label":"player"}}${approval}`);
+    tools.push(`{"action":"placeholder_asset","args":{"path":"assets/icon.png","kind":"icon","format":"png","width":1024,"height":1024,"label":"App"}}${approval}`);
+    tools.push(`{"action":"placeholder_asset","args":{"path":"assets/beep.wav","kind":"sound","durationMs":500,"frequency":660}}${approval}`);
     tools.push(`{"action":"boot_mobile_device","args":{"platform":"ios","id":"SIMULATOR-UDID"}}${commandApproval}`);
     tools.push(`{"action":"mobile_screenshot","args":{"platform":"ios","id":"SIMULATOR-UDID"}}${commandApproval}`);
   }
@@ -3837,6 +3839,9 @@ export async function runAgentTask(
           label: typeof args.label === "string" ? args.label : undefined,
           color: typeof args.color === "string" ? args.color : undefined,
           background: typeof args.background === "string" ? args.background : undefined,
+          format: args.format === "png" ? "png" : undefined,
+          durationMs: Number(args.durationMs) || undefined,
+          frequency: Number(args.frequency) || undefined,
         });
         if (!changedFiles.includes(created.path)) changedFiles.push(created.path);
         evidence.push({ path: created.path, label: "Placeholder asset" });

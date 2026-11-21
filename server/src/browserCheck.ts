@@ -24,7 +24,7 @@ const CHROME_CANDIDATES = [
   "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
 ].filter((value): value is string => Boolean(value));
 
-async function browserExecutable(): Promise<string> {
+export async function browserExecutable(): Promise<string> {
   for (const candidate of CHROME_CANDIDATES) {
     try {
       await fs.access(candidate);
