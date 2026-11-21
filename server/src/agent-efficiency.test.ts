@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { shouldRetryWithEditFirst } from "./ai/loop";
+import { blockDependentsOf, shouldRetryWithEditFirst, taskLooksLikeInspection } from "./ai/loop";
 import {
   isFastEditTask,
   preferredVerificationCommand,
@@ -61,4 +61,84 @@ test("step-limit failures without edits retry with the edit-first fast profile",
   assert.equal(shouldRetryWithEditFirst("max_steps", ["js/script.js"]), false);
   assert.equal(shouldRetryWithEditFirst("finished", []), false);
   assert.equal(shouldRetryWithEditFirst("error", []), false);
+});
+
+test("inspection tasks are recognized and may finish without edits", () => {
+  assert.equal(
+    taskLooksLikeInspection({
+      id: "task-1",
+      title: "Inspect existing project files and structure",
+      detail: "Read the files and report the structure.",
+      status: "in_progress",
+      effort: "standard",
+      role: "main",
+      dependsOn: [],
+      attempts: 0,
+      changedFiles: [],
+      commands: [],
+      createdAt: "",
+      updatedAt: "",
+    }),
+    true,
+  );
+  assert.equal(
+    taskLooksLikeInspection({
+      id: "task-2",
+      title: "Add date and time input fields",
+      detail: "Implement the form changes.",
+      status: "pending",
+      effort: "simple",
+      role: "fast",
+      dependsOn: [],
+      attempts: 0,
+      changedFiles: [],
+      commands: [],
+      createdAt: "",
+      updatedAt: "",
+    }),
+    false,
+  );
+});
+
+test("a failed task blocks its pending dependents instead of leaving the queue stuck", () => {
+  const base = {
+    version: 1 as const,
+    projectId: "p",
+    goal: "g",
+    status: "running" as const,
+    createdAt: "",
+    updatedAt: "",
+    notesPath: "",
+    planPath: "",
+    contextPath: "",
+    digestPath: "",
+  };
+  const task = (id: string, dependsOn: string[], status: "failed" | "pending" | "done") => ({
+    id,
+    title: id,
+    detail: id,
+    status,
+    effort: "standard" as const,
+    role: "main" as const,
+    dependsOn,
+    attempts: 0,
+    changedFiles: [],
+    commands: [],
+    createdAt: "",
+    updatedAt: "",
+  });
+  const queue = {
+    ...base,
+    tasks: [
+      task("a", [], "failed"),
+      task("b", ["a"], "pending"),
+      task("c", ["b"], "pending"),
+      task("d", [], "pending"),
+    ],
+  };
+  const blocked = blockDependentsOf(queue, "a");
+  assert.equal(blocked.tasks.find((item) => item.id === "a")?.status, "failed");
+  assert.equal(blocked.tasks.find((item) => item.id === "b")?.status, "blocked");
+  assert.equal(blocked.tasks.find((item) => item.id === "c")?.status, "blocked");
+  assert.equal(blocked.tasks.find((item) => item.id === "d")?.status, "pending");
 });

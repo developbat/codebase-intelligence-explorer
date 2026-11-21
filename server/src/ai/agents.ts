@@ -202,7 +202,9 @@ export async function pickAlternateAgentModel(exclude?: {
   const configured = settings.providers.filter(
     (provider) => (provider.hasKey || provider.custom) && provider.id !== exclude?.provider,
   );
-  const roleOrder: AiAgentRole[] = ["reviewer", "planner", "main", "fast"];
+  // Coding fallbacks should stay cheap and fast first. Reviewer/planner models
+  // are often the most expensive ones and should be a last resort.
+  const roleOrder: AiAgentRole[] = ["fast", "main", "planner", "reviewer"];
   const candidates: { provider: string; model: string; reason: string }[] = [];
   for (const role of roleOrder) {
     const configuredRole = settings.agentRoles.find((item) => item.role === role);
@@ -243,9 +245,14 @@ export async function pickAlternateAgentModel(exclude?: {
     return !isModelUnhealthy(item, settings.modelHealth);
   });
   const pool = healthy.length > 0 ? healthy : candidates;
+  const catalogFast = pool.find((candidate) => {
+    const item = catalogLookup(catalog, candidate.provider, candidate.model);
+    return item?.roles.includes("fast");
+  });
+  if (catalogFast) return catalogFast;
   const catalogBest = pool.find((candidate) => {
     const item = catalogLookup(catalog, candidate.provider, candidate.model);
-    return item?.roles.includes("main") || item?.roles.includes("reviewer");
+    return item?.roles.includes("main");
   });
   if (catalogBest) return catalogBest;
   const coderFirst = pool.find((candidate) => /coder|code|deepseek|claude|gpt/i.test(candidate.model));

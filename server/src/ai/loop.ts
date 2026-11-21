@@ -258,6 +258,44 @@ function taskLooksLikeWrite(task: ProjectTask): boolean {
   );
 }
 
+export function blockDependentsOf(
+  queue: ProjectTaskQueue,
+  failedId: string,
+): ProjectTaskQueue {
+  const blockedIds = new Set<string>([failedId]);
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const item of queue.tasks) {
+      if (item.status !== "pending" || blockedIds.has(item.id)) continue;
+      if (item.dependsOn.some((dependency) => blockedIds.has(dependency))) {
+        blockedIds.add(item.id);
+        changed = true;
+      }
+    }
+  }
+  return {
+    ...queue,
+    tasks: queue.tasks.map((item) =>
+      blockedIds.has(item.id) && item.id !== failedId && item.status === "pending"
+        ? {
+            ...item,
+            status: "blocked",
+            resultSummary: `Blocked because dependency ${failedId} failed.`,
+            updatedAt: nowIso(),
+          }
+        : item,
+    ),
+  };
+}
+
+export function taskLooksLikeInspection(task: ProjectTask): boolean {
+  const title = task.title;
+  const inspection = /\b(inspect|read|review|analy[sz]e|research|understand|explore|audit)\b|incele|oku|gözden geçir|araştır|analiz et/i;
+  const write = /\b(fix|update|add|create|write|implement|change|remove|delete|rename|move|refactor)\b|düzelt|ekle|oluştur|yaz|güncelle|değiştir|sil|taşı/i;
+  return inspection.test(title) && !write.test(title);
+}
+
 function taskLooksLikeVerification(task: ProjectTask): boolean {
   return /\b(verify|verification|check|test|validate|confirm|review)\b|doğrula|kontrol|test et|incele/i.test(
     `${task.title} ${task.detail}`,
@@ -511,6 +549,8 @@ export async function runProjectLoop(
         taskConfig = await resolveProvider(alternate.provider, alternate.model).catch(
           () => taskConfig,
         );
+        options.provider = alternate.provider;
+        options.model = alternate.model;
       }
     }
     queue = markTask(queue, task.id, {
@@ -531,7 +571,13 @@ export async function runProjectLoop(
           allowWrite: options.allowWrite === true,
           allowCommands: options.allowCommands === true,
           language: options.language,
-          maxSteps: current.effort === "simple" ? 10 : current.effort === "hard" ? 24 : 16,
+          maxSteps: taskLooksLikeInspection(current)
+            ? 6
+            : current.effort === "simple"
+              ? 8
+              : current.effort === "hard"
+                ? 18
+                : 12,
           mode: "auto",
           interactive: true,
           forceFast: current.effort === "simple",
@@ -586,16 +632,19 @@ export async function runProjectLoop(
           String(step.args.command ?? ""),
         ),
     );
+    const inspectionTask = taskLooksLikeInspection(task);
     const writeWithoutChange =
+      !inspectionTask &&
       taskLooksLikeWrite(task) &&
       result.changedFiles.length === 0 &&
       !mutatingCommand &&
       !summaryAllowsNoChanges(result.summary);
     const verificationBlocker =
+      !inspectionTask &&
       taskLooksLikeVerification(task) &&
       summaryReportsBlocker(result.summary) &&
       !summaryAllowsNoChanges(result.summary);
-    const pendingWork = reportsRemainingWork(result.summary);
+    const pendingWork = !inspectionTask && reportsRemainingWork(result.summary);
     const status =
       result.stoppedReason === "aborted"
         ? "blocked"
@@ -608,6 +657,17 @@ export async function runProjectLoop(
           : "done";
     if (status === "failed" && (malformedToolReply || /invalid tool protocol/i.test(result.summary))) {
       avoidModels.add(`${taskConfig.id}::${taskConfig.model}`);
+    }
+    const unavailableModel = /error 410\b|end of life|no longer available|model_not_found|model .* not found|does not exist/i.test(
+      result.summary,
+    );
+    if (unavailableModel) {
+      avoidModels.add(`${taskConfig.id}::${taskConfig.model}`);
+      await appendTaskContext(
+        analysis.rootPath,
+        `Model unavailable · ${task.id}`,
+        `${taskConfig.id}/${taskConfig.model} is unavailable. The run will switch to a working model.`,
+      );
     }
     queue = markTask(queue, task.id, {
       status,
@@ -661,6 +721,10 @@ export async function runProjectLoop(
           provider: taskConfig.id,
           model: taskConfig.model,
         }).catch(() => null);
+        if (alternate) {
+          options.provider = alternate.provider;
+          options.model = alternate.model;
+        }
         queue = markTask(queue, task.id, {
           status: "pending",
           effort: task.effort === "simple" ? "standard" : task.effort,
@@ -674,6 +738,12 @@ export async function runProjectLoop(
       }
       queue = await saveQueue(analysis.rootPath, queue);
       emit({ type: "task", queue, task: queue.tasks.find((item) => item.id === task.id) });
+    }
+    const finalTask = queue.tasks.find((item) => item.id === task.id);
+    if (finalTask && (finalTask.status === "failed" || finalTask.status === "blocked")) {
+      queue = blockDependentsOf(queue, finalTask.id);
+      queue = await saveQueue(analysis.rootPath, queue);
+      emit({ type: "task", queue });
     }
     if (result.stoppedReason === "aborted") break;
   }

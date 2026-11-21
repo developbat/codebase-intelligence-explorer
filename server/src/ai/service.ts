@@ -1534,7 +1534,7 @@ export async function askProject(
 /* Agent mode: read, search, write and run commands in a controlled loop */
 /* ------------------------------------------------------------------ */
 
-const AGENT_MAX_STEPS = 16;
+const AGENT_MAX_STEPS = 12;
 const AGENT_MAX_ACTIONS = 40;
 const AGENT_MAX_VERIFY_ATTEMPTS = 3;
 const ACTION_INTENT =
@@ -2681,7 +2681,7 @@ export async function runAgentTask(
   // maxSteps limits model turns, not individual tool actions from a multi-call reply.
   const maxSteps = Math.max(
     2,
-    Math.min(24, options.maxSteps ?? (askMode ? 10 : fastTask ? 14 : AGENT_MAX_STEPS)),
+    Math.min(20, options.maxSteps ?? (askMode ? 8 : fastTask ? 10 : AGENT_MAX_STEPS)),
   );
   const createdAt = new Date().toISOString();
   const evidence: AiContextFile[] = [];
@@ -2937,6 +2937,10 @@ export async function runAgentTask(
   const fastSuffix = fastTask
     ? "\n\nFast task profile: this is a small, focused change. Start from the index edit map, read at most 5 files, make the edits, and finish. Complete every edit-map item (service, controller, route registration, container/DI wiring, bootstrap call site) before finishing. Do not read unrelated modules or repeat reads."
     : "";
+  const readOnlySuffix =
+    !askMode && !plan.needsWrite
+      ? "\n\nInspection profile: this task is read-only. Read at most 6 files, never re-read the same range, and finish with a compact report. Do not propose a large next-step list."
+      : "";
   const enabledSkills = await loadEnabledSkills(analysis.rootPath, projectId).catch(() => []);
   const skillsPrompt = renderSkillsForPrompt(enabledSkills);
   if (enabledSkills.length > 0) {
@@ -2952,7 +2956,8 @@ export async function runAgentTask(
       language: languageInstruction,
     }) +
     (skillsPrompt ? `\n\n${skillsPrompt}` : "") +
-    fastSuffix;
+    fastSuffix +
+    readOnlySuffix;
   log(
     "info",
     "Prompt selected",
@@ -3000,6 +3005,8 @@ export async function runAgentTask(
   };
   let modelTurns = 0;
   let writeNudges = 0;
+  let readRejections = 0;
+  let browserCheckCalls = 0;
   let remainingWorkRejected = false;
 
   for (let index = 1; ; index += 1) {
@@ -3319,6 +3326,29 @@ export async function runAgentTask(
         run_command: "Running command…",
       };
       log("tool", toolLabel[action] ?? `Running ${action}…`, agentActionTarget(args));
+    }
+
+    if (
+      !askMode &&
+      plan.needsWrite &&
+      changedFiles.length === 0 &&
+      writeNudges >= 2 &&
+      READ_ONLY_ACTIONS.has(action)
+    ) {
+      readRejections += 1;
+      step.ok = false;
+      step.observation =
+        "Read budget exhausted. No file has changed yet. Perform the edit now with replace_in_file or write_file, or finish with the exact blocker.";
+      step.durationMs = 0;
+      recordStep(step);
+      log("warn", "Read budget exhausted", action);
+      if (readRejections >= 2) {
+        stoppedReason = "error";
+        summary =
+          "Stopped after the final warning because the model kept trying to read instead of editing. No further tokens were spent.";
+      }
+      if (stoppedReason === "error") break;
+      continue;
     }
 
     if (action === "finish") {
@@ -4031,6 +4061,12 @@ export async function runAgentTask(
         ok = result.check.ok && result.check.metrics.canvases > 0;
         log(result.check.ok ? "success" : "error", "Game check complete", `${result.engine} · ${result.check.metrics.fps ?? "—"} fps`);
       } else if (action === "browser_check") {
+        browserCheckCalls += 1;
+        if (browserCheckCalls > 2) {
+          throw new Error(
+            "Browser check budget reached (2). Use the last failure details to fix the page; do not run browser_check again in this task.",
+          );
+        }
         const browserPath = typeof args.path === "string" ? args.path : "index.html";
         const rawSteps = Array.isArray(args.steps) ? args.steps : [];
         const result = await runBrowserCheck(analysis.id, analysis.rootPath, {
