@@ -3825,6 +3825,7 @@ export async function runAgentTask(
         const rawSteps = Array.isArray(args.steps) ? args.steps : [];
         const result = await runBrowserCheck(analysis.id, analysis.rootPath, {
           path: browserPath,
+          url: typeof args.url === "string" ? args.url : undefined,
           steps: rawSteps as BrowserCheckStep[],
           mobile: args.mobile === true,
           screenshot: args.screenshot === true,
@@ -3840,6 +3841,9 @@ export async function runAgentTask(
             : "",
           result.pageErrors.length > 0
             ? `Page errors:\n${result.pageErrors.slice(0, 8).join("\n")}`
+            : "",
+          result.resourceErrors.length > 0
+            ? `Resource errors:\n${result.resourceErrors.slice(0, 8).join("\n")}`
             : "",
         ]
           .filter(Boolean)

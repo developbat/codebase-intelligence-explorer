@@ -1136,9 +1136,423 @@ void main() {
   },
 };
 
+const PHASER_GAME: ExtraTemplateDefinition = {
+  id: "phaser-game",
+  name: "Phaser game",
+  description: "Phaser 3 + Vite + TypeScript arcade starter with score, timer, pointer input and restart.",
+  language: "TypeScript",
+  framework: "Phaser 3 + Vite",
+  files: [
+    "package.json",
+    "index.html",
+    "vite.config.ts",
+    "tsconfig.json",
+    "src/main.ts",
+    "src/scenes/GameScene.ts",
+    "src/styles.css",
+    "README.md",
+    ".gitignore",
+  ],
+  suggestedCommands: ["npm install", "npm run dev", "npm run typecheck", "npm run build"],
+  build: (name) => [
+    {
+      path: "package.json",
+      content: `${JSON.stringify(
+        {
+          name: slug(name),
+          private: true,
+          version: "0.1.0",
+          type: "module",
+          scripts: {
+            dev: "vite",
+            build: "tsc --noEmit && vite build",
+            typecheck: "tsc --noEmit",
+            preview: "vite preview",
+          },
+          dependencies: { phaser: "^3.90.0" },
+          devDependencies: { typescript: "^5.6.3", vite: "^5.4.11" },
+        },
+        null,
+        2,
+      )}\n`,
+    },
+    {
+      path: "index.html",
+      content: `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>${name}</title>
+  </head>
+  <body>
+    <main id="game"></main>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
+`,
+    },
+    {
+      path: "vite.config.ts",
+      content: `import { defineConfig } from "vite";\n\nexport default defineConfig({ server: { host: "127.0.0.1", port: 5173 } });\n`,
+    },
+    {
+      path: "tsconfig.json",
+      content: `${JSON.stringify(
+        {
+          compilerOptions: {
+            target: "ES2020",
+            module: "ESNext",
+            moduleResolution: "Bundler",
+            lib: ["ES2020", "DOM", "DOM.Iterable"],
+            strict: true,
+            skipLibCheck: true,
+            noEmit: true,
+            noUnusedLocals: true,
+            noUnusedParameters: true,
+          },
+          include: ["src", "vite.config.ts"],
+        },
+        null,
+        2,
+      )}\n`,
+    },
+    {
+      path: "src/main.ts",
+      content: `import Phaser from "phaser";
+import { GameScene } from "./scenes/GameScene";
+import "./styles.css";
+
+new Phaser.Game({
+  type: Phaser.AUTO,
+  parent: "game",
+  backgroundColor: "#070b12",
+  width: 960,
+  height: 600,
+  scale: {
+    mode: Phaser.Scale.FIT,
+    autoCenter: Phaser.Scale.CENTER_BOTH,
+  },
+  scene: [GameScene],
+});
+`,
+    },
+    {
+      path: "src/scenes/GameScene.ts",
+      content: `import Phaser from "phaser";
+
+export class GameScene extends Phaser.Scene {
+  private score = 0;
+  private timeLeft = 30;
+  private target!: Phaser.GameObjects.Arc;
+  private scoreText!: Phaser.GameObjects.Text;
+  private timeText!: Phaser.GameObjects.Text;
+  private statusText!: Phaser.GameObjects.Text;
+  private timer?: Phaser.Time.TimerEvent;
+
+  constructor() {
+    super("game");
+  }
+
+  create(): void {
+    this.score = 0;
+    this.timeLeft = 30;
+    this.scoreText = this.add.text(24, 18, "Score 0", {
+      color: "#e9f2ff",
+      fontFamily: "ui-monospace, monospace",
+      fontSize: "22px",
+    });
+    this.timeText = this.add.text(24, 48, "Time 30s", {
+      color: "#8fa9c9",
+      fontFamily: "ui-monospace, monospace",
+      fontSize: "16px",
+    });
+    this.statusText = this.add
+      .text(480, 540, "Tap the glowing target", {
+        color: "#5eead4",
+        fontFamily: "ui-sans-serif, system-ui, sans-serif",
+        fontSize: "16px",
+      })
+      .setOrigin(0.5);
+    this.target = this.add.circle(480, 300, 48, 0x5eead4, 1).setInteractive();
+    this.target.on("pointerdown", () => this.hitTarget());
+    this.timer = this.time.addEvent({
+      delay: 1000,
+      loop: true,
+      callback: () => this.tick(),
+    });
+  }
+
+  private hitTarget(): void {
+    this.score += 1;
+    this.scoreText.setText("Score " + this.score);
+    this.target.setPosition(
+      Phaser.Math.Between(120, 840),
+      Phaser.Math.Between(120, 470),
+    );
+    this.target.setRadius(Phaser.Math.Between(34, 58));
+    this.tweens.add({
+      targets: this.target,
+      scale: { from: 1.25, to: 1 },
+      duration: 140,
+      ease: "Quad.easeOut",
+    });
+  }
+
+  private tick(): void {
+    this.timeLeft -= 1;
+    this.timeText.setText("Time " + this.timeLeft + "s");
+    if (this.timeLeft <= 0) {
+      this.timer?.remove();
+      this.target.disableInteractive();
+      this.statusText.setText("Game over · " + this.score + " points · restarting…");
+      this.time.delayedCall(1800, () => this.scene.restart());
+    }
+  }
+}
+`,
+    },
+    {
+      path: "src/styles.css",
+      content: `:root {
+  color-scheme: dark;
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  background: #070b12;
+  color: #e9f2ff;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  min-height: 100%;
+  margin: 0;
+  overflow: hidden;
+  background: radial-gradient(circle at 50% 0%, #16304f, #070b12 65%);
+}
+
+#game {
+  width: 100vw;
+  height: 100vh;
+  display: grid;
+  place-items: center;
+}
+
+#game canvas {
+  max-width: 100%;
+  max-height: 100%;
+  border-radius: 12px;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.45);
+  touch-action: none;
+}
+`,
+    },
+    {
+      path: "README.md",
+      content: readme(name, "A Phaser 3 arcade starter with score, timer, pointer input and restart.", [
+        "## Run",
+        "",
+        "```bash",
+        "npm install",
+        "npm run dev",
+        "```",
+        "",
+        "## Verify",
+        "",
+        "```bash",
+        "npm run typecheck",
+        "npm run build",
+        "```",
+      ]),
+    },
+    { path: ".gitignore", content: GITIGNORE },
+  ],
+};
+
+const THREE_SCENE: ExtraTemplateDefinition = {
+  id: "three-scene",
+  name: "Three.js 3D scene",
+  description: "Three.js + Vite + TypeScript rotating 3D scene with lights and responsive canvas.",
+  language: "TypeScript",
+  framework: "Three.js + Vite",
+  files: [
+    "package.json",
+    "index.html",
+    "vite.config.ts",
+    "tsconfig.json",
+    "src/main.ts",
+    "src/styles.css",
+    "README.md",
+    ".gitignore",
+  ],
+  suggestedCommands: ["npm install", "npm run dev", "npm run typecheck", "npm run build"],
+  build: (name) => [
+    {
+      path: "package.json",
+      content: `${JSON.stringify(
+        {
+          name: slug(name),
+          private: true,
+          version: "0.1.0",
+          type: "module",
+          scripts: {
+            dev: "vite",
+            build: "tsc --noEmit && vite build",
+            typecheck: "tsc --noEmit",
+            preview: "vite preview",
+          },
+          dependencies: { three: "^0.170.0" },
+          devDependencies: {
+            "@types/three": "^0.170.0",
+            typescript: "^5.6.3",
+            vite: "^5.4.11",
+          },
+        },
+        null,
+        2,
+      )}\n`,
+    },
+    {
+      path: "index.html",
+      content: `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>${name}</title>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
+`,
+    },
+    {
+      path: "vite.config.ts",
+      content: `import { defineConfig } from "vite";\n\nexport default defineConfig({ server: { host: "127.0.0.1", port: 5173 } });\n`,
+    },
+    {
+      path: "tsconfig.json",
+      content: `${JSON.stringify(
+        {
+          compilerOptions: {
+            target: "ES2020",
+            module: "ESNext",
+            moduleResolution: "Bundler",
+            lib: ["ES2020", "DOM", "DOM.Iterable"],
+            strict: true,
+            skipLibCheck: true,
+            noEmit: true,
+            noUnusedLocals: true,
+            noUnusedParameters: true,
+          },
+          include: ["src", "vite.config.ts"],
+        },
+        null,
+        2,
+      )}\n`,
+    },
+    {
+      path: "src/main.ts",
+      content: `import * as THREE from "three";
+import "./styles.css";
+
+const app = document.querySelector<HTMLDivElement>("#app");
+if (!app) throw new Error("Missing #app");
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x070b12);
+
+const camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.1, 100);
+camera.position.set(0, 0, 5);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(2, window.devicePixelRatio));
+renderer.setSize(window.innerWidth, window.innerHeight);
+app.appendChild(renderer.domElement);
+
+const geometry = new THREE.BoxGeometry(1.6, 1.6, 1.6);
+const material = new THREE.MeshStandardMaterial({
+  color: 0x5eead4,
+  roughness: 0.28,
+  metalness: 0.55,
+});
+const cube = new THREE.Mesh(geometry, material);
+scene.add(cube);
+
+scene.add(new THREE.AmbientLight(0x8fbfff, 1.2));
+const key = new THREE.DirectionalLight(0xffffff, 2.4);
+key.position.set(3, 4, 5);
+scene.add(key);
+const rim = new THREE.PointLight(0x2563eb, 20, 12);
+rim.position.set(-4, -2, 3);
+scene.add(rim);
+
+function animate(): void {
+  requestAnimationFrame(animate);
+  cube.rotation.x += 0.006;
+  cube.rotation.y += 0.009;
+  renderer.render(scene, camera);
+}
+animate();
+
+window.addEventListener("resize", () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+`,
+    },
+    {
+      path: "src/styles.css",
+      content: `:root {
+  color-scheme: dark;
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  background: #070b12;
+  color: #e9f2ff;
+}
+
+* { box-sizing: border-box; }
+
+html, body, #app {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+}
+
+#app canvas {
+  display: block;
+}
+`,
+    },
+    {
+      path: "README.md",
+      content: readme(name, "A Three.js 3D scene starter with responsive rendering and lighting.", [
+        "## Run",
+        "",
+        "```bash",
+        "npm install",
+        "npm run dev",
+        "```",
+        "",
+        "## Verify",
+        "",
+        "```bash",
+        "npm run typecheck",
+        "npm run build",
+        "```",
+      ]),
+    },
+    { path: ".gitignore", content: GITIGNORE },
+  ],
+};
+
 export const EXTRA_TEMPLATES: ExtraTemplateDefinition[] = [
   CANVAS_GAME,
   PWA_MOBILE,
   EXPO_MOBILE,
   FLUTTER_MOBILE,
+  PHASER_GAME,
+  THREE_SCENE,
 ];

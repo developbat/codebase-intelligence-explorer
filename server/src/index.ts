@@ -509,6 +509,7 @@ app.post("/api/projects/:id/browser-check", async (req, res) => {
     const analysis = await loadAnalysis(req.params.id);
     const result = await runBrowserCheck(req.params.id, analysis.rootPath, {
       path: typeof req.body?.path === "string" ? req.body.path : "index.html",
+      url: typeof req.body?.url === "string" ? req.body.url : undefined,
       steps: Array.isArray(req.body?.steps) ? req.body.steps : [],
       mobile: req.body?.mobile === true,
       screenshot: req.body?.screenshot === true,

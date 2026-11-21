@@ -22,6 +22,7 @@ export interface BrowserCheckStep {
 
 export interface BrowserCheckOptions {
   path?: string;
+  url?: string;
   steps?: BrowserCheckStep[];
   mobile?: boolean;
   screenshot?: boolean;
@@ -56,6 +57,7 @@ export interface BrowserCheckResult {
   steps: BrowserCheckStepResult[];
   consoleErrors: string[];
   pageErrors: string[];
+  resourceErrors: string[];
   metrics: BrowserCheckMetrics;
   screenshotPath?: string;
 }

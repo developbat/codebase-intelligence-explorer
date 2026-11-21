@@ -25,6 +25,8 @@ test("lists the built-in project templates", () => {
       "pwa-mobile",
       "expo-mobile",
       "flutter-mobile",
+      "phaser-game",
+      "three-scene",
     ],
   );
   for (const template of templates) {
@@ -176,6 +178,29 @@ test("scaffolds a Flutter mobile app", async () => {
     assert.match(main, /flutter-demo/);
     const testFile = await fs.readFile(path.join(result.rootPath, "test", "widget_test.dart"), "utf8");
     assert.match(testFile, /package:flutter_demo\/main.dart/);
+  } finally {
+    await fs.rm(parent, { recursive: true, force: true });
+  }
+});
+
+test("scaffolds Phaser and Three.js game templates", async () => {
+  const parent = await tempParent();
+  try {
+    const phaser = await scaffoldProject({ parentPath: parent, name: "phaser-demo", template: "phaser-game" });
+    const phaserPackage = JSON.parse(await fs.readFile(path.join(phaser.rootPath, "package.json"), "utf8")) as {
+      dependencies: Record<string, string>;
+      scripts: Record<string, string>;
+    };
+    assert.ok(phaserPackage.dependencies.phaser);
+    assert.equal(phaserPackage.scripts.dev, "vite");
+    assert.match(await fs.readFile(path.join(phaser.rootPath, "src", "scenes", "GameScene.ts"), "utf8"), /extends Phaser.Scene/);
+
+    const three = await scaffoldProject({ parentPath: parent, name: "three-demo", template: "three-scene" });
+    const threePackage = JSON.parse(await fs.readFile(path.join(three.rootPath, "package.json"), "utf8")) as {
+      dependencies: Record<string, string>;
+    };
+    assert.ok(threePackage.dependencies.three);
+    assert.match(await fs.readFile(path.join(three.rootPath, "src", "main.ts"), "utf8"), /WebGLRenderer/);
   } finally {
     await fs.rm(parent, { recursive: true, force: true });
   }

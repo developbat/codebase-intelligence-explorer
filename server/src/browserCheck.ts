@@ -178,6 +178,22 @@ async function collectMetrics(page: Page, viewport: { width: number; height: num
   };
 }
 
+function localUrl(value: string): string {
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    throw new Error("Browser check URL is invalid.");
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw new Error("Browser check URL must start with http:// or https://.");
+  }
+  if (!["localhost", "127.0.0.1", "::1", "[::1]", "0.0.0.0"].includes(parsed.hostname)) {
+    throw new Error("Browser check URL must point to localhost.");
+  }
+  return parsed.toString();
+}
+
 export async function runBrowserCheck(
   projectId: string,
   rootPath: string,
@@ -197,8 +213,9 @@ export async function runBrowserCheck(
   requestedPath = requestedPath.replace(/^\/+/, "");
   const viewport = options.mobile ? { width: 390, height: 844 } : { width: 1280, height: 800 };
   let browser: Browser | null = null;
-  const consoleErrors: string[] = [];
+  let consoleErrors: string[] = [];
   const pageErrors: string[] = [];
+  const resourceErrors: string[] = [];
   const stepResults: BrowserCheckStepResult[] = [];
   let page: Page | null = null;
   try {
@@ -217,7 +234,12 @@ export async function runBrowserCheck(
     page.on("pageerror", (error) => {
       if (pageErrors.length < 20) pageErrors.push(error.message);
     });
-    const url = previewUrl(projectId, requestedPath);
+    page.on("response", (response) => {
+      if (response.status() >= 400 && resourceErrors.length < 40) {
+        resourceErrors.push(`${response.status()} ${response.url()}`);
+      }
+    });
+    const url = options.url ? localUrl(options.url) : previewUrl(projectId, requestedPath);
     const response = await page.goto(url, { waitUntil: "load", timeout: timeoutMs });
     if (response && !response.ok()) {
       throw new Error(`Preview page returned HTTP ${response.status()}.`);
@@ -264,10 +286,19 @@ export async function runBrowserCheck(
       screenshotPath = relative;
     }
     const failedSteps = stepResults.filter((step) => !step.ok);
+    const meaningfulResourceErrors = resourceErrors.filter(
+      (entry) => !/favicon\.ico/i.test(entry),
+    );
+    if (meaningfulResourceErrors.length === 0) {
+      consoleErrors = consoleErrors.filter(
+        (message) => !/^Failed to load resource/i.test(message),
+      );
+    }
     const ok =
       failedSteps.length === 0 &&
       consoleErrors.length === 0 &&
       pageErrors.length === 0 &&
+      meaningfulResourceErrors.length === 0 &&
       metrics.brokenImages === 0 &&
       !metrics.horizontalOverflow;
     const summary = [
@@ -276,6 +307,9 @@ export async function runBrowserCheck(
       failedSteps.length > 0 ? `Failed steps: ${failedSteps.map((step) => step.index).join(", ")}` : "",
       consoleErrors.length > 0 ? `Console errors: ${consoleErrors.length}` : "",
       pageErrors.length > 0 ? `Page errors: ${pageErrors.length}` : "",
+      meaningfulResourceErrors.length > 0
+        ? `Resource errors: ${meaningfulResourceErrors.slice(0, 5).join(", ")}`
+        : "",
       metrics.brokenImages > 0 ? `Broken images: ${metrics.brokenImages}` : "",
       metrics.horizontalOverflow ? "Horizontal overflow detected." : "",
       screenshotPath ? `Screenshot: ${screenshotPath}` : "",
@@ -284,11 +318,12 @@ export async function runBrowserCheck(
       .join("\n");
     return {
       ok,
-      path: requestedPath,
+      path: options.url ?? requestedPath,
       summary,
       steps: stepResults,
       consoleErrors,
       pageErrors,
+      resourceErrors: meaningfulResourceErrors,
       metrics,
       screenshotPath,
     };

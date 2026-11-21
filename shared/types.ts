@@ -505,7 +505,9 @@ export type ProjectTemplateId =
   | "canvas-game"
   | "pwa-mobile"
   | "expo-mobile"
-  | "flutter-mobile";
+  | "flutter-mobile"
+  | "phaser-game"
+  | "three-scene";
 
 export interface ProjectTemplate {
   id: ProjectTemplateId;
