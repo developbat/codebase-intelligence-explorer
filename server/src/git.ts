@@ -28,6 +28,44 @@ async function git(root: string, args: string[]): Promise<string> {
   return stdout;
 }
 
+export async function getGitBlame(
+  rootPath: string,
+  filePath: string,
+  startLine = 1,
+  endLine = 40,
+): Promise<string> {
+  const relative = filePath.replace(/^\/+/, "");
+  const absolute = path.resolve(rootPath, relative);
+  if (!isWithin(rootPath, absolute)) throw new Error("That path is outside the project root.");
+  const realRoot = await fs.realpath(rootPath);
+  const realFile = await fs.realpath(absolute);
+  if (!isWithin(realRoot, realFile)) throw new Error("That path is outside the project root.");
+  const stat = await fs.stat(realFile);
+  if (!stat.isFile()) throw new Error("The path is not a file.");
+  if (stat.size > 5_000_000) throw new Error("The file is too large for git_blame.");
+  const content = await fs.readFile(realFile, "utf8");
+  const totalLines = content.split("\n").length;
+  const start = Math.max(1, Math.floor(startLine));
+  if (start > totalLines) throw new Error(`The file has only ${totalLines} lines.`);
+  const end = Math.min(totalLines, Math.max(start, Math.floor(endLine)));
+  if (end - start > 80) throw new Error("git_blame is limited to 80 lines at a time.");
+  const inside = (await git(rootPath, ["rev-parse", "--is-inside-work-tree"])).trim();
+  if (inside !== "true") throw new Error("Git is not available for this project.");
+  try {
+    return await git(rootPath, [
+      "blame",
+      "--date=short",
+      "-L",
+      `${start},${end}`,
+      "--",
+      relative,
+    ]);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "git blame failed.";
+    throw new Error(message);
+  }
+}
+
 export async function getGitSnapshot(rootPath: string): Promise<GitSnapshotSummary> {
   try {
     const inside = (await git(rootPath, ["rev-parse", "--is-inside-work-tree"])).trim();

@@ -12,6 +12,10 @@ export class UserRepository {
     return this.users.get(userId) ?? null;
   }
 
+  async findAll(): Promise<User[]> {
+    return Array.from(this.users.values());
+  }
+
   async save(user: User): Promise<void> {
     if (!user.email.includes("@")) {
       throw new Error("Geçersiz e-posta adresi");

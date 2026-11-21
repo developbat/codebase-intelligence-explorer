@@ -20,11 +20,37 @@ const theme: PrismTheme = {
   ],
 };
 
+const PRISM_LANGUAGES: Record<string, string> = {
+  typescript: "typescript",
+  tsx: "tsx",
+  javascript: "javascript",
+  jsx: "jsx",
+  python: "python",
+  go: "go",
+  c: "c",
+  cpp: "cpp",
+  objectivec: "objectivec",
+  ocaml: "ocaml",
+  json: "json",
+  yaml: "yaml",
+  markdown: "markdown",
+  css: "css",
+  scss: "scss",
+  sass: "sass",
+  less: "less",
+  stylus: "stylus",
+  sql: "sql",
+  graphql: "graphql",
+  wasm: "wasm",
+  shell: "bash",
+  makefile: "makefile",
+  html: "markup",
+  xml: "markup",
+};
+
 function prismLanguage(language: string): string {
-  if (language === "typescript" || language === "tsx" || language === "javascript" || language === "jsx") {
-    return language;
-  }
-  return "typescript";
+  if (PRISM_LANGUAGES[language]) return PRISM_LANGUAGES[language];
+  return "clike";
 }
 
 interface SourcePreviewProps {

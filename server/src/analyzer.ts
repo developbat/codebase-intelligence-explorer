@@ -14,6 +14,8 @@ import type {
 import { isWithin, scanProject, type ScannedFile } from "./scanner";
 import { getGitSnapshot } from "./git";
 import { analyzePolyglot } from "./languages";
+import { analyzeGenericSymbols } from "./genericSymbols";
+import { detectProjectProfile } from "./projectProfile";
 
 const MAX_GRAPH_NODES = 12_000;
 const MAX_BODY_CHARS = 12_000;
@@ -262,6 +264,213 @@ function rangeFor(sf: ts.SourceFile, node: ts.Node) {
  * Builds the knowledge graph for a project using the TypeScript compiler API.
  * Read-only: sources are parsed, never executed, written or modified.
  */
+
+interface HtmlDocument {
+  title?: string;
+  description?: string;
+  headings: string[];
+  scripts: string[];
+  styles: string[];
+  links: string[];
+}
+
+function decodeHtml(value: string): string {
+  return value
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;|&apos;/gi, "'")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function htmlInnerText(value: string): string {
+  return decodeHtml(value.replace(/<[^>]*>/g, " "));
+}
+
+function tagAttributes(tag: string): Record<string, string> {
+  const attributes: Record<string, string> = {};
+  const regex = /([A-Za-z_:][-A-Za-z0-9_:.]*)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+))/g;
+  let match: RegExpExecArray | null;
+  while ((match = regex.exec(tag))) {
+    attributes[match[1].toLowerCase()] = decodeHtml(match[2] ?? match[3] ?? match[4] ?? "");
+  }
+  return attributes;
+}
+
+function analyzeHtmlDocument(content: string): HtmlDocument {
+  const titleMatch = content.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+  const headings: string[] = [];
+  const headingRegex = /<h[12][^>]*>([\s\S]*?)<\/h[12]>/gi;
+  let heading: RegExpExecArray | null;
+  while ((heading = headingRegex.exec(content)) && headings.length < 12) {
+    const text = htmlInnerText(heading[1]);
+    if (text && text.length < 180 && !text.includes("${")) headings.push(text);
+  }
+
+  let description: string | undefined;
+  const scripts: string[] = [];
+  const styles: string[] = [];
+  const links: string[] = [];
+  const tagRegex = /<(script|link|a|meta)\b[^>]*>/gi;
+  let tag: RegExpExecArray | null;
+  while ((tag = tagRegex.exec(content))) {
+    const name = tag[1].toLowerCase();
+    const attributes = tagAttributes(tag[0]);
+    if (name === "script" && attributes.src) scripts.push(attributes.src);
+    if (name === "link" && attributes.href) {
+      const rel = (attributes.rel ?? "").toLowerCase();
+      if (rel.includes("stylesheet") || attributes.href.toLowerCase().endsWith(".css")) {
+        styles.push(attributes.href);
+      }
+    }
+    if (name === "a" && attributes.href) links.push(attributes.href);
+    if (name === "meta" && !description) {
+      const metaName = (attributes.name ?? attributes.property ?? "").toLowerCase();
+      if (metaName === "description" || metaName === "og:description") {
+        description = attributes.content;
+      }
+    }
+  }
+
+  return {
+    title: titleMatch ? htmlInnerText(titleMatch[1]) : undefined,
+    description,
+    headings,
+    scripts: [...new Set(scripts)].slice(0, 30),
+    styles: [...new Set(styles)].slice(0, 30),
+    links: [...new Set(links)].slice(0, 80),
+  };
+}
+
+function htmlRouteForPath(relativePath: string): string {
+  const parts = relativePath.split("/").filter(Boolean);
+  const fileName = parts.pop() ?? "";
+  if (/^index\.html?$/i.test(fileName)) {
+    const prefix = parts.length > 0 ? `/${parts.join("/")}` : "";
+    return prefix || "/";
+  }
+  const withoutExtension = fileName.replace(/\.html?$/i, "");
+  return `/${[...parts, withoutExtension].join("/")}`;
+}
+
+function resolveHtmlReference(
+  fromPath: string,
+  reference: string,
+  fileSet: Set<string>,
+): string | undefined {
+  const raw = reference.trim();
+  if (!raw || /^(?:[a-z]+:|\/\/|#|javascript:|data:)/i.test(raw)) return undefined;
+  const pathOnly = raw.split(/[?#]/)[0].replace(/\\/g, "/");
+  if (!pathOnly) return undefined;
+  const base = path.posix.dirname(fromPath);
+  const joined = pathOnly.startsWith("/")
+    ? pathOnly.replace(/^\/+/, "")
+    : path.posix.normalize(path.posix.join(base === "." ? "" : base, pathOnly));
+  const normalized = joined.replace(/^\.\//, "");
+  if (!normalized || normalized.startsWith("..")) return undefined;
+
+  const candidates = [
+    normalized,
+    `${normalized}.html`,
+    `${normalized}.htm`,
+    normalized.endsWith("/") ? `${normalized}index.html` : `${normalized}/index.html`,
+  ];
+  return candidates.find((candidate) => fileSet.has(candidate));
+}
+
+const MAX_STATIC_ROUTES = 300;
+
+function analyzeStaticDocuments(graph: GraphBuilder, files: ScannedFile[]): {
+  imports: Map<string, string[]>;
+  pageCount: number;
+} {
+  const htmlFiles = files.filter((file) => /\.html?$/i.test(file.relPath));
+  const fileSet = new Set(files.map((file) => file.relPath));
+  const imports = new Map<string, string[]>();
+  const routePaths = new Set<string>();
+  let pageCount = 0;
+
+  for (const file of htmlFiles) {
+    const document = analyzeHtmlDocument(file.content);
+    const fileNode = graph.nodes.get(`file:${file.relPath}`);
+    if (fileNode) {
+      fileNode.metadata = {
+        ...(fileNode.metadata ?? {}),
+        htmlTitle: document.title,
+        htmlDescription: document.description,
+        htmlHeadings: document.headings,
+        htmlScripts: document.scripts,
+        htmlStyles: document.styles,
+        htmlPage: true,
+      };
+    }
+
+    const routePath = htmlRouteForPath(file.relPath);
+    if (pageCount < MAX_STATIC_ROUTES && !routePaths.has(routePath)) {
+      const routeId = `route:GET:${routePath}@${file.relPath}:1`;
+      addNode(graph, {
+        id: routeId,
+        kind: "route",
+        label: `GET ${routePath}`,
+        filePath: file.relPath,
+        startLine: 1,
+        endLine: 1,
+        language: file.language,
+        parentId: "project",
+        metadata: {
+          method: "GET",
+          path: routePath,
+          framework: "Static HTML",
+          signature: `GET ${routePath}`,
+          title: document.title,
+        },
+      });
+      addEdge(graph, routeId, `file:${file.relPath}`, "ROUTES_TO", "confirmed", {
+        filePath: file.relPath,
+        startLine: 1,
+        description: `Static HTML page ${routePath}`,
+      });
+      routePaths.add(routePath);
+      pageCount += 1;
+    }
+
+    const fileImports: string[] = [];
+    for (const script of document.scripts) {
+      const target = resolveHtmlReference(file.relPath, script, fileSet);
+      if (!target) continue;
+      fileImports.push(target);
+      addEdge(graph, `file:${file.relPath}`, `file:${target}`, "IMPORTS", "confirmed", {
+        filePath: file.relPath,
+        description: `HTML script: ${script}`,
+      });
+    }
+    for (const style of document.styles) {
+      const target = resolveHtmlReference(file.relPath, style, fileSet);
+      if (!target) continue;
+      fileImports.push(target);
+      addEdge(graph, `file:${file.relPath}`, `file:${target}`, "IMPORTS", "confirmed", {
+        filePath: file.relPath,
+        description: `HTML stylesheet: ${style}`,
+      });
+    }
+    if (fileImports.length > 0) imports.set(file.relPath, [...new Set(fileImports)]);
+
+    for (const link of document.links) {
+      const target = resolveHtmlReference(file.relPath, link, fileSet);
+      if (!target || target === file.relPath || !/\.html?$/i.test(target)) continue;
+      addEdge(graph, `file:${file.relPath}`, `file:${target}`, "RELATES_TO", "confirmed", {
+        filePath: file.relPath,
+        description: `HTML link: ${link}`,
+      });
+    }
+  }
+
+  return { imports, pageCount };
+}
+
 export async function analyzeProject(inputPath: string, options: AnalyzeOptions = {}): Promise<AnalysisResult> {
   const startedAt = Date.now();
   const scan = await scanProject(inputPath, { signal: options.signal });
@@ -1016,6 +1225,27 @@ export async function analyzeProject(inputPath: string, options: AnalyzeOptions 
   }
 
   // ---------------------------------------------------------------------
+  // Generic language symbol layer (Go, Rust, Java, Ruby, Swift, ...)
+  // ---------------------------------------------------------------------
+  const generic = analyzeGenericSymbols(files);
+  for (const node of generic.nodes) addNode(graph, node);
+  for (const edge of generic.edges) {
+    if (!graph.edges.has(edge.id)) graph.edges.set(edge.id, edge);
+  }
+
+  // ---------------------------------------------------------------------
+  // Static HTML sites: pages, script/style links, and page-to-page links
+  // ---------------------------------------------------------------------
+  const staticDocuments = analyzeStaticDocuments(graph, files);
+  for (const [filePath, importList] of staticDocuments.imports) {
+    const record = fileRecords.find((file) => file.path === filePath);
+    if (!record) continue;
+    for (const specifier of importList) {
+      if (!record.imports.includes(specifier)) record.imports.push(specifier);
+    }
+  }
+
+  // ---------------------------------------------------------------------
   // MVP 2: framework and architecture adapters
   // ---------------------------------------------------------------------
   const HTTP_METHODS = new Set(["get", "post", "put", "patch", "delete", "options", "head", "all"]);
@@ -1660,7 +1890,7 @@ export async function analyzeProject(inputPath: string, options: AnalyzeOptions 
     if (node?.metadata) node.metadata.fileCount = count;
   }
 
-  const allSymbols = [...symbols, ...polyglotSymbols];
+  const allSymbols = [...symbols, ...polyglotSymbols, ...generic.symbols];
   const projectNode = graph.nodes.get("project");
   if (projectNode?.metadata) {
     projectNode.metadata.fileCount = fileRecords.length;
@@ -1751,6 +1981,25 @@ export async function analyzeProject(inputPath: string, options: AnalyzeOptions 
     frameworks.add("Django");
   }
   if (relativePaths.has("app.py") || relativePaths.has("wsgi.py")) frameworks.add("Python web");
+  const tooling = await detectProjectProfile(
+    rootPath,
+    files.map((file) => ({ path: file.relPath })),
+    [...frameworks],
+  );
+  for (const profileFramework of tooling.frameworks) frameworks.add(profileFramework);
+  const projectGraphNode = graph.nodes.get("project");
+  if (projectGraphNode) {
+    projectGraphNode.metadata = {
+      ...projectGraphNode.metadata,
+      ecosystems: tooling.ecosystems,
+      packageManagers: tooling.packageManagers,
+      testFramework: tooling.testFramework,
+      frameworks: [...frameworks],
+      manifests: tooling.manifests,
+    };
+  }
+
+  if (staticDocuments.pageCount > 0 && frameworks.size === 0) frameworks.add("Static HTML");
   if (routes > 0 && frameworks.size === 0) frameworks.add("Framework routes");
   if (databases > 0) frameworks.add("Database");
   if (events > 0) frameworks.add("Events");
@@ -1782,6 +2031,7 @@ export async function analyzeProject(inputPath: string, options: AnalyzeOptions 
     warnings,
     languages,
     frameworks: [...frameworks].sort((a, b) => a.localeCompare(b)),
+    tooling,
     git: gitSnapshot,
     files: fileRecords,
     // Source bodies stay out of the API payload; the inspector reads the real
@@ -1789,6 +2039,7 @@ export async function analyzeProject(inputPath: string, options: AnalyzeOptions 
     symbols: [
       ...symbols.map(({ decl: _decl, rangeNode: _rangeNode, body: _body, ...record }) => record),
       ...polyglotSymbols.map(({ body: _body, ...record }) => record),
+      ...generic.symbols.map(({ body: _body, ...record }) => record),
     ],
     nodes: [...graph.nodes.values()],
     edges: [...graph.edges.values()],

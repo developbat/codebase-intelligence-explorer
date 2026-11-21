@@ -43,7 +43,7 @@ import { build3DGraph } from "./lib/threeGraph";
 import { formatNumber } from "./lib/constants";
 import { useI18n } from "./i18n";
 import { activeProvider } from "./lib/ai";
-import type { GitChangedFile, GitCommit, GraphNode } from "../../shared/types";
+import type { GitChangedFile, GitCommit, GraphNode, ProjectTemplateId } from "../../shared/types";
 
 const LAST_PROJECT_KEY = "cie:last-project";
 const LAST_PATH_KEY = "cie:last-path";
@@ -118,6 +118,8 @@ export default function App() {
   const [depth, setDepth] = useState(1);
   const [inspectorOpen, setInspectorOpen] = useState(() => window.innerWidth > 1120);
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [studioInitialPrompt, setStudioInitialPrompt] = useState("");
+  const [studioAutoRunPrompt, setStudioAutoRunPrompt] = useState(false);
   const [gitStatus, setGitStatus] = useState<GitStatus | null>(null);
   const [changeReport, setChangeReport] = useState<ChangeReport | null>(null);
   const [gitLoading, setGitLoading] = useState(false);
@@ -127,6 +129,7 @@ export default function App() {
   const [showcaseOpen, setShowcaseOpen] = useState(false);
   const [aiSettings, setAiSettings] = useState<AiSettingsPublic | null>(null);
   const [aiSettingsOpen, setAiSettingsOpen] = useState(false);
+  const [aiSettingsAdd, setAiSettingsAdd] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
   const [reviewOpen, setReviewOpen] = useState(false);
   const [flowsOpen, setFlowsOpen] = useState(false);
@@ -300,6 +303,37 @@ export default function App() {
       setDialogOpen(false);
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : t("Analysis failed"));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function createProject(input: {
+    parentPath: string;
+    name: string;
+    template: ProjectTemplateId;
+    brief: string;
+    autoRun: boolean;
+  }) {
+    if (busy) return;
+    setBusy("analyze");
+    setError(null);
+    try {
+      const created = await api.scaffoldProject(input);
+      const result = await api.analyze(created.rootPath);
+      applyAnalysis(result);
+      localStorage.setItem(LAST_PATH_KEY, created.rootPath);
+      setLastPath(created.rootPath);
+      setDialogOpen(false);
+      setProduct("studio");
+      setStudioInitialPrompt(
+        input.brief
+          ? `Build this project: ${input.brief}\n\nThe project was just created from the ${created.template} template. Inspect the existing files first, then implement the request with tools. Run the detected typecheck/build command before finishing.`
+          : "",
+      );
+      setStudioAutoRunPrompt(input.autoRun && Boolean(input.brief));
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : t("Project could not be created"));
     } finally {
       setBusy(null);
     }
@@ -797,28 +831,35 @@ export default function App() {
 
         <div className="topbar-actions">
           {product === "intelligence" ? <TourButton /> : null}
-          <button
-            className={`icon-button topbar-icon ${aiConfigured ? "is-active" : ""}`}
-            onClick={() => setAiSettingsOpen(true)}
-            title={t("AI models & providers")}
-            aria-label={t("AI models & providers")}
-          >
-            <Sparkles size={15} />
-          </button>
-          <select
-            className="lang-select"
-            value={locale}
-            onChange={(event) => setLocale(event.target.value as typeof locale)}
-            title={t("Language")}
-            aria-label={t("Language")}
-          >
-            {locales.map((item) => (
-              <option key={item.id} value={item.id}>
-                {item.nativeLabel}
-              </option>
-            ))}
-          </select>
-          {analysis ? (
+          {product === "intelligence" ? (
+            <button
+              className={`icon-button topbar-icon ${aiConfigured ? "is-active" : ""}`}
+              onClick={() => {
+                setAiSettingsAdd(false);
+                setAiSettingsOpen(true);
+              }}
+              title={t("AI models & providers")}
+              aria-label={t("AI models & providers")}
+            >
+              <Sparkles size={15} />
+            </button>
+          ) : null}
+          {product === "intelligence" ? (
+            <select
+              className="lang-select"
+              value={locale}
+              onChange={(event) => setLocale(event.target.value as typeof locale)}
+              title={t("Language")}
+              aria-label={t("Language")}
+            >
+              {locales.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.nativeLabel}
+                </option>
+              ))}
+            </select>
+          ) : null}
+          {analysis && product === "intelligence" ? (
             <span className="readonly-pill" title={t("Read-only — source files are never modified")}>
               <Lock size={11} /> {t("Read-only")}
             </span>
@@ -861,8 +902,17 @@ export default function App() {
           <CodeStudio
             analysis={analysis}
             aiSettings={aiSettings}
-            onOpenSettings={() => setAiSettingsOpen(true)}
+            recent={recent}
+            onSettingsSaved={setAiSettings}
             onRescan={rescan}
+            onLoadRecent={loadRecent}
+            onRemoveRecent={removeRecent}
+            initialPrompt={studioInitialPrompt}
+            autoRunInitialPrompt={studioAutoRunPrompt}
+            onInitialPromptConsumed={() => {
+              setStudioInitialPrompt("");
+              setStudioAutoRunPrompt(false);
+            }}
           />
         </Suspense>
       ) : (
@@ -1290,12 +1340,17 @@ export default function App() {
         lastPath={lastPath}
         onClose={() => setDialogOpen(false)}
         onAnalyze={analyze}
+        onCreate={createProject}
       />
 
       <AiSettingsDialog
         open={aiSettingsOpen}
         settings={aiSettings}
-        onClose={() => setAiSettingsOpen(false)}
+        startInAddMode={aiSettingsAdd}
+        onClose={() => {
+          setAiSettingsOpen(false);
+          setAiSettingsAdd(false);
+        }}
         onSaved={setAiSettings}
       />
 

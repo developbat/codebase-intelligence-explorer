@@ -10,7 +10,7 @@ test("fixture projesi fonksiyon seviyesinde çağrı grafiği üretir", async ()
   const result = await analyzeProject(root);
 
   assert.equal(result.projectName, "acme-orders");
-  assert.equal(result.stats.files, 10);
+  assert.ok(result.stats.files >= 12, `beklenen >=12 dosya, gelen ${result.stats.files}`);
   assert.ok(result.stats.symbols >= 35, `beklenen >=35 sembol, gelen ${result.stats.symbols}`);
   assert.ok(result.stats.functions >= 25);
   assert.equal(result.stats.unresolvedEdges, 0);
@@ -102,4 +102,30 @@ test("analiz node_modules ve secret dosyalarını okumaz", async () => {
   assert.ok(result.rootPath.startsWith("/"));
   assert.ok(result.stats.sourceBytes > 0);
   assert.ok(result.stats.durationMs >= 0);
+});
+
+test("analyzer project map shares ecosystem and tooling detection with tests", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "cie-go-profile-"));
+  try {
+    await fs.writeFile(path.join(root, "go.mod"), "module example.com/app\n\ngo 1.22\n");
+    await fs.writeFile(
+      path.join(root, "main.go"),
+      'package main\n\nimport "fmt"\n\nfunc main() { fmt.Println(Add(1, 2)) }\n\nfunc Add(a, b int) int { return a + b }\n',
+    );
+    await fs.writeFile(
+      path.join(root, "main_test.go"),
+      'package main\n\nimport "testing"\n\nfunc TestAdd(t *testing.T) {\n\tif Add(1, 2) != 3 {\n\t\tt.Fatal("bad")\n\t}\n}\n',
+    );
+
+    const result = await analyzeProject(root);
+    assert.ok(result.frameworks?.includes("Go Modules"));
+    assert.equal(result.tooling?.ecosystems.includes("Go"), true);
+    assert.equal(result.tooling?.packageManagers.includes("go"), true);
+    assert.equal(result.tooling?.testFramework, "Go test");
+    assert.ok(result.tooling?.testCommands.includes("go test ./..."));
+    assert.ok(result.tooling?.buildCommands.includes("go build ./..."));
+    assert.equal(result.tooling?.testFileCount, 1);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
 });

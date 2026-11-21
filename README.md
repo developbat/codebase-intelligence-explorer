@@ -41,7 +41,8 @@ The UI is **English by default** and ships with Turkish, German, French, Spanish
 - **Read-only scanning:** source files are read; the analysis engine has no write, delete, move, or execute path.
 - **TypeScript Compiler API:** real AST, symbols, types, imports, and call resolution for TypeScript and JavaScript.
 - **PHP and Python parser layer:** Lezer-based parsing for classes, interfaces, traits, enums, functions, methods, imports, calls, and framework routes without requiring a PHP or Python runtime.
-- **File-level language coverage:** Go, Rust, Java, Kotlin, C#, C/C++, Ruby, Swift, Scala, shell, Lua, R, Dart, Elixir, Erlang, Clojure/F#, SQL, Vue, Svelte, Astro, HTML/CSS, GraphQL, and Protobuf files appear in the file map and Git impact views. Their symbols are not parsed yet.
+- **File-level language coverage:** 100+ source, config and documentation extensions — including Go, Rust, Java, Kotlin, C#, F#, VB, C/C++, Objective-C, Ruby, Swift, Scala, Dart, Elixir, Erlang, Clojure, Haskell, OCaml, Perl, Julia, Crystal, Nim, Zig, Solidity, Lua, R, PowerShell, shell, SQL, Vue, Svelte, Astro, HTML/CSS, GraphQL, Protobuf, JSON, YAML, TOML, XML, Markdown and Dockerfile/Makefile — appear in the file map and Git impact views with a real language label. TS/JS use the TypeScript AST, PHP/Python use Lezer, and the remaining code languages use a lightweight symbol parser with basic inferred call edges.
+- **Static HTML site analysis:** HTML pages become static GET routes; page title, description, headings, script/style imports, and page-to-page links are extracted. Framework detection reports **Static HTML**.
 - **Symbol extraction:** functions, methods, classes, interfaces, type aliases, enums, arrow functions, nested functions, and CommonJS exports.
 - **Knowledge graph:** files, folders, classes, functions, routes, database objects, events, packages, and their relationships.
 - **Evidence and certainty:** every relationship carries source evidence and is marked `confirmed`, `inferred`, or `unresolved`.
@@ -85,7 +86,7 @@ The UI is **English by default** and ships with Turkish, German, French, Spanish
 
 ### Optional AI layer (MVP 3)
 
-- **Providers:** OpenAI, Anthropic Claude, DeepSeek, OpenRouter, Google Gemini, NVIDIA NIM, and any custom OpenAI-compatible base URL.
+- **Providers:** OpenAI, Anthropic Claude, DeepSeek, OpenRouter, Google Gemini, NVIDIA NIM, xAI Grok, plus any number of **named custom OpenAI-compatible providers**. For a custom provider you enter a name, base URL (or the full `/chat/completions` URL), API key, model ids, and an optional model-list URL. Keys are stored locally in a 0600 file.
 - **Model settings:** API key, base URL, model, test connection, fetch model list, default provider/model.
 - **AI symbol analysis:** purpose, business steps, inputs, outputs, side effects, risks, uncertainties, and evidence.
 - **AI scope summaries:** file, folder, and package responsibilities/dependencies.
@@ -95,6 +96,7 @@ The UI is **English by default** and ships with Turkish, German, French, Spanish
 - **AI codebase chat:** graph-guided Q&A with source evidence.
 - **AI unresolved-target classification:** builtin, external package, dynamic dispatch, callback, string-based registration, or missed local function.
 - **Language-aware answers:** every AI flow uses the selected UI language.
+- **Language parsing boundary:** generic-language symbols and call edges are structural (regex/brace/indent based) and not semantically type-resolved. TS/JS use the TypeScript AST; PHP/Python use Lezer. Generic assets are served by the preview server but binary files are not added to the text index.
 - **Honest boundaries:** AI output is labeled as interpretation, cached by provider/model/source hash/language, and kept visually separate from static facts.
 - **Local key handling:** keys are stored in `~/.codebase-intelligence-explorer/ai-settings.json` with `0600` permissions and are never returned to the browser.
 - **Token visibility:** AI panels show context size and estimated input tokens.
@@ -147,10 +149,74 @@ The UI is **English by default** and ships with Turkish, German, French, Spanish
 ### Code Studio (write-enabled)
 
 - **Two products, one project session:** switch between **Intelligence** (read-only analysis) and **Code Studio** from the topbar without reopening the project.
-- **Real code editor:** CodeMirror 6 with TypeScript/JavaScript/TSX/JSX, Python, and PHP language support, tabs, folding, bracket matching, and autocomplete.
+- **Real code editor:** CodeMirror 6 with deep support for TS/JS, Python and PHP, plus syntax modes for 50+ more languages and formats. Tabs, folding, bracket matching and autocomplete.
 - **Explicit save model:** no autosave. Every save writes through a path-validated server endpoint and creates a timestamped backup under `~/.codebase-intelligence-explorer/editor-backups/`.
-- **Command runner:** run user-entered commands in the project root, with quick commands for `npm test`, `pytest`, `php artisan test`, and PHPUnit. Exit code, stdout/stderr, duration, timeout, and truncation are returned.
-- **AI single-file edit:** select a file, describe the change, and review the generated line diff before **Apply & save** or **Discard**. The model returns a full replacement for that one file; no automatic apply.
+- **Command runner:** run user-entered commands in the project root, with quick commands for `npm test`, `pytest`, `php artisan test`, and PHPUnit. Output streams live over NDJSON, commands can run for up to 10 minutes, and a Stop button cancels the process. Exit code, duration, timeout, and truncation are returned.
+- **AI single-file edit:** select a file, describe the change, and review the generated line diff before **Apply & save** or **Discard**. Small files use full-file replacement; files above 24 KB use surgical find/replace edits. Hard limit is 120 KB. No automatic apply.
+- **Code model picker:** every configured provider/key, including named custom providers, is available in Code Studio. Pick a provider, type a model id, fetch the provider model list, or open AI settings to add keys/models. The choice is stored locally for Code Studio.
+- **Resizable three-column studio:** the project tree, editor, and preview panel can be resized with drag handles. Left and center keep minimum widths; the preview can grow up to 80% of the workspace. Widths persist locally.
+- **Persistent project index:** a local MiniSearch index stores file contents, symbols, routes, project metadata, README/manifests, and past conversations. It is built automatically after analysis and reused across restarts.
+- **Incremental index:** saves update the file document immediately; renames/deletes update the index; external file changes trigger a debounced re-analysis and index rebuild while the project watcher is connected.
+- **Index status:** the header shows Indexed / Indexing / Build index. If the index is missing or stale, a banner offers a one-click build.
+- **Index search:** a Search modal searches file contents, symbols and past answers, with line numbers and match-centered snippets.
+- **Conversation memory:** finished agent/chat answers are recorded per project; existing local chat history is imported once, so repeated questions can reuse earlier answers.
+- **Markdown answers:** assistant answers render headings, lists, tables, code blocks, links and blockquotes instead of raw `**`/`###` text.
+- **Collapsible details:** each answer keeps only the result visible; the full trace log, steps, file evidence and token breakdown live under a single collapsed **Details** control.
+- **Streaming agent responses:** OpenAI-compatible providers stream tokens into the live trace, so the activity card shows received characters while the model is still generating.
+- **Provider diagnostics:** empty completions include the provider finish reason; reasoning-only responses fall back to `reasoning_content`. A retired model (HTTP 410 / end of life) stops immediately and offers Switch model without a pointless retry. Failed runs auto-open Details.
+- **Live agent trace:** while the agent works, the activity card animates the current phase and streams a live log: model thinking, plan received, file tree scan, search, file read, match count, JSON inspection, tool completion and result evaluation.
+- **Center agent workspace:** one input drives the agent. The center column shows the full workflow history: prompts, tool calls, command output, file edits, evidence, and the final answer. A live activity card above the input animates what the agent is doing right now (understanding, listing, reading, searching, counting, inspecting JSON, editing, running a command, writing the answer).
+- **Console drawer:** Terminal and Tests live in a collapsible console under the workflow, so the center stays focused on the task history.
+- **Multiple terminals:** the Terminal tab supports any number of independent command tabs, each with its own command, live output, exit status and Stop button.
+- **Interactive shell:** a real PTY shell (xterm.js + Python `pty.fork`) opens in the project root with stdin, Enter/arrow keys, Ctrl+C, ANSI colors, 5,000-line scrollback and live window resizing.
+- **Command history and favorites:** the last 50 commands are stored per project. Use ↑/↓ in the command input, open the History panel to re-run a command, and star favorites for one-click reuse.
+- **One-click dependencies:** when `node_modules`, `.venv` or `vendor` is missing, the Terminal shows an **Install dependencies** action that runs the detected npm/pnpm/yarn/bun, pip or Composer install in the background with live output.
+- **Dev servers:** detected project commands (`npm run dev`, `php artisan serve`, `python3 manage.py runserver`, `bin/rails server`, `mix phx.server`, …) can be started in one click. Background jobs stream stdout/stderr, show PID/status/duration, expose detected local URLs as clickable links, and can be stopped or removed. Jobs and PTY sessions are cleaned up when the server stops.
+- **Token budget:** every AI request records real provider token usage (with a character-based estimate when a provider omits the usage block). Each agent step shows its tokens, each finished answer shows a token badge, the composer shows the session total, and the **Settings → Usage** tab breaks usage down by model and day for the project (today, last 7 days, all time).
+- **Prompt + send inputs:** the file-edit and project-task modes use a single input with a send button (Enter sends, Shift+Enter adds a line). There is no separate "generate" button.
+- **Prompt manager:** edit all 16 system prompts (agent, edit, task, review, summary, tests, analysis, chat) from **Settings → Prompts**. Project overrides take precedence over global overrides; defaults stay untouched, with versioning, variable chips, token estimate, preview, **default diff**, **version history** (last 20, preserved across reset, restore into the editor) and reset. Prompt versions are part of AI cache keys.
+- **Plan preview:** before the first tool call the agent emits a `plan` event with intent (question/explain/edit/multi-file/run/scaffold), risk, scope, write/command needs, verification command and a step checklist. The live plan card is open; the same plan is kept, collapsed, in the finished answer. It is informational — actual writes and commands still go through the permission handshake. If the user denies a permission, a new read-only fallback plan replaces it and the agent explains what was blocked.
+- **Task queue / long-running agent:** a **Task loop** toggle turns a goal into a persistent ordered queue under `.cie/agent/` (`tasks.json`, `TASKS.md`, `context.md`). A planner model decomposes the goal, each task runs sequentially with the appropriate role/model, the agent verifies its work, and the loop continues until the queue is complete or you press Stop. The live **Task queue** card shows every task, model, result and verification command.
+- **Agent roles:** **Settings → Agents** assigns separate providers/models to **main** (normal/hard coding), **planner** (task decomposition), **fast** (small mechanical work) and **reviewer**. **Auto-pick models** chooses roles from cached model lists; it does not hit the network every time.
+- **Model catalog:** **Settings → Model catalog** imports a JSON model/agent catalog from a file, pasted JSON or a JSON URL (Aibender-style exports work; HTML pages are rejected). Models carry provider, context, input/output price, speed and role hints. Auto-pick and task fallback use the catalog roles/prices when available; import never installs API keys and never silently overwrites role choices.
+- **Live dev preview:** running background dev servers expose local URLs as **Preview** tabs, so Vite, Expo web and game dev servers can be inspected inside the app instead of only in an external browser.
+- **Cached model lists:** provider model lists are stored after an explicit **Update model list** action and reused across sessions. Model pickers are searchable, show the last update time, and auto-pick/role configuration works offline from the cache.
+- **Agent-first workflow:** the agent runs an autonomous tool loop (`/ai/agent`): list files, search, read, find in file, count matches, inspect JSON, write, replace, run commands, and finish.
+- **Agentic Q&A:** questions are answered by the same agent. It searches, reads, counts and inspects JSON instead of stopping when the preloaded context is incomplete. Steps stream live and the final answer cites files and lines.
+- **No dead-end answers:** when the step limit is reached, the agent runs a final evidence-only synthesis call, so you get a grounded answer or a precise statement of what is missing.
+- **Edits and multi-file tasks:** the unified agent handles both. The direct `/ai/edit` and `/ai/task` endpoints remain available for API clients that want a single review-first proposal.
+- **Efficient agent loop:** model turns are counted separately from tool actions, so native multi-call replies execute all queued actions without burning extra turns. Repeated file reads and identical read-only tool calls return a short “already executed” note instead of doing the work again. The seed includes an index-derived edit map with existing pattern files and suggested service/controller paths. Small edits automatically use a focused fast profile.
+- **Automatic typecheck gate:** before accepting `finish`, the agent runs the detected typecheck/build command (for example `npx tsc --noEmit`). It uses the permission handshake when commands are not pre-approved, caches the result for the current file signature so the check is not repeated, feeds failures back to the agent to fix, and writes the typecheck result into the final summary. A finish that still reports pending work is rejected while turns remain.
+- **Tool-protocol recovery:** the agent understands its JSON action protocol plus `<tool_call>` and provider-native DSML blocks. Native multi-call replies are queued and executed in order. Tool-call markup is stripped from the transcript and can never leak into the final answer.
+- **Games and mobile:** the **Canvas game** template creates a dependency-free HTML5 arcade game with score, timer, touch input and restart. The **Mobile PWA** template is installable, offline-capable and mobile-first. The **Expo mobile** template is React Native + Expo + TypeScript with `web`, `ios` and `android` scripts. Games/PWAs use the static preview and `browser_check`; Expo/React Native dev servers appear as live preview tabs.
+- **Preview Inspector:** **Checks → Inspect preview** opens the project page in headless Chrome and reports page errors, console errors, broken images, horizontal overflow, element counts and a screenshot. The `browser_check` agent tool runs fill/click/press/expect/reload/localStorage steps, so the agent can verify UI behavior instead of claiming it. It uses local Chrome/Chromium (set `CIE_CHROME_PATH` if auto-detection fails).
+- **Reusable project tools:** scripts under `.cie/agent/tools/` (JS, TS, Python, shell, PHP, Ruby) are auto-registered with an inferred command. The agent sees them in its seed and can call `list_project_tools` / `run_project_tool` to reuse a check instead of recreating it. The Checks panel lists saved tools with success/failure counts.
+- **Agent tools:** list files, search file contents, read files, find inside a file, extract list items, count matches, inspect JSON paths and array lengths, **find symbols by name/kind across every supported language**, run read-only SQLite queries, inspect CSV/TSV data, read git blame, write or replace file contents, run build/test commands, and finish. For list requests the agent pre-extracts matching card/item names from the best index hit and enumerates them instead of returning only a count. Each tool call is shown with its observation, duration, and success state.
+- **Agent seed context:** before the first step the agent receives ranked files, matching symbols with line numbers, route samples, uncommitted Git changes, and the active file.
+- **Skills (P1):** **Settings → Skills** discovers `SKILL.md` packs from the project (`.cie/skills`, `.agents/skills`, `.claude/skills`, `.cursor/skills`) and global OpenCode/Claude/Cursor/agent folders. Preview the instructions, file list and script warnings, then enable a skill for this project. Only enabled skills are injected into the agent and chat system prompt, with project-over-global precedence and limits of 5 skills, 6,000 characters each and 20,000 total. Skill text is marked as untrusted reference data and the user request always wins; scripts are never executed. GitHub install is the next phase.
+- **Settings screen:** one tabbed screen for **General** (language, project), **Models** (providers, cached model lists, connection checks), **Agents** (main/planner/fast/reviewer roles and auto-pick), **Model catalog** (JSON model/agent import), **Permissions** (pre-approve writes/commands), **Editor & tests** (format/syntax/typecheck on save, test timeout), **Usage** (token report), **Prompts** (prompt manager) and **Skills** (project/global skill discovery, preview and enable/disable). The center workflow is reduced to Search, Settings and Console; permissions, model editing, usage and prompts no longer clutter the composer.
+- **Agent permissions:** file writes and command execution have separate pre-approval checkboxes in **Settings → Permissions**. When a permission is not pre-approved, the agent pauses and asks **Allow once / Always allow / Deny** with the target, size and a short preview. “Always allow” approves that action type for the rest of the run and turns on the matching pre-approval toggle. Delete and rename always require a fresh confirmation and cannot be remembered. Writes create backups. Commands start in the project root and a destructive-command denylist blocks things like `sudo`, `git push`, `git reset --hard`, disk formatting, and `curl | sh`. The agent stops after 16 model turns (14 for the fast profile), 40 actions, 10 writes, or 5 commands.
+- **Live streams:** agent steps and terminal stdout/stderr appear as they happen over NDJSON. Stop buttons abort the model request and terminate running commands.
+- **Binary assets:** the project toolbar can upload images, icons, fonts and other binary files up to 15 MB under `assets/`. The preview server serves common image/font MIME types. Secret paths (`.env`, private keys, `.git`) are rejected.
+- **Safe config templates:** New file offers `env.example`, `config.example.json`, `config.example.yaml` and `config.example.toml` templates. Real `.env` files, private keys and Git internals cannot be created or written from the editor.
+- **Any-language editor:** syntax modes for TypeScript/JavaScript/JSX, PHP, Python, Go, Rust, Java, Kotlin, C#, F#, VB, C/C++, Objective-C, Ruby, Swift, Scala, Dart, shell, PowerShell, Lua, R, Julia, Perl, Haskell, OCaml, Elixir, Erlang, Clojure, Crystal, Nim, Zig, Solidity, Groovy, D, Fortran, Pascal, COBOL, Tcl, Verilog/VHDL, HTML, CSS/SCSS/Sass/Less/Stylus, SQL, JSON, XML, Markdown, YAML, TOML, HCL/Terraform, Nix, Protobuf, LaTeX, CMake, Dockerfile, Makefile and more. A **New file** button creates a file at any project-relative path; highlighting follows the extension.
+- **New project wizard:** **New project → Create new** picks a parent folder, validates the project name and generates a runnable skeleton from nine templates: Static HTML, React + Vite (TypeScript), Node + Express (TypeScript), Python FastAPI, PHP, Blank, Canvas game, Mobile PWA and Expo mobile (React Native + TypeScript). The project is analyzed immediately and opens in Code Studio. An optional starter brief is placed in the composer; you can press Send yourself or enable **Start the task loop automatically after creation** to plan and build the brief immediately.
+- **Fast project switching:** the Code Studio sidebar includes the same project switcher as the Intelligence explorer, with recent projects, search, active marker, and removal.
+- **Terminal working directory:** the Terminal panel shows the exact project root where commands run.
+- **Project details tab:** the left sidebar has Files and Project Details tabs. Project Details shows the root, file/symbol/function/route totals, HTML/JS/CSS/PHP/Python inventory, frameworks, Git state, test discovery, full AI project summary, and rescan.
+- **Collapsible tree:** the project tree can be collapsed to free space; a Files button reopens it.
+- **Right code + preview panel:** the right column is a tabbed panel with **one Preview tab** plus open file tabs. Preview shows the selected HTML page through the read-only preview endpoint; when the project has no HTML page, it falls back to a read-only view of the active file. Clicking a file in the tree opens it as a code tab with CodeMirror, dirty marker, Save, and close.
+- **Quality checks:** a Checks tab runs detected typecheck, lint, format-check, and build commands with live output and Stop. The optional “Format file on save”, “Run syntax check after save” and “Run typecheck after save” toggles live in **Settings → Editor & tests**.
+- **Syntax check:** per-file syntax checking for JavaScript, Python, PHP, Ruby, shell, JSON, Go, Rust, C/C++, Objective-C, Lua, Perl, PowerShell, Zig, Solidity, XML, YAML, TOML, R, Nix and Elixir when the checker is installed; TypeScript/JSX and JVM/.NET files use the project typecheck/build check.
+- **Code duplication scan:** a local 6-line window scanner reports duplicated blocks across the project, with occurrence counts, sample snippets and clickable file:line locations.
+- **Format file:** the right-panel toolbar can format the active file through the project’s detected or configured formatter (Prettier, dprint, gofmt, rustfmt, black/ruff, php-cs-fixer, dart format, clang-format, mix format, scalafmt, rubocop/standardrb, zig fmt, crystal tool format, nixfmt, terraform fmt, cmake-format, ocamlformat, swift-format, taplo, buf) and refresh the editor. An optional **Format file on save** toggle formats the file immediately after saving and updates the editor to the formatted content.
+- **File actions:** rename or move a file from the right-panel tab bar, and delete files with an explicit confirmation. Renaming creates parent folders; deleting is limited to files and empty directories.
+- **Agent file tools:** the agent can rename/move (`rename_path`) and delete (`delete_file`) when write permission is enabled.
+- **Unified input:** one composer replaces the old Ask/Edit/Task/Agent tabs; the legacy AI panel and mode-specific edit/task UI were removed. The agent decides whether the request is a question, an edit, a command, or a multi-file task, subject to the write/command permission handshake. Chat/workflow history is persisted per project in local storage.
+- **Full project summary:** the project summary prompt now receives the complete route inventory, HTML page list, JavaScript/TypeScript list, CSS list, and file-type counts.
+- **Shared project profile:** one detector reads root manifests and returns ecosystems, package managers, frameworks, test/build/lint/format commands, and manifests. The analyzer, project map, inspector, Code Studio details, AI briefs and the test runner all consume the same profile.
+- **Test discovery and runner:** detects Vitest, Jest, Node test, Laravel, PHPUnit, Pytest, Go test, Cargo test, Maven, Gradle, dotnet test, RSpec, Minitest, Swift test, ExUnit, Dart/Flutter test, CTest, sbt, Cabal/Stack, Dune, prove, Julia, EUnit, Clojure, Crystal, Nimble, Zig, Forge/Hardhat, Busted, testthat, Pester, Bats, Deno, Bazel, Make and package.json scripts. Tests stream live output over NDJSON, run with a 2/5/10/20-minute timeout, can be stopped, list discovered test files, and parse passed/failed/skipped totals and failures. Clicking a failure opens the file and scrolls to the reported line, and **Fix failures with agent** sends the failure summary and output tail to the agent.
+- **AI test generation:** generates a new test file for the active source file, shows the full file diff, and creates it only after **Create test file**. Existing paths are rejected.
 - **Stale-analysis awareness:** after a save or AI apply, Code Studio marks the graph stale and offers a rescan.
 - **Separate safety boundary:** Intelligence remains read-only. Code Studio writes only after an explicit user action and stays inside the project root.
 
@@ -312,6 +378,7 @@ server/src/
   languages.ts                   PHP/Python Lezer parsing, imports, calls, routes
   icons.ts                       Safe local favicon/logo discovery
   editor.ts                      Safe file read/write, backups, command runner
+  tests.ts                       Test discovery, test run parsing, failures
   git.ts                         Read-only Git status/log/diff
   changes.ts                     Structural diff + impact analysis
   search.ts                      Local TF-IDF vector index and ranking
@@ -353,8 +420,22 @@ fixtures/sample-app/             End-to-end sample order project
 | `DELETE /api/projects/:id` | Remove cached analysis |
 | `GET /api/projects/:id/source` | Read-only source range |
 | `GET /api/projects/:id/file` | Full file content for Code Studio |
+| `GET /api/projects/:id/preview/*` | Read-only static HTML/CSS/JS/asset preview |
 | `PUT /api/projects/:id/file` | Path-validated write with local backup |
 | `POST /api/projects/:id/run` | Run a user command in the project root |
+| `POST /api/projects/:id/run/stream` | Stream command stdout/stderr live with cancellation |
+| `GET/POST /api/projects/:id/processes` | List or start background jobs |
+| `GET/DELETE /api/projects/:id/processes/:jobId` | Read incremental output or stop a background job |
+| `GET /api/projects/:id/usage` | Token usage totals by model and day |
+| `GET /api/prompts` | List agent prompts with project overrides |
+| `PUT/DELETE /api/prompts/:id` | Save or reset a global/project prompt override |
+| `GET /api/projects/:id/index/status` | Persistent search-index status |
+| `POST /api/projects/:id/index/build` | Start a background index build |
+| `GET /api/projects/:id/index/search` | Search indexed files, symbols and conversations |
+| `POST /api/projects/:id/conversations/import` | Import existing chat history into the index |
+| `GET /api/projects/:id/tests` | Discover test framework and test files |
+| `POST /api/projects/:id/tests/run` | Run tests and parse summary/failures |
+| `POST /api/projects/:id/tests/stream` | Stream test output (NDJSON), stop, timeout and final parsed result |
 | `POST /api/projects/:id/search` | Local vector search |
 | `GET /api/projects/:id/events` | SSE watcher stream |
 | `GET /api/projects/:id/git` | Branch, HEAD, changed files, commits |
@@ -375,6 +456,10 @@ fixtures/sample-app/             End-to-end sample order project
 | `POST /api/projects/:id/ai/unresolved` | Classify an unresolved target |
 | `POST /api/projects/:id/ai/chat` | Graph-grounded Q&A |
 | `POST /api/projects/:id/ai/edit` | Single-file AI edit proposal with diff review |
+| `POST /api/projects/:id/ai/agent` | Autonomous agent loop with file and command tools |
+| `POST /api/projects/:id/ai/agent/stream` | Streaming agent loop (NDJSON) with `mode: ask` for read-only Q&A |
+| `POST /api/projects/:id/agent/permissions/:requestId` | Resolve an agent permission request (`once`, `always`, `deny`) |
+| `POST /api/projects/:id/ai/tests` | Generate a new test file proposal |
 | `GET /api/health` | Health check |
 
 All endpoints bind to `127.0.0.1`.
@@ -444,7 +529,7 @@ Every AI request carries the selected UI locale. The server appends an explicit 
 npm test
 ```
 
-Current coverage (7 tests):
+Current coverage (8 tests):
 
 1. Fixture call graph and evidence.
 2. CommonJS `require()` / `exports.x`.
@@ -453,8 +538,9 @@ Current coverage (7 tests):
 5. Git status, diff, commits since analysis, commit graph/detail/diff, structural diff, impact.
 6. AI service: real source prompt, structured result, cache, language instruction, grounded chat, single-file AI edit.
 7. Code Studio: safe write, backup, command runner, path sandbox.
+8. Test discovery and runner: framework detection, summary parsing, failure extraction.
 
-Manual browser verification covers folder browsing, all views, PHP/Python projects, the guided tour, the project profile, Git last-commit history and commit detail, 3D hybrid/hierarchical/clustered/force layouts, 3D LOD selection, 2D up navigation, semantic search, Git changes, AI panels, Code Studio editor/terminal, and language switching.
+Manual browser verification covers folder browsing, all views, PHP/Python projects, the guided tour, the project profile, Git last-commit history and commit detail, 3D hybrid/hierarchical/clustered/force layouts, 3D LOD selection, 2D up navigation, semantic search, Git changes, AI panels, Code Studio editor/terminal/tests, and language switching.
 
 ---
 
@@ -478,6 +564,13 @@ Manual browser verification covers folder browsing, all views, PHP/Python projec
 | Static data flow + AI business flow explorer | ✅ |
 | Code Studio: editor, save + backups, command runner | ✅ |
 | AI single-file edit with diff review and explicit apply | ✅ |
+| Code Studio model picker for all configured providers | ✅ |
+| Large-file AI edits via surgical find/replace (120 KB cap) | ✅ |
+| Test discovery + parsed test runner | ✅ |
+| Code Studio project-details tab, collapsible tree, preview panel | ✅ |
+| Full-screen AI panel + persisted chat history | ✅ |
+| Static HTML site routes + page metadata + asset links | ✅ |
+| AI test file generation with explicit create | ✅ |
 | Multi-file patch studio / agent test loop | ⏳ next |
 | PHP / Python symbol, import, call, and route support | ✅ core |
 | Git last commit + recent history in Changes | ✅ |

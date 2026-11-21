@@ -1,5 +1,8 @@
 import type {
   AnalysisResult,
+  BackgroundJob,
+  BackgroundJobRead,
+  DevCommandSuggestion,
   ChangeReport,
   CodeSearchResponse,
   FolderListing,
@@ -8,25 +11,59 @@ import type {
   GitDiffResult,
   GitStatus,
   GraphNodeKind,
+  PathChangeResult,
+  ProjectIndexHit,
+  ProjectIndexStatus,
+  ProjectTemplate,
   RecentProject,
   RunCommandResult,
+  RunStreamEvent,
+  ScaffoldProjectRequest,
+  ScaffoldProjectResult,
   SourceFileContent,
   SourceResponse,
+  TerminalSessionInfo,
+  TerminalStreamEvent,
+  TestDiscovery,
+  TestRunResult,
+  TestStreamEvent,
 } from "../../shared/types";
 import type {
+  AiAgentEvent,
+  AiAgentResult,
   AiBusinessFlowsResult,
   AiChatResult,
-  AiCodeEditResult,
   AiProjectSummary,
   AiScopeSummary,
+  AiPromptDefinition,
+  AiPromptVersionContent,
+  AiAgentAutoResult,
   AiProviderId,
   AiReviewResult,
   AiSettingsInput,
   AiSettingsPublic,
   AiSymbolAnalysis,
+  AiTestGenerationResult,
+  AiUsageReport,
   AiTestResult,
   AiUnresolvedAnalysis,
 } from "../../shared/ai";
+import type { ProjectTaskQueue } from "../../shared/tasks";
+import type {
+  CatalogImportResult,
+  ModelCatalog,
+} from "../../shared/catalog";
+import type {
+  BrowserCheckOptions,
+  BrowserCheckResult,
+} from "../../shared/browserCheck";
+import type { ProjectToolList } from "../../shared/projectTools";
+import type {
+  SkillDetail,
+  SkillFileResponse,
+  SkillListResponse,
+  SkillRecord,
+} from "../../shared/skills";
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, {
@@ -51,6 +88,14 @@ export const api = {
     request<AnalysisResult>("/api/analyze", {
       method: "POST",
       body: JSON.stringify({ path: projectPath }),
+    }),
+
+  projectTemplates: () => request<{ templates: ProjectTemplate[] }>("/api/project-templates"),
+
+  scaffoldProject: (input: ScaffoldProjectRequest) =>
+    request<ScaffoldProjectResult>("/api/projects/scaffold", {
+      method: "POST",
+      body: JSON.stringify(input),
     }),
 
   recent: () => request<{ projects: RecentProject[] }>("/api/recent"),
@@ -82,11 +127,304 @@ export const api = {
       body: JSON.stringify({ filePath, content }),
     }),
 
+  createFile: (id: string, filePath: string) =>
+    request<SourceFileContent>(`/api/projects/${id}/files`, {
+      method: "POST",
+      body: JSON.stringify({ filePath }),
+    }),
+
+  uploadAsset: (id: string, filePath: string, dataBase64: string) =>
+    request<{ filePath: string; bytes: number }>(`/api/projects/${id}/assets`, {
+      method: "POST",
+      body: JSON.stringify({ filePath, dataBase64 }),
+    }),
+
+  checkSyntax: (id: string, filePath: string) =>
+    request<{
+      filePath: string;
+      supported: boolean;
+      command?: string;
+      ok: boolean;
+      exitCode: number | null;
+      output: string;
+    }>(`/api/projects/${id}/checks/syntax`, {
+      method: "POST",
+      body: JSON.stringify({ filePath }),
+    }),
+
+  scanDuplications: (id: string, windowLines = 6) =>
+    request<{
+      filesScanned: number;
+      windowLines: number;
+      blocks: {
+        hash: string;
+        lines: number;
+        sample: string;
+        occurrences: { path: string; startLine: number; endLine: number }[];
+      }[];
+      duplicatedLines: number;
+      generatedAt: string;
+    }>(`/api/projects/${id}/checks/duplication?windowLines=${windowLines}`),
+
+  formatFile: (id: string, filePath: string) =>
+    request<{
+      filePath: string;
+      command?: string;
+      exitCode: number | null;
+      stdout: string;
+      stderr: string;
+      content: string;
+      formatted: boolean;
+    }>(`/api/projects/${id}/format`, {
+      method: "POST",
+      body: JSON.stringify({ filePath }),
+    }),
+
+  renamePath: (id: string, from: string, to: string) =>
+    request<PathChangeResult>(`/api/projects/${id}/fs/rename`, {
+      method: "POST",
+      body: JSON.stringify({ path: from, newPath: to }),
+    }),
+
+  deletePath: (id: string, pathToDelete: string) =>
+    request<{ path: string; kind: "file" | "directory" }>(`/api/projects/${id}/fs/delete`, {
+      method: "POST",
+      body: JSON.stringify({ path: pathToDelete }),
+    }),
+
   runCommand: (id: string, command: string, cwd?: string) =>
     request<RunCommandResult>(`/api/projects/${id}/run`, {
       method: "POST",
       body: JSON.stringify({ command, cwd }),
     }),
+
+  runCommandStream: async (
+    id: string,
+    command: string,
+    options: { cwd?: string; timeoutMs?: number },
+    onEvent: (event: RunStreamEvent) => void,
+    signal?: AbortSignal,
+  ): Promise<void> => {
+    const response = await fetch(`/api/projects/${id}/run/stream`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ command, ...options }),
+      signal,
+    });
+    if (!response.ok || !response.body) {
+      const message = await response
+        .json()
+        .then((value: { error?: string }) => value.error)
+        .catch(() => null);
+      throw new Error(message ?? `Command request failed with status ${response.status}.`);
+    }
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        let newline = buffer.indexOf("\n");
+        while (newline >= 0) {
+          const line = buffer.slice(0, newline);
+          buffer = buffer.slice(newline + 1);
+          if (line.trim()) onEvent(JSON.parse(line) as RunStreamEvent);
+          newline = buffer.indexOf("\n");
+        }
+      }
+      if (buffer.trim()) onEvent(JSON.parse(buffer) as RunStreamEvent);
+    } finally {
+      reader.releaseLock();
+    }
+  },
+
+  tests: (id: string) => request<TestDiscovery>(`/api/projects/${id}/tests`),
+
+  usage: (id: string) => request<AiUsageReport>(`/api/projects/${id}/usage`),
+
+  indexStatus: (id: string) =>
+    request<ProjectIndexStatus>(`/api/projects/${id}/index/status`),
+
+  buildIndex: (id: string) =>
+    request<ProjectIndexStatus>(`/api/projects/${id}/index/build`, { method: "POST" }),
+
+  importConversations: (id: string, pairs: { question: string; answer: string }[]) =>
+    request<{ imported: number }>(`/api/projects/${id}/conversations/import`, {
+      method: "POST",
+      body: JSON.stringify({ pairs }),
+    }),
+
+  searchIndex: (id: string, query: string, limit = 20) =>
+    request<{ query: string; results: ProjectIndexHit[] }>(
+      `/api/projects/${id}/index/search?q=${encodeURIComponent(query)}&limit=${limit}`,
+    ),
+
+  processes: {
+    devCommands: (id: string) =>
+      request<{ commands: DevCommandSuggestion[] }>(`/api/projects/${id}/dev-commands`),
+    list: (id: string) =>
+      request<{ jobs: BackgroundJob[] }>(`/api/projects/${id}/processes`),
+    start: (id: string, command: string, cwd?: string) =>
+      request<BackgroundJob>(`/api/projects/${id}/processes`, {
+        method: "POST",
+        body: JSON.stringify({ command, cwd }),
+      }),
+    read: (id: string, jobId: string, offset = 0) =>
+      request<BackgroundJobRead>(
+        `/api/projects/${id}/processes/${encodeURIComponent(jobId)}?offset=${offset}`,
+      ),
+    stop: (id: string, jobId: string) =>
+      request<BackgroundJob>(
+        `/api/projects/${id}/processes/${encodeURIComponent(jobId)}`,
+        { method: "DELETE" },
+      ),
+    remove: (id: string, jobId: string) =>
+      request<{ ok: boolean }>(
+        `/api/projects/${id}/processes/${encodeURIComponent(jobId)}/remove`,
+        { method: "DELETE" },
+      ),
+  },
+
+  skills: {
+    list: (id: string) => request<SkillListResponse>(`/api/projects/${id}/skills`),
+
+    get: (id: string, key: string) =>
+      request<SkillDetail>(`/api/projects/${id}/skills/${encodeURIComponent(key)}`),
+
+    setEnabled: (id: string, key: string, enabled: boolean) =>
+      request<SkillRecord>(`/api/projects/${id}/skills/${encodeURIComponent(key)}`, {
+        method: "PATCH",
+        body: JSON.stringify({ enabled }),
+      }),
+
+    readFile: (id: string, key: string, filePath: string) =>
+      request<SkillFileResponse>(
+        `/api/projects/${id}/skills/${encodeURIComponent(key)}/file?path=${encodeURIComponent(filePath)}`,
+      ),
+  },
+
+  runTests: (id: string, command?: string) =>
+    request<TestRunResult>(`/api/projects/${id}/tests/run`, {
+      method: "POST",
+      body: JSON.stringify({ command }),
+    }),
+
+  terminals: {
+    list: (id: string) =>
+      request<{ sessions: TerminalSessionInfo[] }>(`/api/projects/${id}/terminals`),
+
+    create: (id: string, size?: { cols?: number; rows?: number }) =>
+      request<TerminalSessionInfo>(`/api/projects/${id}/terminals`, {
+        method: "POST",
+        body: JSON.stringify(size ?? {}),
+      }),
+
+    resize: (id: string, sessionId: string, cols: number, rows: number) =>
+      request<{ ok: boolean }>(`/api/projects/${id}/terminals/${sessionId}/resize`, {
+        method: "POST",
+        body: JSON.stringify({ cols, rows }),
+      }),
+
+    input: (id: string, sessionId: string, data: string) =>
+      request<{ ok: boolean }>(`/api/projects/${id}/terminals/${sessionId}/input`, {
+        method: "POST",
+        body: JSON.stringify({ data }),
+      }),
+
+    interrupt: (id: string, sessionId: string) =>
+      request<{ ok: boolean }>(`/api/projects/${id}/terminals/${sessionId}/interrupt`, {
+        method: "POST",
+        body: JSON.stringify({}),
+      }),
+
+    close: (id: string, sessionId: string) =>
+      request<TerminalSessionInfo>(`/api/projects/${id}/terminals/${sessionId}`, {
+        method: "DELETE",
+      }),
+
+    stream: async (
+      id: string,
+      sessionId: string,
+      onEvent: (event: TerminalStreamEvent) => void,
+      signal?: AbortSignal,
+    ): Promise<void> => {
+      const response = await fetch(`/api/projects/${id}/terminals/${sessionId}/stream`, {
+        method: "GET",
+        signal,
+      });
+      if (!response.ok || !response.body) {
+        const message = await response
+          .json()
+          .then((value: { error?: string }) => value.error)
+          .catch(() => null);
+        throw new Error(message ?? `Terminal stream failed with status ${response.status}.`);
+      }
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      try {
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          let newline = buffer.indexOf("\n");
+          while (newline >= 0) {
+            const line = buffer.slice(0, newline);
+            buffer = buffer.slice(newline + 1);
+            if (line.trim()) onEvent(JSON.parse(line) as TerminalStreamEvent);
+            newline = buffer.indexOf("\n");
+          }
+        }
+        if (buffer.trim()) onEvent(JSON.parse(buffer) as TerminalStreamEvent);
+      } finally {
+        reader.releaseLock();
+      }
+    },
+  },
+
+  runTestsStream: async (
+    id: string,
+    command: string,
+    options: { timeoutSeconds?: number },
+    onEvent: (event: TestStreamEvent) => void,
+    signal?: AbortSignal,
+  ): Promise<void> => {
+    const response = await fetch(`/api/projects/${id}/tests/stream`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ command, ...options }),
+      signal,
+    });
+    if (!response.ok || !response.body) {
+      const message = await response
+        .json()
+        .then((value: { error?: string }) => value.error)
+        .catch(() => null);
+      throw new Error(message ?? `Test request failed with status ${response.status}.`);
+    }
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        let newline = buffer.indexOf("\n");
+        while (newline >= 0) {
+          const line = buffer.slice(0, newline);
+          buffer = buffer.slice(newline + 1);
+          if (line.trim()) onEvent(JSON.parse(line) as TestStreamEvent);
+          newline = buffer.indexOf("\n");
+        }
+      }
+      if (buffer.trim()) onEvent(JSON.parse(buffer) as TestStreamEvent);
+    } finally {
+      reader.releaseLock();
+    }
+  },
 
   remove: (id: string) => request<{ ok: boolean }>(`/api/projects/${id}`, { method: "DELETE" }),
 
@@ -132,7 +470,97 @@ export const api = {
     },
   },
 
+  projectTools: (projectId: string) =>
+    request<ProjectToolList>(`/api/projects/${projectId}/tools`),
+
+  browserCheck: (projectId: string, options: BrowserCheckOptions = {}) =>
+    request<BrowserCheckResult>(`/api/projects/${projectId}/browser-check`, {
+      method: "POST",
+      body: JSON.stringify(options),
+    }),
+
+  browserCheckStatus: () =>
+    request<{ available: boolean }>("/api/browser-check/status"),
+
+  tasks: {
+    get: (projectId: string) =>
+      request<{ queue: ProjectTaskQueue | null }>(`/api/projects/${projectId}/tasks`),
+    plan: (projectId: string, instruction: string, language?: string, replan = false) =>
+      request<ProjectTaskQueue>(`/api/projects/${projectId}/tasks/plan`, {
+        method: "POST",
+        body: JSON.stringify({ instruction, language, replan }),
+      }),
+    loopStream: async (
+      projectId: string,
+      instruction: string,
+      options: {
+        activeFile?: string;
+        provider?: AiProviderId;
+        model?: string;
+        allowWrite?: boolean;
+        allowCommands?: boolean;
+        language?: string;
+        maxTasks?: number;
+        maxMinutes?: number;
+        replan?: boolean;
+        retryFailed?: boolean;
+      },
+      onEvent: (event: AiAgentEvent) => void,
+      signal?: AbortSignal,
+    ): Promise<void> => {
+      const response = await fetch(`/api/projects/${projectId}/ai/loop/stream`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ instruction, ...options }),
+        signal,
+      });
+      if (!response.ok || !response.body) {
+        const message = await response
+          .json()
+          .then((value: { error?: string }) => value.error)
+          .catch(() => null);
+        throw new Error(message ?? `Task loop failed with status ${response.status}.`);
+      }
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      try {
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          let newline = buffer.indexOf("\n");
+          while (newline >= 0) {
+            const line = buffer.slice(0, newline);
+            buffer = buffer.slice(newline + 1);
+            if (line.trim()) onEvent(JSON.parse(line) as AiAgentEvent);
+            newline = buffer.indexOf("\n");
+          }
+        }
+        if (buffer.trim()) onEvent(JSON.parse(buffer) as AiAgentEvent);
+      } finally {
+        reader.releaseLock();
+      }
+    },
+  },
+
   ai: {
+    autoConfigureAgents: () =>
+      request<AiAgentAutoResult>("/api/ai/agents/auto", {
+        method: "POST",
+        body: JSON.stringify({}),
+      }),
+
+    catalog: () => request<{ catalog: ModelCatalog | null }>("/api/ai/catalog"),
+
+    importCatalog: (input: { json?: string; url?: string; replace?: boolean }) =>
+      request<CatalogImportResult>("/api/ai/catalog/import", {
+        method: "POST",
+        body: JSON.stringify(input),
+      }),
+
+    clearCatalog: () => request<{ ok: boolean }>("/api/ai/catalog", { method: "DELETE" }),
+
     settings: () => request<AiSettingsPublic>("/api/ai/settings"),
 
     updateSettings: (input: AiSettingsInput) =>
@@ -147,8 +575,53 @@ export const api = {
         body: JSON.stringify({ provider, model }),
       }),
 
-    models: (provider: AiProviderId) =>
-      request<{ models: string[] }>(`/api/ai/models?provider=${encodeURIComponent(provider)}`),
+    prompts: (projectId?: string) =>
+      request<{ prompts: AiPromptDefinition[] }>(
+        `/api/prompts${projectId ? `?projectId=${encodeURIComponent(projectId)}` : ""}`,
+      ),
+
+    promptVersionContent: (
+      id: string,
+      version: number,
+      scope: "global" | "project",
+      projectId?: string,
+    ) => {
+      const params = new URLSearchParams({ scope });
+      if (projectId) params.set("projectId", projectId);
+      return request<AiPromptVersionContent>(
+        `/api/prompts/${encodeURIComponent(id)}/versions/${version}?${params.toString()}`,
+      );
+    },
+
+    savePrompt: (id: string, system: string, projectId?: string) =>
+      request<AiPromptDefinition>(`/api/prompts/${encodeURIComponent(id)}`, {
+        method: "PUT",
+        body: JSON.stringify({ system, projectId }),
+      }),
+
+    resetPrompt: (id: string, projectId?: string) =>
+      request<AiPromptDefinition>(
+        `/api/prompts/${encodeURIComponent(id)}${projectId ? `?projectId=${encodeURIComponent(projectId)}` : ""}`,
+        { method: "DELETE" },
+      ),
+
+    previewPrompt: (
+      id: string,
+      projectId?: string,
+      variables?: Record<string, string>,
+    ) =>
+      request<AiPromptDefinition & { preview: string }>(
+        `/api/prompts/${encodeURIComponent(id)}/preview`,
+        {
+          method: "POST",
+          body: JSON.stringify({ projectId, variables }),
+        },
+      ),
+
+    models: (provider: AiProviderId, refresh = false) =>
+      request<{ models: string[] }>(
+        `/api/ai/models?provider=${encodeURIComponent(provider)}${refresh ? "&refresh=1" : ""}`,
+      ),
 
     symbol: (
       projectId: string,
@@ -228,34 +701,123 @@ export const api = {
         body: JSON.stringify({ question, history, provider, model, language }),
       }),
 
-    edit: (
+    generateTests: (
       projectId: string,
-      filePath: string,
-      instruction: string,
+      sourceFile: string,
+      framework?: string,
+      instruction?: string,
       provider?: AiProviderId,
       model?: string,
-      language?: string,
     ) =>
-      request<AiCodeEditResult>(`/api/projects/${projectId}/ai/edit`, {
+      request<AiTestGenerationResult>(`/api/projects/${projectId}/ai/tests`, {
         method: "POST",
-        body: JSON.stringify({ filePath, instruction, provider, model, language }),
+        body: JSON.stringify({ sourceFile, framework, instruction, provider, model }),
       }),
+
+    resolvePermission: (
+      projectId: string,
+      requestId: string,
+      decision: "once" | "always" | "deny",
+    ) =>
+      request<{ ok: boolean; decision: string }>(
+        `/api/projects/${projectId}/agent/permissions/${encodeURIComponent(requestId)}`,
+        {
+          method: "POST",
+          body: JSON.stringify({ decision }),
+        },
+      ),
+
+    agent: (
+      projectId: string,
+      instruction: string,
+      options: {
+        activeFile?: string;
+        provider?: AiProviderId;
+        model?: string;
+        allowWrite?: boolean;
+        allowCommands?: boolean;
+        language?: string;
+        maxSteps?: number;
+        mode?: "ask" | "coding" | "auto";
+        history?: { role: "user" | "assistant"; content: string }[];
+      } = {},
+    ) =>
+      request<AiAgentResult>(`/api/projects/${projectId}/ai/agent`, {
+        method: "POST",
+        body: JSON.stringify({ instruction, ...options }),
+      }),
+
+    agentStream: async (
+      projectId: string,
+      instruction: string,
+      options: {
+        activeFile?: string;
+        provider?: AiProviderId;
+        model?: string;
+        allowWrite?: boolean;
+        allowCommands?: boolean;
+        language?: string;
+        maxSteps?: number;
+        mode?: "ask" | "coding" | "auto";
+        history?: { role: "user" | "assistant"; content: string }[];
+      },
+      onEvent: (event: AiAgentEvent) => void,
+      signal?: AbortSignal,
+    ): Promise<void> => {
+      const response = await fetch(`/api/projects/${projectId}/ai/agent/stream`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ instruction, ...options }),
+        signal,
+      });
+      if (!response.ok || !response.body) {
+        const message = await response
+          .json()
+          .then((value: { error?: string }) => value.error)
+          .catch(() => null);
+        throw new Error(message ?? `Agent request failed with status ${response.status}.`);
+      }
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      try {
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          let newline = buffer.indexOf("\n");
+          while (newline >= 0) {
+            const line = buffer.slice(0, newline);
+            buffer = buffer.slice(newline + 1);
+            if (line.trim()) onEvent(JSON.parse(line) as AiAgentEvent);
+            newline = buffer.indexOf("\n");
+          }
+        }
+        if (buffer.trim()) onEvent(JSON.parse(buffer) as AiAgentEvent);
+      } finally {
+        reader.releaseLock();
+      }
+    },
   },
 };
 
 export type {
+  AiAgentResult,
   AiBusinessFlowsResult,
   AiChatResult,
-  AiCodeEditResult,
   AiProjectSummary,
   AiProviderId,
   AiReviewResult,
   AiScopeSummary,
   AiSettingsPublic,
   AiSymbolAnalysis,
+  AiTestGenerationResult,
   AiTestResult,
+  AiUsageReport,
   AiUnresolvedAnalysis,
   AnalysisResult,
+  BackgroundJob,
+  BackgroundJobRead,
   ChangeReport,
   CodeSearchResponse,
   FolderListing,
@@ -266,4 +828,6 @@ export type {
   GraphNodeKind,
   RecentProject,
   SourceResponse,
+  TestDiscovery,
+  TestRunResult,
 };

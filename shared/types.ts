@@ -110,7 +110,7 @@ export interface SymbolRecord {
 export interface FileRecord {
   id: string;
   path: string;
-  language: "typescript" | "tsx" | "javascript" | "jsx" | "php" | "python" | "prisma" | "sql" | "other";
+  language: string;
   bytes: number;
   loc: number;
   hash: string;
@@ -143,6 +143,21 @@ export interface AiStatus {
   model?: string;
 }
 
+export interface ProjectTooling {
+  ecosystems: string[];
+  packageManagers: string[];
+  frameworks: string[];
+  testFramework?: string;
+  testCommands: string[];
+  buildCommands: string[];
+  typecheckCommands: string[];
+  lintCommands: string[];
+  formatCommands: string[];
+  manifests: string[];
+  testFileCount: number;
+  hasTests: boolean;
+}
+
 export interface AnalysisSummary {
   id: string;
   projectName: string;
@@ -152,6 +167,7 @@ export interface AnalysisSummary {
   warnings: string[];
   languages: Record<string, number>;
   frameworks?: string[];
+  tooling?: ProjectTooling;
   ai?: AiStatus;
   git?: GitSnapshotSummary;
 }
@@ -324,10 +340,103 @@ export interface CodeSearchResponse {
   tookMs: number;
 }
 
+export interface SyntaxCheckResult {
+  filePath: string;
+  supported: boolean;
+  command?: string;
+  ok: boolean;
+  exitCode: number | null;
+  output: string;
+}
+
+export interface DuplicationOccurrence {
+  path: string;
+  startLine: number;
+  endLine: number;
+}
+
+export interface DuplicationBlock {
+  hash: string;
+  lines: number;
+  sample: string;
+  occurrences: DuplicationOccurrence[];
+}
+
+export interface DuplicationReport {
+  filesScanned: number;
+  windowLines: number;
+  blocks: DuplicationBlock[];
+  duplicatedLines: number;
+  generatedAt: string;
+}
+
+export interface ProjectIndexStatus {
+  ready: boolean;
+  building: boolean;
+  processed: number;
+  total: number;
+  documents: number;
+  updatedAt?: string;
+  stale: boolean;
+  partial: boolean;
+  error?: string;
+}
+
+export interface ProjectIndexHit {
+  id: string;
+  kind: string;
+  title: string;
+  path?: string;
+  line?: number;
+  snippet?: string;
+  answer?: string;
+  score: number;
+}
+
+export interface PathChangeResult {
+  from: string;
+  to: string;
+  kind: "file" | "directory";
+}
+
 export interface SourceFileContent {
   filePath: string;
   content: string;
   bytes: number;
+}
+
+export interface TestDiscovery {
+  framework?: string;
+  commands: string[];
+  testFiles: string[];
+  testFileCount: number;
+  hasTests: boolean;
+}
+
+export interface TestFailure {
+  name: string;
+  file?: string;
+  line?: number;
+  message?: string;
+}
+
+export interface TestSummary {
+  passed: number;
+  failed: number;
+  skipped: number;
+  total: number;
+}
+
+export type TestStreamEvent =
+  | { type: "output"; stream: "stdout" | "stderr"; chunk: string }
+  | { type: "done"; result: TestRunResult }
+  | { type: "error"; message: string };
+
+export interface TestRunResult extends RunCommandResult {
+  framework?: string;
+  summary: TestSummary;
+  failures: TestFailure[];
+  parsed: boolean;
 }
 
 export interface RunCommandResult {
@@ -340,6 +449,94 @@ export interface RunCommandResult {
   timedOut: boolean;
   truncated: boolean;
 }
+
+export interface TerminalSessionInfo {
+  id: string;
+  projectId: string;
+  cwd: string;
+  shell: string;
+  pid?: number;
+  startedAt: string;
+  status: "running" | "exited";
+  exitCode: number | null;
+}
+
+export type TerminalStreamEvent =
+  | { type: "start"; session: TerminalSessionInfo; buffer: string }
+  | { type: "output"; chunk: string }
+  | { type: "exit"; session: TerminalSessionInfo }
+  | { type: "error"; message: string };
+
+export interface BackgroundJob {
+  id: string;
+  projectId: string;
+  command: string;
+  cwd: string;
+  pid?: number;
+  status: "running" | "exited" | "stopped";
+  exitCode: number | null;
+  startedAt: string;
+  endedAt?: string;
+  output: string;
+  /** Local URLs detected in the process output (dev servers, previews). */
+  urls?: string[];
+}
+
+export interface BackgroundJobRead {
+  job: BackgroundJob;
+  output: string;
+  offset: number;
+}
+
+export interface DevCommandSuggestion {
+  label: string;
+  command: string;
+  kind: "node" | "php" | "python" | "ruby" | "go" | "rust" | "elixir";
+  purpose?: "dev" | "install";
+}
+
+export type ProjectTemplateId =
+  | "blank"
+  | "static"
+  | "react-vite"
+  | "node-express"
+  | "python-fastapi"
+  | "php-web"
+  | "canvas-game"
+  | "pwa-mobile"
+  | "expo-mobile";
+
+export interface ProjectTemplate {
+  id: ProjectTemplateId;
+  name: string;
+  description: string;
+  language: string;
+  framework?: string;
+  files: string[];
+  suggestedCommands: string[];
+}
+
+export interface ScaffoldProjectRequest {
+  parentPath: string;
+  name: string;
+  template: ProjectTemplateId;
+}
+
+export interface ScaffoldProjectResult {
+  rootPath: string;
+  name: string;
+  template: ProjectTemplateId;
+  filesCreated: string[];
+  warnings: string[];
+  suggestedCommands: string[];
+}
+
+export type RunStreamEvent =
+  | { type: "start"; command: string; cwd: string }
+  | { type: "stdout"; chunk: string }
+  | { type: "stderr"; chunk: string }
+  | { type: "exit"; result: RunCommandResult }
+  | { type: "error"; message: string };
 
 export interface SourceResponse {
   filePath: string;

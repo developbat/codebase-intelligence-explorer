@@ -1,6 +1,5 @@
-import type { AiProviderId, AiTestResult } from "../../../shared/ai";
-import { providerInfo } from "../../../shared/ai";
-import { resolveProvider, type ResolvedProvider } from "./settings";
+import type { AiProviderId, AiTestResult, AiTokenUsage } from "../../../shared/ai";
+import { resolveProvider, saveProviderModels, type ResolvedProvider } from "./settings";
 
 export interface ChatMessage {
   role: "system" | "user" | "assistant";
@@ -11,6 +10,9 @@ interface ChatOptions {
   maxTokens?: number;
   temperature?: number;
   timeoutMs?: number;
+  signal?: AbortSignal;
+  onUsage?: (usage: AiTokenUsage) => void;
+  onToken?: (chunk: string) => void;
 }
 
 async function request(
@@ -18,9 +20,15 @@ async function request(
   init: RequestInit,
   timeoutMs: number,
   providerName: string,
+  signal?: AbortSignal,
 ): Promise<Response> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const onAbort = () => controller.abort();
+  if (signal) {
+    if (signal.aborted) controller.abort();
+    else signal.addEventListener("abort", onAbort, { once: true });
+  }
   try {
     const response = await fetch(url, { ...init, signal: controller.signal });
     if (!response.ok) {
@@ -38,12 +46,14 @@ async function request(
     }
     return response;
   } catch (error) {
+    if (signal?.aborted) throw new Error("The request was cancelled.");
     if (error instanceof Error && error.name === "AbortError") {
       throw new Error(`${providerName} request timed out after ${Math.round(timeoutMs / 1000)}s.`);
     }
     throw error;
   } finally {
     clearTimeout(timer);
+    signal?.removeEventListener("abort", onAbort);
   }
 }
 
@@ -59,37 +69,197 @@ function openAiHeaders(config: ResolvedProvider): Record<string, string> {
 
 function extractOpenAiText(payload: unknown): string {
   const data = payload as {
-    choices?: { message?: { content?: string | { type?: string; text?: string }[] } }[];
+    choices?: {
+      text?: string;
+      finish_reason?: string;
+      message?: {
+        content?: string | { type?: string; text?: string }[];
+        reasoning?: string;
+        reasoning_content?: string;
+        tool_calls?: { function?: { name?: string; arguments?: string } }[];
+      };
+    }[];
   };
-  const content = data.choices?.[0]?.message?.content;
-  if (typeof content === "string") return content;
+  const choice = data.choices?.[0];
+  const content = choice?.message?.content;
+  if (typeof content === "string" && content.trim()) return content;
   if (Array.isArray(content)) {
-    return content.map((part) => (typeof part === "string" ? part : part.text ?? "")).join("");
+    const text = content.map((part) => (typeof part === "string" ? part : part.text ?? "")).join("");
+    if (text.trim()) return text;
   }
-  throw new Error("The provider returned an empty response.");
+  const toolCalls = choice?.message?.tool_calls;
+  if (Array.isArray(toolCalls) && toolCalls.length > 0) {
+    const calls = toolCalls.map((call) => {
+      let args: Record<string, unknown> = {};
+      if (typeof call.function?.arguments === "string" && call.function.arguments.trim()) {
+        try {
+          const parsed = JSON.parse(call.function.arguments) as unknown;
+          if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+            args = parsed as Record<string, unknown>;
+          }
+        } catch {
+          args = {};
+        }
+      }
+      return { action: call.function?.name ?? "invalid", args };
+    });
+    return JSON.stringify(
+      calls.length === 1
+        ? calls[0]
+        : {
+            action: calls[0].action,
+            args: calls[0].args,
+            __actionCount: calls.length,
+            __actions: calls,
+          },
+    );
+  }
+  // Some reasoning models put the answer in a separate field and leave content empty.
+  const reasoning = choice?.message?.reasoning_content ?? choice?.message?.reasoning;
+  if (typeof reasoning === "string" && reasoning.trim()) return reasoning;
+  if (typeof choice?.text === "string" && choice.text.trim()) return choice.text;
+  throw new Error(
+    `The provider returned an empty response${choice?.finish_reason ? ` (finish_reason: ${choice.finish_reason})` : ""}.`,
+  );
+}
+
+async function readOpenAiStream(
+  response: Response,
+  options: ChatOptions,
+): Promise<string> {
+  const reader = response.body?.getReader();
+  if (!reader) throw new Error("The provider returned no streaming body.");
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let text = "";
+  let reasoning = "";
+  let finishReason: string | undefined;
+  let usage: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number } | undefined;
+
+  try {
+    for (;;) {
+      // eslint-disable-next-line no-await-in-loop
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      let newline = buffer.indexOf("\n");
+      while (newline >= 0) {
+        const rawLine = buffer.slice(0, newline).trim();
+        buffer = buffer.slice(newline + 1);
+        newline = buffer.indexOf("\n");
+        if (!rawLine.startsWith("data:")) continue;
+        const data = rawLine.slice(5).trim();
+        if (!data || data === "[DONE]") continue;
+        let payload: {
+          choices?: {
+            delta?: {
+              content?: string | { type?: string; text?: string }[];
+              reasoning?: string;
+              reasoning_content?: string;
+            };
+            finish_reason?: string;
+          }[];
+          usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
+        };
+        try {
+          payload = JSON.parse(data) as typeof payload;
+        } catch {
+          continue;
+        }
+        if (payload.usage) usage = payload.usage;
+        const choice = payload.choices?.[0];
+        if (!choice) continue;
+        if (choice.finish_reason) finishReason = choice.finish_reason;
+        const delta = choice.delta;
+        if (!delta) continue;
+        const content = delta.content;
+        if (typeof content === "string" && content) {
+          text += content;
+          options.onToken?.(content);
+        } else if (Array.isArray(content)) {
+          const piece = content.map((part) => (typeof part === "string" ? part : part.text ?? "")).join("");
+          if (piece) {
+            text += piece;
+            options.onToken?.(piece);
+          }
+        }
+        const thinking = delta.reasoning_content ?? delta.reasoning;
+        if (typeof thinking === "string" && thinking) reasoning += thinking;
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  if (usage) {
+    const inputTokens = usage.prompt_tokens ?? 0;
+    const outputTokens = usage.completion_tokens ?? 0;
+    options.onUsage?.({
+      inputTokens,
+      outputTokens,
+      totalTokens: usage.total_tokens ?? inputTokens + outputTokens,
+    });
+  }
+  if (text.trim()) return text;
+  if (reasoning.trim()) return reasoning;
+  throw new Error(
+    `The provider returned an empty response${finishReason ? ` (finish_reason: ${finishReason})` : ""}.`,
+  );
 }
 
 async function chatOpenAi(config: ResolvedProvider, messages: ChatMessage[], options: ChatOptions): Promise<string> {
   const maxTokens = options.maxTokens ?? 2400;
   const reasoningModel = /^(gpt-5|o\d|o-)/i.test(config.model);
+  const streaming = typeof options.onToken === "function";
   const body: Record<string, unknown> = {
     model: config.model,
     messages,
-    stream: false,
+    stream: streaming,
   };
+  if (streaming) body.stream_options = { include_usage: true };
   if (reasoningModel) body.max_completion_tokens = maxTokens;
   else {
     body.max_tokens = maxTokens;
     body.temperature = options.temperature ?? 0.2;
   }
 
-  const response = await request(
-    `${config.baseUrl}/chat/completions`,
-    { method: "POST", headers: openAiHeaders(config), body: JSON.stringify(body) },
-    options.timeoutMs ?? 90_000,
-    providerInfo(config.id).name,
-  );
-  return extractOpenAiText(await response.json());
+  let response: Response;
+  try {
+    response = await request(
+      `${config.baseUrl}/chat/completions`,
+      { method: "POST", headers: openAiHeaders(config), body: JSON.stringify(body) },
+      options.timeoutMs ?? 90_000,
+      config.name,
+      options.signal,
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "";
+    if (!streaming || !/error 4\d\d/.test(message)) throw error;
+    // Some OpenAI-compatible servers reject stream_options or streaming itself.
+    body.stream = false;
+    delete body.stream_options;
+    response = await request(
+      `${config.baseUrl}/chat/completions`,
+      { method: "POST", headers: openAiHeaders(config), body: JSON.stringify(body) },
+      options.timeoutMs ?? 90_000,
+      config.name,
+      options.signal,
+    );
+  }
+  if (streaming && body.stream === true) return readOpenAiStream(response, options);
+  const payload = (await response.json()) as {
+    usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
+  };
+  if (payload.usage) {
+    const inputTokens = payload.usage.prompt_tokens ?? 0;
+    const outputTokens = payload.usage.completion_tokens ?? 0;
+    options.onUsage?.({
+      inputTokens,
+      outputTokens,
+      totalTokens: payload.usage.total_tokens ?? inputTokens + outputTokens,
+    });
+  }
+  return extractOpenAiText(payload);
 }
 
 async function chatAnthropic(config: ResolvedProvider, messages: ChatMessage[], options: ChatOptions): Promise<string> {
@@ -117,10 +287,24 @@ async function chatAnthropic(config: ResolvedProvider, messages: ChatMessage[], 
     },
     options.timeoutMs ?? 90_000,
     "Anthropic",
+    options.signal,
   );
-  const payload = (await response.json()) as { content?: { type?: string; text?: string }[] };
+  const payload = (await response.json()) as {
+    content?: { type?: string; text?: string }[];
+    stop_reason?: string;
+    usage?: { input_tokens?: number; output_tokens?: number };
+  };
+  if (payload.usage) {
+    const inputTokens = payload.usage.input_tokens ?? 0;
+    const outputTokens = payload.usage.output_tokens ?? 0;
+    options.onUsage?.({ inputTokens, outputTokens, totalTokens: inputTokens + outputTokens });
+  }
   const text = (payload.content ?? []).map((part) => part.text ?? "").join("");
-  if (!text) throw new Error("Anthropic returned an empty response.");
+  if (!text) {
+    throw new Error(
+      `Anthropic returned an empty response${payload.stop_reason ? ` (stop_reason: ${payload.stop_reason})` : ""}.`,
+    );
+  }
   return text;
 }
 
@@ -149,12 +333,30 @@ async function chatGemini(config: ResolvedProvider, messages: ChatMessage[], opt
     },
     options.timeoutMs ?? 90_000,
     "Google Gemini",
+    options.signal,
   );
   const payload = (await response.json()) as {
-    candidates?: { content?: { parts?: { text?: string }[] } }[];
+    candidates?: { content?: { parts?: { text?: string }[] }; finishReason?: string }[];
+    usageMetadata?: {
+      promptTokenCount?: number;
+      candidatesTokenCount?: number;
+      totalTokenCount?: number;
+    };
   };
+  if (payload.usageMetadata) {
+    const inputTokens = payload.usageMetadata.promptTokenCount ?? 0;
+    const outputTokens = payload.usageMetadata.candidatesTokenCount ?? 0;
+    options.onUsage?.({
+      inputTokens,
+      outputTokens,
+      totalTokens: payload.usageMetadata.totalTokenCount ?? inputTokens + outputTokens,
+    });
+  }
   const text = (payload.candidates?.[0]?.content?.parts ?? []).map((part) => part.text ?? "").join("");
-  if (!text) throw new Error("Gemini returned an empty response.");
+  if (!text) {
+    const finish = payload.candidates?.[0]?.finishReason;
+    throw new Error(`Gemini returned an empty response${finish ? ` (finishReason: ${finish})` : ""}.`);
+  }
   return text;
 }
 
@@ -198,15 +400,18 @@ export async function testProvider(provider?: AiProviderId, model?: string): Pro
   }
 }
 
-export async function listProviderModels(provider: AiProviderId): Promise<string[]> {
-  const info = providerInfo(provider);
-  if (info.kind === "anthropic") return info.models;
-
+export async function listProviderModels(
+  provider: AiProviderId,
+  options: { refresh?: boolean } = {},
+): Promise<string[]> {
   const config = await resolveProvider(provider);
+  if (!options.refresh && config.models.length > 0) return config.models;
+  if (config.kind === "anthropic") return config.models;
+
   const timeout = 20_000;
 
   try {
-    if (info.kind === "gemini") {
+    if (config.kind === "gemini") {
       const response = await request(
         `${config.baseUrl}/v1beta/models?key=${encodeURIComponent(config.apiKey)}`,
         { method: "GET" },
@@ -214,20 +419,35 @@ export async function listProviderModels(provider: AiProviderId): Promise<string
         "Google Gemini",
       );
       const payload = (await response.json()) as { models?: { name?: string; supportedGenerationMethods?: string[] }[] };
-      return (payload.models ?? [])
+      const models = (payload.models ?? [])
         .filter((model) => !model.supportedGenerationMethods || model.supportedGenerationMethods.includes("generateContent"))
         .map((model) => model.name?.replace(/^models\//, "") ?? "")
         .filter(Boolean)
         .sort();
+      if (models.length === 0) return config.models;
+      await saveProviderModels(provider, models);
+      return models;
     }
 
     const headers: Record<string, string> = {};
     if (config.apiKey) headers.Authorization = `Bearer ${config.apiKey}`;
-    const response = await request(`${config.baseUrl}/models`, { method: "GET", headers }, timeout, info.name);
-    const payload = (await response.json()) as { data?: { id?: string }[] };
-    const models = (payload.data ?? []).map((model) => model.id ?? "").filter(Boolean);
-    return models.length > 0 ? models.sort() : info.models;
+    const modelUrl = config.modelListUrl?.trim() || `${config.baseUrl}/models`;
+    const response = await request(modelUrl, { method: "GET", headers }, timeout, config.name);
+    const payload = (await response.json()) as {
+      data?: { id?: string }[];
+      models?: { id?: string; name?: string }[];
+      result?: string[];
+    };
+    const models = [
+      ...(payload.data ?? []).map((model) => model.id ?? ""),
+      ...(payload.models ?? []).map((model) => model.id ?? model.name ?? ""),
+      ...(payload.result ?? []),
+    ].filter(Boolean);
+    if (models.length === 0) return config.models;
+    const unique = [...new Set(models)].sort();
+    await saveProviderModels(provider, unique);
+    return unique;
   } catch {
-    return info.models;
+    return config.models;
   }
 }

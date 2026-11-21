@@ -13,14 +13,14 @@ export interface ActiveProvider {
 export function activeProvider(settings: AiSettingsPublic | null): ActiveProvider | null {
   if (!settings) return null;
   const defaultState = settings.providers.find((provider) => provider.id === settings.defaultProvider);
-  if (defaultState?.hasKey || settings.defaultProvider === "custom") {
+  if (defaultState?.hasKey || defaultState?.custom || settings.defaultProvider === "custom") {
     return {
       provider: settings.defaultProvider,
       model: settings.defaultModel || defaultState?.model || "",
-      name: defaultState?.id ?? settings.defaultProvider,
+      name: defaultState?.name ?? settings.defaultProvider,
     };
   }
-  const configured = settings.providers.find((provider) => provider.hasKey);
+  const configured = settings.providers.find((provider) => provider.hasKey || provider.custom);
   if (!configured) return null;
-  return { provider: configured.id, model: configured.model, name: configured.id };
+  return { provider: configured.id, model: configured.model, name: configured.name };
 }

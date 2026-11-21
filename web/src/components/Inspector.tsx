@@ -16,6 +16,7 @@ import {
   FolderOpen,
   FunctionSquare,
   GitCompareArrows,
+  Globe2,
   Info,
   Layers,
   ListTree,
@@ -851,6 +852,35 @@ export function Inspector({
                 <strong>{fileRecord.hash.slice(0, 8)}</strong>
               </div>
             </div>
+
+            {node.metadata?.htmlPage ? (
+              <div className="inspector-section html-page-section">
+                <div className="inspector-section-title">
+                  <Globe2 size={12} /> {t("Static HTML page")}
+                </div>
+                {node.metadata.htmlTitle ? (
+                  <div className="html-page-row">
+                    <span>{t("Page title")}</span>
+                    <strong>{String(node.metadata.htmlTitle)}</strong>
+                  </div>
+                ) : null}
+                {node.metadata.htmlDescription ? (
+                  <p className="section-note">{String(node.metadata.htmlDescription)}</p>
+                ) : null}
+                {Array.isArray(node.metadata.htmlHeadings) && node.metadata.htmlHeadings.length > 0 ? (
+                  <div className="html-page-row">
+                    <span>{t("Headings")}</span>
+                    <div className="ai-chips">
+                      {(node.metadata.htmlHeadings as unknown[]).slice(0, 8).map((heading, index) => (
+                        <code key={index} className="html-heading-chip">
+                          {String(heading)}
+                        </code>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
 
             {fileRecord.imports.length > 0 ? (
               <div className="inspector-section">

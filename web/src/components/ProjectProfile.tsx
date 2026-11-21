@@ -12,6 +12,16 @@ const ENTRY_PATTERNS: RegExp[] = [
   /^(wsgi|asgi)\.py$/,
   /^(app|main|server)\.(py|ts|tsx|js|jsx|mjs|cjs)$/i,
   /^src\/(index|main|server)\.(ts|tsx|js|jsx|mjs|cjs)$/i,
+  /^main\.go$/i,
+  /^cmd\/.*\/main\.go$/i,
+  /^src\/(main|lib)\.rs$/i,
+  /^src\/main\/java\/.*\/(Application|Main)\.java$/i,
+  /^(Program|Startup)\.cs$/i,
+  /^(config\.ru|app\.rb)$/i,
+  /^bin\/rails$/i,
+  /^Sources\/.*\/main\.swift$/i,
+  /^lib\/.*\/application\.ex$/i,
+  /^lib\/main\.dart$/i,
 ];
 
 function entryPointRank(filePath: string): number {
@@ -53,6 +63,82 @@ export function ProjectProfile({ analysis }: { analysis: AnalysisResult }) {
       <p className="section-note">
         {t("Inferred from the file tree, symbols, routes, and manifests without using AI.")}
       </p>
+
+      {analysis.tooling ? (
+        <>
+          <div className="profile-row">
+            <span className="profile-label">{t("Ecosystems")}</span>
+            <div className="profile-list">
+              {analysis.tooling.ecosystems.length > 0 ? (
+                analysis.tooling.ecosystems.map((item) => (
+                  <span key={item} className="profile-file">{item}</span>
+                ))
+              ) : (
+                <span className="profile-file">{t("none detected")}</span>
+              )}
+              {analysis.tooling.packageManagers.map((manager) => (
+                <span key={manager} className="profile-file"><em>{manager}</em></span>
+              ))}
+            </div>
+          </div>
+
+          <div className="profile-row">
+            <span className="profile-label">{t("Tooling")}</span>
+            <div className="profile-list">
+              <span className="profile-file">
+                {analysis.tooling.testFramework ?? t("No test framework detected")}
+              </span>
+              {analysis.tooling.manifests.map((manifest) => (
+                <span key={manifest} className="profile-file"><em>{manifest}</em></span>
+              ))}
+            </div>
+          </div>
+
+          {analysis.tooling.testCommands.length > 0 ? (
+            <div className="profile-row">
+              <span className="profile-label">{t("Test commands")}</span>
+              <div className="profile-list">
+                {analysis.tooling.testCommands.map((command) => (
+                  <code key={command} className="profile-file">{command}</code>
+                ))}
+              </div>
+            </div>
+          ) : null}
+
+          {(analysis.tooling.typecheckCommands ?? []).length > 0 ? (
+            <div className="profile-row">
+              <span className="profile-label">{t("Typecheck commands")}</span>
+              <div className="profile-list">
+                {(analysis.tooling.typecheckCommands ?? []).map((command) => (
+                  <code key={command} className="profile-file">{command}</code>
+                ))}
+              </div>
+            </div>
+          ) : null}
+
+          {analysis.tooling.buildCommands.length > 0 ? (
+            <div className="profile-row">
+              <span className="profile-label">{t("Build commands")}</span>
+              <div className="profile-list">
+                {analysis.tooling.buildCommands.map((command) => (
+                  <code key={command} className="profile-file">{command}</code>
+                ))}
+              </div>
+            </div>
+          ) : null}
+
+          {analysis.tooling.lintCommands.length + analysis.tooling.formatCommands.length > 0 ? (
+            <div className="profile-row">
+              <span className="profile-label">{t("Lint & format")}</span>
+              <div className="profile-list">
+                {[...analysis.tooling.lintCommands, ...analysis.tooling.formatCommands].map((command) => (
+                  <code key={command} className="profile-file">{command}</code>
+                ))}
+              </div>
+            </div>
+          ) : null}
+        </>
+      ) : null}
 
       {analysis.frameworks && analysis.frameworks.length > 0 ? (
         <div className="profile-row">

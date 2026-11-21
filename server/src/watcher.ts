@@ -3,8 +3,10 @@ import type { Response } from "express";
 import path from "node:path";
 import { analyzeProject } from "./analyzer";
 import { loadAnalysis, saveAnalysis } from "./store";
+import { startProjectIndexBuild } from "./indexer";
 
-const WATCHED_EXTENSIONS = /\.(ts|tsx|js|jsx|mjs|cjs|prisma|json)$/i;
+const WATCHED_EXTENSIONS =
+  /\.(ts|tsx|js|jsx|mjs|cjs|mts|cts|prisma|json|go|rs|java|kt|kts|cs|c|h|cpp|cc|cxx|hpp|rb|swift|scala|php|py|ex|exs|html?|css|scss|sass|less|sql|md|toml|ya?ml|vue|svelte|astro)$/i;
 const IGNORED = [
   "**/node_modules/**",
   "**/.git/**",
@@ -56,6 +58,7 @@ async function runRefresh(project: WatchedProject): Promise<void> {
     const previous = await loadAnalysis(project.projectId);
     const next = await analyzeProject(previous.rootPath);
     await saveAnalysis(next);
+    startProjectIndexBuild(next.id, next);
     broadcast(project, {
       type: "updated",
       changedPaths: paths,

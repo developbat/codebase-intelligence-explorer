@@ -8,7 +8,9 @@ import {
   analyzeSymbol,
   askProject,
   discoverBusinessFlows,
+  applyTextEdits,
   editSourceFile,
+  generateTests,
   summarizeProject,
   summarizeScope,
 } from "./ai/service";
@@ -54,6 +56,12 @@ test("AI service sends real source and parses structured results through an Open
             dependencies: ["OrderRepository", "PaymentService"],
             risks: ["Payment and email are direct side effects."],
             evidence: [{ file: "src/services/order.service.ts", start_line: 15, end_line: 41 }],
+          });
+        } else if (prompt.includes("senior test engineer")) {
+          content = JSON.stringify({
+            testFilePath: "src/services/order.service.test.ts",
+            content: "import { describe, it, expect } from 'vitest';\n",
+            explanation: "Covers the order creation path.",
           });
         } else if (prompt.includes("precise code editor")) {
           content = JSON.stringify({
@@ -157,6 +165,15 @@ test("AI service sends real source and parses structured results through an Open
     assert.equal(edit.newContent, "export const edited = true;\n");
     assert.ok(edit.explanation.length > 0);
     assert.ok(received.some((prompt) => prompt.includes("precise code editor")));
+
+    const tests = await generateTests(analysis.id, "src/services/order.service.ts", "Vitest", "Cover validation");
+    assert.equal(tests.testFilePath, "src/services/order.service.test.ts");
+    assert.ok(tests.content.includes("describe"));
+    assert.ok(tests.explanation.length > 0);
+    assert.ok(received.some((prompt) => prompt.includes("senior test engineer")));
+
+    assert.equal(applyTextEdits("a\nb\nc", [{ find: "b", replace: "B" }]), "a\nB\nc");
+    assert.throws(() => applyTextEdits("a\nb", [{ find: "missing", replace: "x" }]));
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
     if (previousDataDir === undefined) delete process.env.CIE_DATA_DIR;

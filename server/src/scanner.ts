@@ -2,8 +2,9 @@ import fg from "fast-glob";
 import fs from "node:fs/promises";
 import path from "node:path";
 import crypto from "node:crypto";
+import { detectLanguage } from "./fileLanguage";
 
-export type SourceLanguage = "typescript" | "tsx" | "javascript" | "jsx" | "php" | "python" | "other";
+export type SourceLanguage = string;
 
 export interface ScannedFile {
   absPath: string;
@@ -14,62 +15,6 @@ export interface ScannedFile {
   loc: number;
   hash: string;
 }
-
-const SOURCE_EXTENSIONS = [".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".mts", ".cts", ".php", ".py"];
-
-/**
- * Additional source formats. These appear in the file map and Git impact
- * views, but their symbols are not parsed yet.
- */
-const GENERIC_SOURCE_EXTENSIONS = new Set([
-  ".go",
-  ".rs",
-  ".java",
-  ".kt",
-  ".kts",
-  ".cs",
-  ".c",
-  ".h",
-  ".cpp",
-  ".cc",
-  ".cxx",
-  ".hpp",
-  ".hxx",
-  ".m",
-  ".mm",
-  ".rb",
-  ".swift",
-  ".scala",
-  ".sh",
-  ".bash",
-  ".zsh",
-  ".ps1",
-  ".lua",
-  ".r",
-  ".dart",
-  ".ex",
-  ".exs",
-  ".erl",
-  ".hrl",
-  ".clj",
-  ".cljs",
-  ".fs",
-  ".fsx",
-  ".vb",
-  ".sql",
-  ".vue",
-  ".svelte",
-  ".astro",
-  ".html",
-  ".htm",
-  ".css",
-  ".scss",
-  ".sass",
-  ".less",
-  ".graphql",
-  ".gql",
-  ".proto",
-]);
 
 /** Folders that never carry first-party source code. */
 const IGNORED_GLOBS = [
@@ -105,6 +50,7 @@ const IGNORED_GLOBS = [
   "**/*.bundle.js",
   "**/*.map",
   "**/*.d.ts",
+  "**/._*",
   "**/*.pyc",
   "**/*.lock",
   "**/package-lock.json",
@@ -151,25 +97,7 @@ export interface PackageManifest {
 }
 
 function toLanguage(filePath: string): SourceLanguage | null {
-  const ext = path.extname(filePath).toLowerCase();
-  if (GENERIC_SOURCE_EXTENSIONS.has(ext)) return "other";
-  if (!SOURCE_EXTENSIONS.includes(ext)) return null;
-  switch (ext) {
-    case ".tsx":
-      return "tsx";
-    case ".jsx":
-      return "jsx";
-    case ".js":
-    case ".mjs":
-    case ".cjs":
-      return "javascript";
-    case ".php":
-      return "php";
-    case ".py":
-      return "python";
-    default:
-      return "typescript";
-  }
+  return detectLanguage(filePath);
 }
 
 function sha1(input: string): string {

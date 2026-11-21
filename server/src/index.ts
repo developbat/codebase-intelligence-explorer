@@ -8,25 +8,81 @@ import {
   analyzeSymbol,
   discoverBusinessFlows,
   editSourceFile,
+  generateTests,
   investigateUnresolved,
+  runAgentTask,
+  runCodingTask,
   reviewChanges,
   summarizeProject,
   summarizeScope,
 } from "./ai/service";
 import { listProviderModels, testProvider } from "./ai/providers";
+import { autoConfigureAgents } from "./ai/agents";
+import { clearModelCatalog, getModelCatalog, importModelCatalog } from "./ai/catalog";
+import { isBrowserCheckAvailable, runBrowserCheck } from "./browserCheck";
+import { listProjectTools } from "./projectTools";
+import { getProjectTaskQueue, planProjectTasks, runProjectLoop } from "./ai/loop";
 import { getPublicSettings, updateAiSettings } from "./ai/settings";
+import { getPrompt, getPromptVersion, listPrompts, renderPrompt, resetPrompt, savePrompt } from "./ai/prompts";
+import { resolvePermission } from "./ai/permissions";
+import { getProjectUsage } from "./ai/usage";
 import { buildChangeReport } from "./changes";
-import { readSourceFile, runProjectCommand, writeSourceFile } from "./editor";
+import { formatProjectFile } from "./formatter";
+import { checkFileSyntax } from "./syntax";
+import { scanDuplications } from "./duplication";
+import {
+  getProjectIndexStatus,
+  removeIndexedPath,
+  renameIndexedPath,
+  importConversations,
+  searchConversations,
+  searchProjectIndex,
+  startProjectIndexBuild,
+} from "./indexer";
+import {
+  createSourceFile,
+  deleteProjectPath,
+  readSourceFile,
+  renameProjectPath,
+  runProjectCommand,
+  writeProjectAsset,
+  writeSourceFile,
+} from "./editor";
+import {
+  listBackgroundProcesses,
+  readBackgroundProcess,
+  removeBackgroundProcess,
+  detectDevCommands,
+  startBackgroundProcess,
+  stopBackgroundProcess,
+} from "./processes";
+import {
+  closeProjectTerminals,
+  closeTerminalSession,
+  createTerminalSession,
+  interruptTerminal,
+  listTerminalSessions,
+  resizeTerminal,
+  subscribeTerminal,
+  writeTerminalInput,
+} from "./terminals";
+import { readPreviewFile } from "./preview";
 import { getCommitDetail, getCommitFileDiff, getCommitLog, getFileDiff, getGitStatus } from "./git";
 import { findProjectIcon } from "./icons";
+import { discoverTests, runTests } from "./tests";
 import { listFolders } from "./fsbrowse";
+import { listProjectTemplates, scaffoldProject } from "./scaffold";
+import { getSkill, listSkills, readSkillFile, setSkillEnabled } from "./skills";
 import { searchCode } from "./search";
 import { subscribeProjectEvents } from "./watcher";
 import { isWithin } from "./scanner";
-import { AI_PROVIDERS, type AiProviderId } from "../../shared/ai";
+import { AI_PROVIDERS, CUSTOM_PROVIDER_PREFIX, type AiProviderId } from "../../shared/ai";
 
 function isProviderId(value: string): value is AiProviderId {
-  return AI_PROVIDERS.some((provider) => provider.id === value);
+  return (
+    AI_PROVIDERS.some((provider) => provider.id === value) ||
+    value.startsWith(CUSTOM_PROVIDER_PREFIX)
+  );
 }
 import {
   getRecentProject,
@@ -37,7 +93,7 @@ import {
   saveAnalysis,
   touchProject,
 } from "./store";
-import type { SourceResponse } from "../../shared/types";
+import type { ProjectTemplateId, SourceResponse } from "../../shared/types";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(HERE, "../..");
@@ -64,6 +120,12 @@ function handleError(res: express.Response, error: unknown, status = 500) {
   res.status(code).json({ error: message });
 }
 
+app.get("/favicon.ico", (_req, res) => {
+  res.setHeader("Content-Type", "image/png");
+  res.setHeader("Cache-Control", "public, max-age=86400");
+  res.send(TRANSPARENT_PNG);
+});
+
 app.get("/api/health", (_req, res) => {
   res.json({ ok: true, name: "codebase-intelligence-explorer", version: "0.2.0" });
 });
@@ -86,6 +148,46 @@ app.get("/api/ai/settings", async (_req, res) => {
   }
 });
 
+app.get("/api/ai/catalog", async (_req, res) => {
+  try {
+    res.json({ catalog: await getModelCatalog() });
+  } catch (error) {
+    handleError(res, error);
+  }
+});
+
+app.post("/api/ai/catalog/import", async (req, res) => {
+  try {
+    const json = typeof req.body?.json === "string" ? req.body.json : undefined;
+    const url = typeof req.body?.url === "string" ? req.body.url : undefined;
+    const result = await importModelCatalog({
+      json,
+      url,
+      replace: req.body?.replace !== false,
+    });
+    res.json(result);
+  } catch (error) {
+    handleError(res, error, 400);
+  }
+});
+
+app.delete("/api/ai/catalog", async (_req, res) => {
+  try {
+    await clearModelCatalog();
+    res.json({ ok: true });
+  } catch (error) {
+    handleError(res, error);
+  }
+});
+
+app.post("/api/ai/agents/auto", async (_req, res) => {
+  try {
+    res.json(await autoConfigureAgents());
+  } catch (error) {
+    handleError(res, error, 400);
+  }
+});
+
 app.put("/api/ai/settings", async (req, res) => {
   try {
     const body = req.body ?? {};
@@ -100,6 +202,22 @@ app.put("/api/ai/settings", async (req, res) => {
       res.status(400).json({ error: "Unknown AI provider." });
       return;
     }
+    const rawCustom = body.customProvider;
+    const customProvider =
+      rawCustom && typeof rawCustom === "object"
+        ? {
+            id: typeof rawCustom.id === "string" ? rawCustom.id : undefined,
+            name: typeof rawCustom.name === "string" ? rawCustom.name : undefined,
+            baseUrl: typeof rawCustom.baseUrl === "string" ? rawCustom.baseUrl : undefined,
+            apiKey: typeof rawCustom.apiKey === "string" ? rawCustom.apiKey : undefined,
+            clearKey: Boolean(rawCustom.clearKey),
+            models: Array.isArray(rawCustom.models)
+              ? rawCustom.models.filter((model: unknown): model is string => typeof model === "string")
+              : undefined,
+            modelListUrl:
+              typeof rawCustom.modelListUrl === "string" ? rawCustom.modelListUrl : undefined,
+          }
+        : undefined;
     const settings = await updateAiSettings({
       provider,
       defaultProvider,
@@ -108,8 +226,68 @@ app.put("/api/ai/settings", async (req, res) => {
       clearKey: Boolean(body.clearKey),
       baseUrl: typeof body.baseUrl === "string" ? body.baseUrl : undefined,
       model: typeof body.model === "string" ? body.model : undefined,
+      customProvider,
+      removeProviderId:
+        typeof body.removeProviderId === "string" ? body.removeProviderId : undefined,
     });
     res.json(settings);
+  } catch (error) {
+    handleError(res, error, 400);
+  }
+});
+
+app.get("/api/prompts", async (req, res) => {
+  try {
+    const projectId = typeof req.query.projectId === "string" ? req.query.projectId : undefined;
+    res.json({ prompts: await listPrompts(projectId) });
+  } catch (error) {
+    handleError(res, error, 400);
+  }
+});
+
+app.get("/api/prompts/:id/versions/:version", async (req, res) => {
+  try {
+    const scope = req.query.scope === "project" ? "project" : "global";
+    const projectId = typeof req.query.projectId === "string" ? req.query.projectId : undefined;
+    const version = Number(req.params.version);
+    if (!Number.isInteger(version) || version < 1) {
+      res.status(400).json({ error: "A positive version number is required." });
+      return;
+    }
+    res.json(await getPromptVersion(req.params.id, version, scope, projectId));
+  } catch (error) {
+    handleError(res, error, 400);
+  }
+});
+
+app.put("/api/prompts/:id", async (req, res) => {
+  try {
+    const system = typeof req.body?.system === "string" ? req.body.system : "";
+    const projectId = typeof req.body?.projectId === "string" ? req.body.projectId : undefined;
+    res.json(await savePrompt(req.params.id, system, projectId));
+  } catch (error) {
+    handleError(res, error, 400);
+  }
+});
+
+app.delete("/api/prompts/:id", async (req, res) => {
+  try {
+    const projectId = typeof req.query.projectId === "string" ? req.query.projectId : undefined;
+    res.json(await resetPrompt(req.params.id, projectId));
+  } catch (error) {
+    handleError(res, error, 400);
+  }
+});
+
+app.post("/api/prompts/:id/preview", async (req, res) => {
+  try {
+    const projectId = typeof req.body?.projectId === "string" ? req.body.projectId : undefined;
+    const prompt = await getPrompt(req.params.id, projectId);
+    const variables =
+      req.body?.variables && typeof req.body.variables === "object"
+        ? (req.body.variables as Record<string, string>)
+        : {};
+    res.json({ ...prompt, preview: renderPrompt(prompt.system, variables) });
   } catch (error) {
     handleError(res, error, 400);
   }
@@ -135,9 +313,90 @@ app.get("/api/ai/models", async (req, res) => {
       res.status(400).json({ error: "Unknown AI provider." });
       return;
     }
-    res.json({ models: await listProviderModels(provider) });
+    res.json({
+      models: await listProviderModels(provider, {
+        refresh: req.query.refresh === "1" || req.query.refresh === "true",
+      }),
+    });
   } catch (error) {
     handleError(res, error);
+  }
+});
+
+app.get("/api/projects/:id/tools", async (req, res) => {
+  try {
+    const analysis = await loadAnalysis(req.params.id);
+    res.json(await listProjectTools(analysis.rootPath));
+  } catch (error) {
+    handleError(res, error, 400);
+  }
+});
+
+app.get("/api/browser-check/status", async (_req, res) => {
+  res.json({ available: await isBrowserCheckAvailable() });
+});
+
+app.post("/api/projects/:id/browser-check", async (req, res) => {
+  try {
+    const analysis = await loadAnalysis(req.params.id);
+    const result = await runBrowserCheck(req.params.id, analysis.rootPath, {
+      path: typeof req.body?.path === "string" ? req.body.path : "index.html",
+      steps: Array.isArray(req.body?.steps) ? req.body.steps : [],
+      mobile: req.body?.mobile === true,
+      screenshot: req.body?.screenshot === true,
+      timeoutMs: Number(req.body?.timeoutMs) || undefined,
+    });
+    res.json(result);
+  } catch (error) {
+    handleError(res, error, 400);
+  }
+});
+
+app.get("/api/projects/:id/skills", async (req, res) => {
+  try {
+    const analysis = await loadAnalysis(req.params.id);
+    res.json(await listSkills(analysis.rootPath, req.params.id));
+  } catch (error) {
+    handleError(res, error, 400);
+  }
+});
+
+app.get("/api/projects/:id/skills/:key/file", async (req, res) => {
+  try {
+    const analysis = await loadAnalysis(req.params.id);
+    const filePath = typeof req.query.path === "string" ? req.query.path : "";
+    res.json(await readSkillFile(analysis.rootPath, req.params.id, req.params.key, filePath));
+  } catch (error) {
+    handleError(res, error, 400);
+  }
+});
+
+app.get("/api/projects/:id/skills/:key", async (req, res) => {
+  try {
+    const analysis = await loadAnalysis(req.params.id);
+    res.json(await getSkill(analysis.rootPath, req.params.id, req.params.key));
+  } catch (error) {
+    handleError(res, error, 400);
+  }
+});
+
+app.patch("/api/projects/:id/skills/:key", async (req, res) => {
+  try {
+    if (typeof req.body?.enabled !== "boolean") {
+      res.status(400).json({ error: "enabled must be a boolean." });
+      return;
+    }
+    const analysis = await loadAnalysis(req.params.id);
+    res.json(
+      await setSkillEnabled(
+        analysis.rootPath,
+        req.params.id,
+        req.params.key,
+        req.body.enabled,
+      ),
+    );
+  } catch (error) {
+    handleError(res, error, 400);
   }
 });
 
@@ -298,11 +557,269 @@ app.post("/api/projects/:id/ai/edit", async (req, res) => {
   }
 });
 
+app.post("/api/projects/:id/ai/tests", async (req, res) => {
+  try {
+    const sourceFile = typeof req.body?.sourceFile === "string" ? req.body.sourceFile : "";
+    if (!sourceFile) {
+      res.status(400).json({ error: "A source file is required." });
+      return;
+    }
+    const provider = typeof req.body?.provider === "string" ? (req.body.provider as AiProviderId) : undefined;
+    const result = await generateTests(
+      req.params.id,
+      sourceFile,
+      typeof req.body?.framework === "string" ? req.body.framework : undefined,
+      typeof req.body?.instruction === "string" ? req.body.instruction : "",
+      {
+        provider,
+        model: typeof req.body?.model === "string" ? req.body.model : undefined,
+      },
+    );
+    res.json(result);
+  } catch (error) {
+    handleError(res, error, 400);
+  }
+});
+
+app.post("/api/projects/:id/ai/task", async (req, res) => {
+  try {
+    const instruction = typeof req.body?.instruction === "string" ? req.body.instruction : "";
+    if (!instruction.trim()) {
+      res.status(400).json({ error: "A coding instruction is required." });
+      return;
+    }
+    const provider = typeof req.body?.provider === "string" ? (req.body.provider as AiProviderId) : undefined;
+    const result = await runCodingTask(req.params.id, instruction, {
+      activeFile: typeof req.body?.activeFile === "string" ? req.body.activeFile : undefined,
+      provider,
+      model: typeof req.body?.model === "string" ? req.body.model : undefined,
+    });
+    res.json(result);
+  } catch (error) {
+    handleError(res, error, 400);
+  }
+});
+
+app.post("/api/projects/:id/ai/agent", async (req, res) => {
+  try {
+    const instruction = typeof req.body?.instruction === "string" ? req.body.instruction : "";
+    if (!instruction.trim()) {
+      res.status(400).json({ error: "An agent instruction is required." });
+      return;
+    }
+    const provider = typeof req.body?.provider === "string" ? (req.body.provider as AiProviderId) : undefined;
+    const result = await runAgentTask(req.params.id, instruction, {
+      activeFile: typeof req.body?.activeFile === "string" ? req.body.activeFile : undefined,
+      provider,
+      model: typeof req.body?.model === "string" ? req.body.model : undefined,
+      allowWrite: req.body?.allowWrite === true,
+      allowCommands: req.body?.allowCommands === true,
+      language: typeof req.body?.language === "string" ? req.body.language : undefined,
+      maxSteps: Number(req.body?.maxSteps) || undefined,
+      mode:
+        req.body?.mode === "ask" ? "ask" : req.body?.mode === "auto" ? "auto" : "coding",
+      interactive: false,
+      history: Array.isArray(req.body?.history)
+        ? req.body.history
+            .filter(
+              (message: unknown): message is { role: "user" | "assistant"; content: string } =>
+                typeof message === "object" &&
+                message !== null &&
+                ((message as { role?: unknown }).role === "user" ||
+                  (message as { role?: unknown }).role === "assistant") &&
+                typeof (message as { content?: unknown }).content === "string",
+            )
+            .slice(-6)
+        : undefined,
+    });
+    res.json(result);
+  } catch (error) {
+    handleError(res, error, 400);
+  }
+});
+
+app.post("/api/projects/:id/ai/agent/stream", async (req, res) => {
+  const instruction = typeof req.body?.instruction === "string" ? req.body.instruction : "";
+  if (!instruction.trim()) {
+    res.status(400).json({ error: "An agent instruction is required." });
+    return;
+  }
+  res.status(200);
+  res.setHeader("Content-Type", "application/x-ndjson; charset=utf-8");
+  res.setHeader("Cache-Control", "no-cache, no-transform");
+  res.setHeader("Connection", "keep-alive");
+  res.setHeader("X-Accel-Buffering", "no");
+  res.flushHeaders?.();
+
+  const controller = new AbortController();
+  const onClose = () => {
+    if (!res.writableEnded) controller.abort();
+  };
+  res.on("close", onClose);
+  req.on("aborted", onClose);
+  const write = (event: unknown) => {
+    if (!res.writableEnded) res.write(`${JSON.stringify(event)}\n`);
+  };
+
+  try {
+    const provider = typeof req.body?.provider === "string" ? (req.body.provider as AiProviderId) : undefined;
+    const result = await runAgentTask(
+      req.params.id,
+      instruction,
+      {
+        activeFile: typeof req.body?.activeFile === "string" ? req.body.activeFile : undefined,
+        provider,
+        model: typeof req.body?.model === "string" ? req.body.model : undefined,
+        allowWrite: req.body?.allowWrite === true,
+        allowCommands: req.body?.allowCommands === true,
+        language: typeof req.body?.language === "string" ? req.body.language : undefined,
+        maxSteps: Number(req.body?.maxSteps) || undefined,
+        mode:
+          req.body?.mode === "ask" ? "ask" : req.body?.mode === "auto" ? "auto" : "coding",
+        history: Array.isArray(req.body?.history)
+          ? req.body.history
+              .filter(
+                (message: unknown): message is { role: "user" | "assistant"; content: string } =>
+                  typeof message === "object" &&
+                  message !== null &&
+                  ((message as { role?: unknown }).role === "user" ||
+                    (message as { role?: unknown }).role === "assistant") &&
+                  typeof (message as { content?: unknown }).content === "string",
+              )
+              .slice(-6)
+          : undefined,
+      },
+      write,
+      controller.signal,
+    );
+    write({ type: "done", result });
+  } catch (error) {
+    write({ type: "error", message: error instanceof Error ? error.message : "Agent run failed." });
+  } finally {
+    res.off("close", onClose);
+    res.end();
+  }
+});
+
+app.get("/api/projects/:id/tasks", async (req, res) => {
+  try {
+    res.json({ queue: await getProjectTaskQueue(req.params.id) });
+  } catch (error) {
+    handleError(res, error, 400);
+  }
+});
+
+app.post("/api/projects/:id/tasks/plan", async (req, res) => {
+  try {
+    const goal = typeof req.body?.instruction === "string" ? req.body.instruction : "";
+    if (!goal.trim()) {
+      res.status(400).json({ error: "A task goal is required." });
+      return;
+    }
+    res.json(
+      await planProjectTasks(req.params.id, goal, {
+        language: typeof req.body?.language === "string" ? req.body.language : undefined,
+        replan: req.body?.replan === true,
+      }),
+    );
+  } catch (error) {
+    handleError(res, error, 400);
+  }
+});
+
+app.post("/api/projects/:id/ai/loop/stream", async (req, res) => {
+  const goal = typeof req.body?.instruction === "string" ? req.body.instruction : "";
+  if (!goal.trim()) {
+    res.status(400).json({ error: "A task goal is required." });
+    return;
+  }
+  res.status(200);
+  res.setHeader("Content-Type", "application/x-ndjson; charset=utf-8");
+  res.setHeader("Cache-Control", "no-cache, no-transform");
+  res.setHeader("Connection", "keep-alive");
+  res.setHeader("X-Accel-Buffering", "no");
+  res.flushHeaders?.();
+
+  const controller = new AbortController();
+  const onClose = () => {
+    if (!res.writableEnded) controller.abort();
+  };
+  res.on("close", onClose);
+  req.on("aborted", onClose);
+  const write = (event: unknown) => {
+    if (!res.writableEnded) res.write(`${JSON.stringify(event)}\n`);
+  };
+
+  try {
+    await runProjectLoop(
+      req.params.id,
+      goal,
+      {
+        activeFile: typeof req.body?.activeFile === "string" ? req.body.activeFile : undefined,
+        provider: typeof req.body?.provider === "string" ? (req.body.provider as AiProviderId) : undefined,
+        model: typeof req.body?.model === "string" ? req.body.model : undefined,
+        allowWrite: req.body?.allowWrite === true,
+        allowCommands: req.body?.allowCommands === true,
+        language: typeof req.body?.language === "string" ? req.body.language : undefined,
+        maxTasks: Number(req.body?.maxTasks) || undefined,
+        maxMinutes: Number(req.body?.maxMinutes) || undefined,
+        replan: req.body?.replan === true,
+        retryFailed: req.body?.retryFailed === true,
+      },
+      write,
+      controller.signal,
+    );
+  } catch (error) {
+    write({ type: "error", message: error instanceof Error ? error.message : "Task loop failed." });
+  } finally {
+    res.off("close", onClose);
+    res.end();
+  }
+});
+
+app.post("/api/projects/:id/agent/permissions/:requestId", (req, res) => {
+  const decision = req.body?.decision;
+  if (decision !== "once" && decision !== "always" && decision !== "deny") {
+    res.status(400).json({ error: "Decision must be once, always or deny." });
+    return;
+  }
+  const resolved = resolvePermission(req.params.id, req.params.requestId, decision);
+  if (!resolved) {
+    res.status(404).json({ error: "This permission request is unknown or already decided." });
+    return;
+  }
+  res.json({ ok: true, decision });
+});
+
 app.get("/api/recent", async (_req, res) => {
   try {
     res.json({ projects: await listRecent() });
   } catch (error) {
     handleError(res, error);
+  }
+});
+
+app.get("/api/project-templates", (_req, res) => {
+  res.json({ templates: listProjectTemplates() });
+});
+
+app.post("/api/projects/scaffold", async (req, res) => {
+  try {
+    const parentPath = typeof req.body?.parentPath === "string" ? req.body.parentPath : "";
+    const name = typeof req.body?.name === "string" ? req.body.name : "";
+    const template = typeof req.body?.template === "string" ? req.body.template : "";
+    if (!parentPath.trim() || !name.trim() || !template) {
+      res.status(400).json({ error: "Parent folder, project name and template are required." });
+      return;
+    }
+    const result = await scaffoldProject({
+      parentPath,
+      name,
+      template: template as ProjectTemplateId,
+    });
+    res.status(201).json(result);
+  } catch (error) {
+    handleError(res, error, 400);
   }
 });
 
@@ -316,6 +833,7 @@ app.post("/api/analyze", async (req, res) => {
     const expanded = inputPath.startsWith("~") ? path.join(process.env.HOME || "", inputPath.slice(1)) : inputPath;
     const result = await analyzeProject(expanded);
     await saveAnalysis(result);
+    startProjectIndexBuild(result.id, result);
     res.json(result);
   } catch (error) {
     handleError(res, error, 400);
@@ -332,6 +850,7 @@ app.post("/api/projects/:id/rescan", async (req, res) => {
     const previous = await loadAnalysis(id);
     const result = await analyzeProject(previous.rootPath);
     await saveAnalysis(result);
+    startProjectIndexBuild(result.id, result);
     res.json(result);
   } catch (error) {
     handleError(res, error);
@@ -375,6 +894,7 @@ app.get("/api/projects/:id", async (req, res) => {
 
 app.delete("/api/projects/:id", async (req, res) => {
   try {
+    closeProjectTerminals(req.params.id);
     await removeAnalysis(req.params.id);
     res.json({ ok: true });
   } catch (error) {
@@ -567,6 +1087,114 @@ app.put("/api/projects/:id/file", async (req, res) => {
   }
 });
 
+app.post("/api/projects/:id/files", async (req, res) => {
+  try {
+    const analysis = await loadAnalysis(req.params.id);
+    const file = typeof req.body?.filePath === "string" ? req.body.filePath : "";
+    if (!file) {
+      res.status(400).json({ error: "A file path is required." });
+      return;
+    }
+    res.status(201).json(await createSourceFile(req.params.id, analysis.rootPath, file));
+  } catch (error) {
+    handleError(res, error, 400);
+  }
+});
+
+app.post("/api/projects/:id/assets", async (req, res) => {
+  try {
+    const analysis = await loadAnalysis(req.params.id);
+    const filePath = typeof req.body?.filePath === "string" ? req.body.filePath : "";
+    const dataBase64 = typeof req.body?.dataBase64 === "string" ? req.body.dataBase64 : "";
+    if (!filePath) {
+      res.status(400).json({ error: "A file path is required." });
+      return;
+    }
+    if (!dataBase64) {
+      res.status(400).json({ error: "Asset data is required." });
+      return;
+    }
+    res.status(201).json(await writeProjectAsset(analysis.rootPath, filePath, dataBase64));
+  } catch (error) {
+    handleError(res, error, 400);
+  }
+});
+
+app.post("/api/projects/:id/checks/syntax", async (req, res) => {
+  try {
+    const analysis = await loadAnalysis(req.params.id);
+    const filePath = typeof req.body?.filePath === "string" ? req.body.filePath : "";
+    if (!filePath) {
+      res.status(400).json({ error: "A file path is required." });
+      return;
+    }
+    res.json(await checkFileSyntax(analysis, filePath));
+  } catch (error) {
+    handleError(res, error, 400);
+  }
+});
+
+app.get("/api/projects/:id/checks/duplication", async (req, res) => {
+  try {
+    const analysis = await loadAnalysis(req.params.id);
+    const windowLines = Number(req.query.windowLines) || 6;
+    res.json(await scanDuplications(analysis, { windowLines }));
+  } catch (error) {
+    handleError(res, error, 400);
+  }
+});
+
+app.post("/api/projects/:id/format", async (req, res) => {
+  try {
+    const analysis = await loadAnalysis(req.params.id);
+    const filePath = typeof req.body?.filePath === "string" ? req.body.filePath : "";
+    if (!filePath) {
+      res.status(400).json({ error: "A file path is required." });
+      return;
+    }
+    res.json(await formatProjectFile(req.params.id, analysis, filePath));
+  } catch (error) {
+    handleError(res, error, 400);
+  }
+});
+
+app.post("/api/projects/:id/fs/rename", async (req, res) => {
+  try {
+    const analysis = await loadAnalysis(req.params.id);
+    const from = typeof req.body?.path === "string" ? req.body.path : "";
+    const to = typeof req.body?.newPath === "string" ? req.body.newPath : "";
+    if (!from || !to) {
+      res.status(400).json({ error: "Source and target paths are required." });
+      return;
+    }
+    const result = await renameProjectPath(analysis.rootPath, from, to);
+    await renameIndexedPath(req.params.id, analysis.rootPath, result.from, result.to).catch(() => {
+      // index updates must not fail the rename
+    });
+    res.json(result);
+  } catch (error) {
+    handleError(res, error, 400);
+  }
+});
+
+app.post("/api/projects/:id/fs/delete", async (req, res) => {
+  try {
+    const analysis = await loadAnalysis(req.params.id);
+    const target = typeof req.body?.path === "string" ? req.body.path : "";
+    if (!target) {
+      res.status(400).json({ error: "A path is required." });
+      return;
+    }
+    const result = await deleteProjectPath(analysis.rootPath, target);
+    await removeIndexedPath(req.params.id, result.path).catch(() => {
+      // index updates must not fail the delete
+    });
+    res.json(result);
+  } catch (error) {
+    handleError(res, error, 400);
+  }
+});
+
 app.post("/api/projects/:id/run", async (req, res) => {
   try {
     const analysis = await loadAnalysis(req.params.id);
@@ -579,6 +1207,370 @@ app.post("/api/projects/:id/run", async (req, res) => {
     res.json(await runProjectCommand(analysis.rootPath, command, cwd));
   } catch (error) {
     handleError(res, error, 400);
+  }
+});
+
+app.post("/api/projects/:id/run/stream", async (req, res) => {
+  const command = typeof req.body?.command === "string" ? req.body.command : "";
+  if (!command.trim()) {
+    res.status(400).json({ error: "A command is required." });
+    return;
+  }
+  res.status(200);
+  res.setHeader("Content-Type", "application/x-ndjson; charset=utf-8");
+  res.setHeader("Cache-Control", "no-cache, no-transform");
+  res.setHeader("Connection", "keep-alive");
+  res.setHeader("X-Accel-Buffering", "no");
+  res.flushHeaders?.();
+
+  const controller = new AbortController();
+  const onClose = () => {
+    if (!res.writableEnded) controller.abort();
+  };
+  res.on("close", onClose);
+  req.on("aborted", onClose);
+  const write = (event: unknown) => {
+    if (!res.writableEnded) res.write(`${JSON.stringify(event)}\n`);
+  };
+
+  try {
+    const analysis = await loadAnalysis(req.params.id);
+    const cwd = typeof req.body?.cwd === "string" ? req.body.cwd : undefined;
+    const timeoutMs = Number(req.body?.timeoutMs) || undefined;
+    write({ type: "start", command: command.trim(), cwd: cwd ?? "." });
+    const result = await runProjectCommand(analysis.rootPath, command, cwd, {
+      signal: controller.signal,
+      timeoutMs,
+      onStdout: (chunk) => write({ type: "stdout", chunk }),
+      onStderr: (chunk) => write({ type: "stderr", chunk }),
+    });
+    write({ type: "exit", result });
+  } catch (error) {
+    write({ type: "error", message: error instanceof Error ? error.message : "Command failed." });
+  } finally {
+    res.off("close", onClose);
+    res.end();
+  }
+});
+
+app.get("/api/projects/:id/index/status", async (req, res) => {
+  try {
+    const analysis = await loadAnalysis(req.params.id);
+    res.json(await getProjectIndexStatus(req.params.id, analysis));
+  } catch (error) {
+    handleError(res, error, 400);
+  }
+});
+
+app.post("/api/projects/:id/index/build", async (req, res) => {
+  try {
+    const analysis = await loadAnalysis(req.params.id);
+    res.json(startProjectIndexBuild(req.params.id, analysis));
+  } catch (error) {
+    handleError(res, error, 400);
+  }
+});
+
+app.post("/api/projects/:id/conversations/import", async (req, res) => {
+  try {
+    const raw = Array.isArray(req.body?.pairs) ? req.body.pairs : [];
+    const pairs = raw
+      .filter(
+        (pair: unknown): pair is { question: string; answer: string } =>
+          typeof pair === "object" &&
+          pair !== null &&
+          typeof (pair as { question?: unknown }).question === "string" &&
+          typeof (pair as { answer?: unknown }).answer === "string",
+      )
+      .slice(0, 80);
+    res.json({ imported: await importConversations(req.params.id, pairs) });
+  } catch (error) {
+    handleError(res, error, 400);
+  }
+});
+
+app.get("/api/projects/:id/index/search", async (req, res) => {
+  try {
+    const analysis = await loadAnalysis(req.params.id);
+    const query = typeof req.query.q === "string" ? req.query.q : "";
+    const limit = Number(req.query.limit) || 20;
+    const conversationHits = await searchConversations(req.params.id, query, Math.min(5, limit));
+    const indexHits = await searchProjectIndex(
+      req.params.id,
+      query,
+      limit,
+      analysis.rootPath,
+    );
+    const seen = new Set<string>();
+    const results = [...conversationHits, ...indexHits].filter((hit) => {
+      if (seen.has(hit.id)) return false;
+      seen.add(hit.id);
+      return true;
+    });
+    res.json({ query, results: results.slice(0, limit) });
+  } catch (error) {
+    handleError(res, error, 400);
+  }
+});
+
+app.get("/api/projects/:id/usage", async (req, res) => {
+  try {
+    res.json(await getProjectUsage(req.params.id));
+  } catch (error) {
+    handleError(res, error, 400);
+  }
+});
+
+app.get("/api/projects/:id/dev-commands", async (req, res) => {
+  try {
+    const analysis = await loadAnalysis(req.params.id);
+    res.json({ commands: await detectDevCommands(analysis.rootPath) });
+  } catch (error) {
+    handleError(res, error, 400);
+  }
+});
+
+app.get("/api/projects/:id/processes", async (req, res) => {
+  try {
+    res.json({ jobs: listBackgroundProcesses(req.params.id) });
+  } catch (error) {
+    handleError(res, error, 400);
+  }
+});
+
+app.post("/api/projects/:id/processes", async (req, res) => {
+  try {
+    const analysis = await loadAnalysis(req.params.id);
+    const command = typeof req.body?.command === "string" ? req.body.command : "";
+    if (!command.trim()) {
+      res.status(400).json({ error: "A command is required." });
+      return;
+    }
+    const job = await startBackgroundProcess(
+      analysis.rootPath,
+      req.params.id,
+      command,
+      typeof req.body?.cwd === "string" ? req.body.cwd : undefined,
+    );
+    res.json(job);
+  } catch (error) {
+    handleError(res, error, 400);
+  }
+});
+
+app.get("/api/projects/:id/processes/:jobId", async (req, res) => {
+  try {
+    const offset = Number(req.query.offset) || 0;
+    res.json(readBackgroundProcess(req.params.id, req.params.jobId, offset));
+  } catch (error) {
+    handleError(res, error, 400);
+  }
+});
+
+app.delete("/api/projects/:id/processes/:jobId", async (req, res) => {
+  try {
+    res.json(stopBackgroundProcess(req.params.id, req.params.jobId));
+  } catch (error) {
+    handleError(res, error, 400);
+  }
+});
+
+app.delete("/api/projects/:id/processes/:jobId/remove", async (req, res) => {
+  try {
+    removeBackgroundProcess(req.params.id, req.params.jobId);
+    res.json({ ok: true });
+  } catch (error) {
+    handleError(res, error, 400);
+  }
+});
+
+app.get("/api/projects/:id/terminals", async (req, res) => {
+  try {
+    res.json({ sessions: listTerminalSessions(req.params.id) });
+  } catch (error) {
+    handleError(res, error, 400);
+  }
+});
+
+app.post("/api/projects/:id/terminals", async (req, res) => {
+  try {
+    const analysis = await loadAnalysis(req.params.id);
+    const cols = Number(req.body?.cols) || undefined;
+    const rows = Number(req.body?.rows) || undefined;
+    res.status(201).json(await createTerminalSession(analysis.rootPath, req.params.id, { cols, rows }));
+  } catch (error) {
+    handleError(res, error, 400);
+  }
+});
+
+app.get("/api/projects/:id/terminals/:sessionId/stream", (req, res) => {
+  res.status(200);
+  res.setHeader("Content-Type", "application/x-ndjson; charset=utf-8");
+  res.setHeader("Cache-Control", "no-cache, no-transform");
+  res.setHeader("Connection", "keep-alive");
+  res.setHeader("X-Accel-Buffering", "no");
+  res.flushHeaders?.();
+  const write = (event: unknown) => {
+    if (!res.writableEnded) res.write(`${JSON.stringify(event)}\n`);
+  };
+  let unsubscribe: (() => void) | null = null;
+  let ended = false;
+  const finish = () => {
+    if (ended) return;
+    ended = true;
+    unsubscribe?.();
+    unsubscribe = null;
+    if (!res.writableEnded) res.end();
+  };
+  const onClose = () => {
+    if (!res.writableEnded) finish();
+  };
+  res.on("close", onClose);
+  try {
+    unsubscribe = subscribeTerminal(req.params.id, req.params.sessionId, (event) => {
+      write(event);
+      if (event.type === "exit") {
+        res.off("close", onClose);
+        finish();
+      }
+    });
+  } catch (error) {
+    write({ type: "error", message: error instanceof Error ? error.message : "Terminal stream failed." });
+    finish();
+  }
+});
+
+app.post("/api/projects/:id/terminals/:sessionId/input", (req, res) => {
+  try {
+    const data = typeof req.body?.data === "string" ? req.body.data : "";
+    writeTerminalInput(req.params.id, req.params.sessionId, data);
+    res.json({ ok: true });
+  } catch (error) {
+    handleError(res, error, 400);
+  }
+});
+
+app.post("/api/projects/:id/terminals/:sessionId/resize", (req, res) => {
+  try {
+    const cols = Number(req.body?.cols);
+    const rows = Number(req.body?.rows);
+    if (!Number.isFinite(cols) || !Number.isFinite(rows)) {
+      res.status(400).json({ error: "Terminal size is required." });
+      return;
+    }
+    resizeTerminal(req.params.id, req.params.sessionId, cols, rows);
+    res.json({ ok: true });
+  } catch (error) {
+    handleError(res, error, 400);
+  }
+});
+
+app.post("/api/projects/:id/terminals/:sessionId/interrupt", (req, res) => {
+  try {
+    interruptTerminal(req.params.id, req.params.sessionId);
+    res.json({ ok: true });
+  } catch (error) {
+    handleError(res, error, 400);
+  }
+});
+
+app.delete("/api/projects/:id/terminals/:sessionId", (req, res) => {
+  try {
+    res.json(closeTerminalSession(req.params.id, req.params.sessionId));
+  } catch (error) {
+    handleError(res, error, 400);
+  }
+});
+
+app.get("/api/projects/:id/tests", async (req, res) => {
+  try {
+    const analysis = await loadAnalysis(req.params.id);
+    res.json(await discoverTests(analysis));
+  } catch (error) {
+    handleError(res, error, 400);
+  }
+});
+
+app.post("/api/projects/:id/tests/stream", async (req, res) => {
+  const analysis = await loadAnalysis(req.params.id).catch((error: unknown) => {
+    handleError(res, error, 404);
+    return null;
+  });
+  if (!analysis) return;
+  const discovery = await discoverTests(analysis);
+  const requested = typeof req.body?.command === "string" ? req.body.command.trim() : "";
+  const command = requested || discovery.commands[0];
+  if (!command) {
+    res.status(400).json({ error: "No test command was detected." });
+    return;
+  }
+  if (!discovery.commands.includes(command)) {
+    res.status(400).json({ error: "Only a detected test command can be streamed." });
+    return;
+  }
+  const timeoutSeconds = Number(req.body?.timeoutSeconds);
+  const timeoutMs = Number.isFinite(timeoutSeconds) && timeoutSeconds > 0
+    ? Math.max(30_000, Math.min(30 * 60_000, timeoutSeconds * 1_000))
+    : undefined;
+
+  res.status(200);
+  res.setHeader("Content-Type", "application/x-ndjson; charset=utf-8");
+  res.setHeader("Cache-Control", "no-cache, no-transform");
+  res.setHeader("Connection", "keep-alive");
+  res.setHeader("X-Accel-Buffering", "no");
+  res.flushHeaders?.();
+
+  const controller = new AbortController();
+  const onClose = () => {
+    if (!res.writableEnded) controller.abort();
+  };
+  res.on("close", onClose);
+  const write = (event: unknown) => {
+    if (!res.writableEnded) res.write(`${JSON.stringify(event)}\n`);
+  };
+
+  try {
+    const result = await runTests(analysis, command, {
+      signal: controller.signal,
+      timeoutMs,
+      onOutput: (chunk, stream) => write({ type: "output", stream, chunk }),
+    });
+    write({ type: "done", result });
+  } catch (error) {
+    write({ type: "error", message: error instanceof Error ? error.message : "Test run failed." });
+  } finally {
+    res.off("close", onClose);
+    res.end();
+  }
+});
+
+app.post("/api/projects/:id/tests/run", async (req, res) => {
+  try {
+    const analysis = await loadAnalysis(req.params.id);
+    const command = typeof req.body?.command === "string" ? req.body.command : undefined;
+    res.json(await runTests(analysis, command));
+  } catch (error) {
+    handleError(res, error, 400);
+  }
+});
+
+app.get("/api/projects/:id/preview/*", async (req, res) => {
+  const wildcard = (req.params as Record<string, string | string[]>)[0];
+  const requested = typeof wildcard === "string" ? decodeURIComponent(wildcard) : "index.html";
+  try {
+    const analysis = await loadAnalysis(req.params.id);
+    const preview = await readPreviewFile(analysis.rootPath, analysis.id, requested);
+    res.setHeader("Content-Type", preview.mime);
+    res.setHeader("Cache-Control", "no-cache");
+    res.send(preview.data);
+  } catch {
+    if (/favicon\.ico$/i.test(requested)) {
+      res.setHeader("Content-Type", "image/png");
+      res.setHeader("Cache-Control", "public, max-age=86400");
+      res.send(TRANSPARENT_PNG);
+      return;
+    }
+    res.status(404).end();
   }
 });
 

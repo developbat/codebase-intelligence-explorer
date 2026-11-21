@@ -46,11 +46,31 @@ export function AiChatDrawer({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const skipSaveRef = useRef(false);
 
   useEffect(() => {
-    setMessages([]);
+    skipSaveRef.current = true;
     setError(null);
+    try {
+      const raw = localStorage.getItem(`cie:chat:${analysis.id}`);
+      const parsed = raw ? (JSON.parse(raw) as ChatEntry[]) : [];
+      setMessages(Array.isArray(parsed) ? parsed.slice(-40) : []);
+    } catch {
+      setMessages([]);
+    }
   }, [analysis.id]);
+
+  useEffect(() => {
+    if (skipSaveRef.current) {
+      skipSaveRef.current = false;
+      return;
+    }
+    try {
+      localStorage.setItem(`cie:chat:${analysis.id}`, JSON.stringify(messages.slice(-40)));
+    } catch {
+      // storage may be unavailable
+    }
+  }, [analysis.id, messages]);
 
   useEffect(() => {
     if (!scrollRef.current) return;

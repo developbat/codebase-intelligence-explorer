@@ -1,0 +1,673 @@
+import type { AnalysisResult } from "../../../shared/types";
+import type { AiAgentEvent, AiAgentResult, AiTokenUsage } from "../../../shared/ai";
+import type {
+  ProjectTask,
+  ProjectTaskEffort,
+  ProjectTaskLoopOptions,
+  ProjectTaskLoopResult,
+  ProjectTaskQueue,
+  ProjectTaskRole,
+} from "../../../shared/tasks";
+import { loadAnalysis } from "../store";
+import {
+  appendTaskContext,
+  createQueue,
+  loadQueue,
+  markTask,
+  nextPendingTask,
+  saveQueue,
+} from "../tasks";
+import { chat, type ChatMessage } from "./providers";
+import { recordUsage } from "./usage";
+import { resolveAgentRole, resolveProvider } from "./settings";
+import { pickAlternateAgentModel } from "./agents";
+import { isFastEditTask, preferredVerificationCommand, reportsRemainingWork, runAgentTask } from "./service";
+
+const MAX_PLANNED_TASKS = 12;
+const DEFAULT_MAX_TASKS = 12;
+const DEFAULT_MAX_MINUTES = 45;
+
+function nowIso(): string {
+  return new Date().toISOString();
+}
+
+function emptyUsage(): AiTokenUsage {
+  return { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
+}
+
+function addUsage(total: AiTokenUsage, next?: AiTokenUsage): AiTokenUsage {
+  if (!next) return total;
+  return {
+    inputTokens: total.inputTokens + next.inputTokens,
+    outputTokens: total.outputTokens + next.outputTokens,
+    totalTokens: total.totalTokens + next.totalTokens,
+  };
+}
+
+function extractJson(text: string): unknown {
+  const cleaned = text
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/\s*```$/i, "")
+    .trim();
+  const start = cleaned.indexOf("{");
+  const end = cleaned.lastIndexOf("}");
+  if (start < 0 || end <= start) throw new Error("Planner did not return JSON.");
+  return JSON.parse(cleaned.slice(start, end + 1)) as unknown;
+}
+
+function normalizeEffort(value: unknown): ProjectTaskEffort {
+  return value === "simple" || value === "hard" ? value : "standard";
+}
+
+function roleForEffort(effort: ProjectTaskEffort): ProjectTaskRole {
+  return effort === "simple" ? "fast" : "main";
+}
+
+function projectFacts(analysis: AnalysisResult): string {
+  const tooling = analysis.tooling;
+  return [
+    `Project: ${analysis.projectName}`,
+    `Root: ${analysis.rootPath}`,
+    `Languages: ${Object.entries(analysis.languages).map(([name, count]) => `${name} (${count})`).join(", ") || "unknown"}`,
+    `Frameworks: ${(analysis.frameworks ?? []).join(", ") || "none detected"}`,
+    `Test commands: ${tooling?.testCommands.join(" | ") || "none"}`,
+    `Typecheck commands: ${tooling?.typecheckCommands?.join(" | ") || "none"}`,
+    `Build commands: ${tooling?.buildCommands.join(" | ") || "none"}`,
+    `Files (sample): ${analysis.files.slice(0, 30).map((file) => file.path).join(", ")}`,
+  ].join("\n");
+}
+
+const PLANNER_SYSTEM = `You are a senior software project planner. Decompose the user's goal into a short, ordered task queue that another coding agent can execute one task at a time.
+Return JSON only. Do not write code. Do not use Markdown fences.
+Schema:
+{"tasks":[{"title":"short imperative title","detail":"exact work, files/areas if known","acceptance":"how to verify this task","effort":"simple|standard|hard"}]}
+Rules:
+- 2-8 tasks. Each task must be independently verifiable.
+- Order tasks so later tasks depend on earlier ones.
+- Small mechanical edits are "simple"; normal implementation is "standard"; broad refactors/debugging are "hard".
+- Include a final verification task when tests, typecheck or build commands exist.
+- Do not invent files that do not exist; inspect is allowed later by the executor.
+- The context notes in .cie/agent/context.md and .cie/agent/TASKS.md are for continuity; you may mention them.
+- Work in any programming language.`;
+
+function fallbackTasks(goal: string, verification?: string): ProjectTask[] {
+  const at = nowIso();
+  const first: ProjectTask = {
+    id: "task-1",
+    title: goal.length > 90 ? `${goal.slice(0, 87)}…` : goal,
+    detail: goal,
+    acceptance: "The requested work is implemented and the relevant files are updated.",
+    status: "pending",
+    effort: "standard",
+    role: "main",
+    dependsOn: [],
+    attempts: 0,
+    changedFiles: [],
+    commands: [],
+    createdAt: at,
+    updatedAt: at,
+  };
+  const tasks = [first];
+  if (verification) {
+    tasks.push({
+      id: "task-2",
+      title: "Verify and fix",
+      detail: `Run ${verification}, inspect failures, and fix them without reverting completed work.`,
+      acceptance: "The verification command exits successfully.",
+      status: "pending",
+      effort: "standard",
+      role: "main",
+      dependsOn: ["task-1"],
+      attempts: 0,
+      changedFiles: [],
+      commands: [],
+      verification: { command: verification },
+      createdAt: at,
+      updatedAt: at,
+    });
+  }
+  return tasks;
+}
+
+function normalizeTasks(raw: unknown, goal: string, verification?: string): ProjectTask[] {
+  const candidate = raw as { tasks?: unknown };
+  const list = Array.isArray(candidate?.tasks) ? candidate.tasks : [];
+  const at = nowIso();
+  const tasks: ProjectTask[] = [];
+  for (const item of list) {
+    if (!item || typeof item !== "object") continue;
+    const value = item as Record<string, unknown>;
+    const title = typeof value.title === "string" ? value.title.trim() : "";
+    const detail = typeof value.detail === "string" ? value.detail.trim() : "";
+    if (!title || !detail) continue;
+    const effort = normalizeEffort(value.effort);
+    const previous = tasks[tasks.length - 1];
+    tasks.push({
+      id: `task-${tasks.length + 1}`,
+      title: title.slice(0, 140),
+      detail,
+      acceptance:
+        typeof value.acceptance === "string" && value.acceptance.trim()
+          ? value.acceptance.trim()
+          : undefined,
+      status: "pending",
+      effort,
+      role: roleForEffort(effort),
+      dependsOn: previous ? [previous.id] : [],
+      attempts: 0,
+      changedFiles: [],
+      commands: [],
+      createdAt: at,
+      updatedAt: at,
+    });
+    if (tasks.length >= MAX_PLANNED_TASKS) break;
+  }
+  if (tasks.length === 0) return fallbackTasks(goal, verification);
+  const hasVerification = tasks.some((task) =>
+    /(verif|test|typecheck|build|doğrula|test et|derle)/i.test(`${task.title} ${task.detail}`),
+  );
+  if (verification && !hasVerification) {
+    tasks.push({
+      id: `task-${tasks.length + 1}`,
+      title: "Verify and fix",
+      detail: `Run ${verification}, inspect failures, and fix them without reverting completed work.`,
+      acceptance: "The verification command exits successfully.",
+      status: "pending",
+      effort: "standard",
+      role: "main",
+      dependsOn: [tasks[tasks.length - 1].id],
+      attempts: 0,
+      changedFiles: [],
+      commands: [],
+      verification: { command: verification },
+      createdAt: at,
+      updatedAt: at,
+    });
+  }
+  return tasks;
+}
+
+export async function planProjectTasks(
+  projectId: string,
+  goal: string,
+  options: { language?: string; signal?: AbortSignal; replan?: boolean } = {},
+): Promise<ProjectTaskQueue> {
+  const analysis = await loadAnalysis(projectId);
+  const verification = preferredVerificationCommand(analysis.tooling);
+  const config = await resolveAgentRole("planner");
+  const messages: ChatMessage[] = [
+    { role: "system", content: PLANNER_SYSTEM },
+    {
+      role: "user",
+      content: `${projectFacts(analysis)}\n\nVerification command: ${verification ?? "none detected"}\n\nUser goal:\n${goal.trim()}`,
+    },
+  ];
+  let tokenUsage: AiTokenUsage | undefined;
+  let tasks: ProjectTask[] | undefined;
+  try {
+    const text = await chat(config, messages, {
+      maxTokens: 2200,
+      temperature: 0.1,
+      timeoutMs: 120_000,
+      signal: options.signal,
+      onUsage: (usage) => {
+        tokenUsage = usage;
+      },
+    });
+    const inputChars = messages.reduce((sum, message) => sum + message.content.length, 0);
+    tokenUsage = tokenUsage ?? {
+      inputTokens: Math.ceil(inputChars / 4),
+      outputTokens: Math.ceil(text.length / 4),
+      totalTokens: Math.ceil(inputChars / 4) + Math.ceil(text.length / 4),
+    };
+    await recordUsage({
+      projectId,
+      provider: config.id,
+      model: config.model,
+      kind: "tasks.plan",
+      inputTokens: tokenUsage.inputTokens,
+      outputTokens: tokenUsage.outputTokens,
+      totalTokens: tokenUsage.totalTokens,
+    });
+    tasks = normalizeTasks(extractJson(text), goal, verification);
+  } catch {
+    tasks = fallbackTasks(goal, verification);
+  }
+
+  const queue = await createQueue(analysis.rootPath, projectId, goal.trim(), tasks);
+  await appendTaskContext(
+    analysis.rootPath,
+    `Plan · ${new Date().toLocaleString()}`,
+    `Goal: ${goal.trim()}\nPlanner: ${config.id}/${config.model}\nTasks: ${tasks.length}`,
+  );
+  return queue;
+}
+
+function taskLooksLikeWrite(task: ProjectTask): boolean {
+  const text = `${task.title} ${task.detail}`;
+  if (
+    /\b(inspect|read|review|verify|check|analy[sz]e|research|understand|plan)\b|incele|oku|gözden geçir|doğrula|kontrol et|araştır/i.test(
+      task.title,
+    ) &&
+    !/\b(fix|update|add|create|write|implement|change|remove)\b|düzelt|ekle|oluştur|yaz|güncelle/i.test(task.title)
+  ) {
+    return false;
+  }
+  return /\b(add|create|implement|update|change|edit|write|refactor|fix|remove|delete|rename|move|append|replace|insert|build|generate)\b|oluştur|ekle|güncelle|değiştir|düzelt|sil|taşı|yaz|kaldır/i.test(
+    text,
+  );
+}
+
+function taskLooksLikeVerification(task: ProjectTask): boolean {
+  return /\b(verify|verification|check|test|validate|confirm|review)\b|doğrula|kontrol|test et|incele/i.test(
+    `${task.title} ${task.detail}`,
+  );
+}
+
+export function summaryAllowsNoChanges(summary: string): boolean {
+  if (/\b(not complete|incomplete|not done|failed|missing|tamamlanmadı|yapılmadı|eksik)\b/i.test(summary)) {
+    return false;
+  }
+  return /already (?:present|exists|implemented|applied|there|complete|complete and|satisf(?:y|ies|ied)|fits|matches)|no changes? (?:are )?(?:needed|required)|nothing to change|none needed|task[\s-]*\d*\s*(?:is\s*)?complete|görev[\s-]*\d*\s*tamamlandı|created and verified|verified|confirmed|nothing (?:was|is) (?:changed|rewritten)|no (?:changes|modifications) (?:made|required)|zaten (?:var|mevcut|tamam|tam|işlevsel|karşılan|uyumlu)|değişiklik gerekmiyor|gerek yok/i.test(
+    summary,
+  );
+}
+
+function summaryReportsBlocker(summary: string): boolean {
+  return /\b(blocker|blocked|cannot|can't|unable to|not present|does not appear|missing|failed to|verification failed|could not)\b|yapılamadı|başarısız|engellendi|eksik|bulunamadı/i.test(
+    summary,
+  );
+}
+
+function taskInstruction(
+  task: ProjectTask,
+  total: number,
+  verification?: string,
+  priorTasks: ProjectTask[] = [],
+): string {
+  const prior = priorTasks
+    .filter((item) => item.status === "done" && item.resultSummary)
+    .slice(-8)
+    .map(
+      (item) =>
+        `- ${item.id} ${item.title}: ${(item.resultSummary ?? "").replace(/\n+/g, " ").slice(0, 260)}`,
+    )
+    .join("\n");
+  return [
+    `You are executing task ${task.id} of ${total} in a persistent project task loop.`,
+    `Task: ${task.title}`,
+    task.detail,
+    task.acceptance ? `Acceptance: ${task.acceptance}` : "",
+    prior ? `Previous task summaries (use this before reading context.md):\n${prior}` : "",
+    "Read .cie/agent/context.md only when the summaries above are insufficient; if it is large, read only the relevant tail or search it with find_in_file. Append useful durable context if you learn something new.",
+    "Do not re-read files already fully read by a previous task unless the current task needs exact content after a change.",
+    "Stay scoped to this task. Do not do later tasks. Do not revert earlier work.",
+    verification ? `Verification command: ${verification}` : "",
+    "Run tests/typecheck/build when relevant. Finish only when this task is complete, or report the exact blocker.",
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+function aggregateResult(
+  goal: string,
+  queue: ProjectTaskQueue,
+  taskResults: AiAgentResult[],
+  provider: string,
+  model: string,
+): AiAgentResult {
+  const done = queue.tasks.filter((task) => task.status === "done").length;
+  const failed = queue.tasks.filter((task) => task.status === "failed" || task.status === "blocked").length;
+  const changedFiles = [...new Set(queue.tasks.flatMap((task) => task.changedFiles))];
+  const commands = [...new Set(queue.tasks.flatMap((task) => task.commands))];
+  const steps = taskResults.flatMap((result) => result.steps);
+  const tokenUsage = taskResults.reduce(
+    (total, result) => addUsage(total, result.tokenUsage),
+    emptyUsage(),
+  );
+  const stoppedReason: AiAgentResult["stoppedReason"] =
+    queue.status === "stopped" ? "aborted" : queue.status === "completed" ? "finished" : "max_steps";
+  const lines = [
+    `Task loop finished for: **${goal}**`,
+    "",
+    `- Completed: ${done}/${queue.tasks.length}`,
+    `- Blocked/failed: ${failed}`,
+    changedFiles.length > 0 ? `- Changed files: ${changedFiles.map((file) => `\`${file}\``).join(", ")}` : "",
+    commands.length > 0 ? `- Commands: ${commands.map((command) => `\`${command}\``).join(", ")}` : "",
+    "",
+    "### Tasks",
+    ...queue.tasks.map(
+      (task) =>
+        `- ${task.status === "done" ? "✅" : task.status === "failed" ? "❌" : task.status === "blocked" ? "⏸" : "⏳"} \`${task.id}\` ${task.title} · ${task.role}/${task.effort}${
+          task.resultSummary ? ` — ${task.resultSummary.slice(0, 240)}` : ""
+        }`,
+    ),
+  ].filter(Boolean);
+
+  return {
+    instruction: goal,
+    summary: lines.join("\n"),
+    steps,
+    changedFiles,
+    ranCommands: commands,
+    stoppedReason,
+    provider,
+    model,
+    createdAt: new Date().toISOString(),
+    tokenUsage,
+    taskQueue: queue,
+  };
+}
+
+function simpleTask(goal: string, verification?: string): ProjectTask {
+  const at = nowIso();
+  return {
+    id: "task-1",
+    title: goal.length > 90 ? `${goal.slice(0, 87)}…` : goal,
+    detail: goal,
+    acceptance: "The requested change is implemented and verified.",
+    status: "pending",
+    effort: "simple",
+    role: "fast",
+    dependsOn: [],
+    attempts: 0,
+    changedFiles: [],
+    commands: [],
+    verification: verification ? { command: verification } : undefined,
+    createdAt: at,
+    updatedAt: at,
+  };
+}
+
+export async function runProjectLoop(
+  projectId: string,
+  goal: string,
+  options: ProjectTaskLoopOptions = {},
+  emit: (event: AiAgentEvent) => void = () => {},
+  signal?: AbortSignal,
+): Promise<ProjectTaskLoopResult> {
+  if (!goal.trim()) throw new Error("A task goal is required.");
+  const analysis = await loadAnalysis(projectId);
+  const main = await resolveAgentRole("main", {
+    provider: options.provider,
+    model: options.model,
+  });
+  const verification = preferredVerificationCommand(analysis.tooling);
+  let queue = await loadQueue(analysis.rootPath, projectId);
+  const sameGoal = queue?.goal.trim() === goal.trim();
+  const simpleGoal = isFastEditTask(goal, false);
+  if (
+    !queue ||
+    options.replan ||
+    queue.tasks.length === 0 ||
+    !sameGoal ||
+    queue.status === "completed" ||
+    (simpleGoal && queue.status === "failed" && !options.retryFailed)
+  ) {
+    if (
+      simpleGoal &&
+      (options.replan ||
+        !queue ||
+        !sameGoal ||
+        queue.status === "completed" ||
+        queue.status === "failed")
+    ) {
+      queue = await createQueue(analysis.rootPath, projectId, goal.trim(), [
+        simpleTask(goal, verification),
+      ]);
+      await appendTaskContext(
+        analysis.rootPath,
+        `Plan · ${new Date().toLocaleString()}`,
+        `Goal: ${goal.trim()}\nFast path: single focused task (planner skipped)`,
+      );
+    } else {
+      queue = await planProjectTasks(projectId, goal, {
+        language: options.language,
+        signal,
+      });
+    }
+  }
+
+  if (options.retryFailed) {
+    queue = {
+      ...queue,
+      tasks: queue.tasks.map((task) =>
+        task.status === "failed" || task.status === "blocked"
+          ? {
+              ...task,
+              status: "pending",
+              attempts: 0,
+              modelOverride: undefined,
+              completedAt: undefined,
+              resultSummary: undefined,
+              verification: undefined,
+              updatedAt: nowIso(),
+            }
+          : task,
+      ),
+    };
+  }
+  queue = await saveQueue(analysis.rootPath, { ...queue, status: "running" });
+  emit({ type: "start", provider: main.id, model: main.model });
+  emit({ type: "task", queue });
+
+  const startedAt = Date.now();
+  const maxTasks = Math.max(1, Math.min(20, options.maxTasks ?? DEFAULT_MAX_TASKS));
+  const maxMs = Math.max(1, options.maxMinutes ?? DEFAULT_MAX_MINUTES) * 60_000;
+  const executed: AiAgentResult[] = [];
+  const seenTasks = new Set<string>();
+  const avoidModels = new Set<string>();
+  let executedCount = 0;
+
+  while (executedCount < maxTasks && Date.now() - startedAt < maxMs) {
+    if (signal?.aborted) {
+      queue = await saveQueue(analysis.rootPath, { ...queue, status: "stopped" });
+      emit({ type: "task", queue });
+      break;
+    }
+    const task = nextPendingTask(queue);
+    if (!task) break;
+    if (!seenTasks.has(task.id)) {
+      seenTasks.add(task.id);
+      executedCount += 1;
+    }
+    queue = markTask(queue, task.id, {
+      status: "in_progress",
+      startedAt: nowIso(),
+      attempts: task.attempts + 1,
+    });
+    const current = queue.tasks.find((item) => item.id === task.id);
+    if (!current) break;
+    emit({ type: "task", queue, task: current });
+
+    let taskConfig = current.modelOverride
+      ? await resolveProvider(current.modelOverride.provider, current.modelOverride.model).catch(
+          () => main,
+        )
+      : await resolveAgentRole(current.role === "fast" ? "fast" : "main", {
+          provider: options.provider,
+          model: options.model,
+        }).catch(() => main);
+    if (!current.modelOverride && current.effort === "simple" && current.role !== "fast") {
+      taskConfig = await resolveAgentRole("fast", {
+        provider: options.provider,
+        model: options.model,
+      }).catch(() => taskConfig);
+    }
+    if (avoidModels.has(`${taskConfig.id}::${taskConfig.model}`)) {
+      const alternate = await pickAlternateAgentModel({
+        provider: taskConfig.id,
+        model: taskConfig.model,
+      }).catch(() => null);
+      if (alternate) {
+        taskConfig = await resolveProvider(alternate.provider, alternate.model).catch(
+          () => taskConfig,
+        );
+      }
+    }
+    queue = markTask(queue, task.id, {
+      provider: taskConfig.id,
+      model: taskConfig.model,
+    });
+    emit({ type: "task", queue, task: queue.tasks.find((item) => item.id === task.id) });
+
+    let result: AiAgentResult | null = null;
+    try {
+      result = await runAgentTask(
+        projectId,
+        taskInstruction(current, queue.tasks.length, verification, queue.tasks),
+        {
+          activeFile: options.activeFile,
+          provider: taskConfig.id,
+          model: taskConfig.model,
+          allowWrite: options.allowWrite === true,
+          allowCommands: options.allowCommands === true,
+          language: options.language,
+          maxSteps: current.effort === "simple" ? 10 : current.effort === "hard" ? 24 : 16,
+          mode: "auto",
+          interactive: true,
+          forceFast: current.effort === "simple",
+        },
+        (event) => {
+          if (event.type === "done") {
+            result = event.result;
+            return;
+          }
+          emit(event);
+        },
+        signal,
+      );
+    } catch (error) {
+      result = null;
+      emit({
+        type: "error",
+        message: error instanceof Error ? error.message : "Task execution failed.",
+      });
+    }
+
+    if (!result) {
+      queue = markTask(queue, task.id, {
+        status: "failed",
+        completedAt: nowIso(),
+        resultSummary: "Task execution failed before a result was produced.",
+      });
+      queue = await saveQueue(analysis.rootPath, queue);
+      emit({ type: "task", queue, task: queue.tasks.find((item) => item.id === task.id) });
+      continue;
+    }
+
+    executed.push(result);
+    const verificationLog = result.logs?.find(
+      (entry) => entry.label === "Verification passed" || entry.label === "Verification failed",
+    );
+    const taskVerification = verificationLog
+      ? {
+          command: verificationLog.detail,
+          ok: verificationLog.label === "Verification passed",
+          output: verificationLog.detail,
+        }
+      : undefined;
+    const malformedToolReply = /provider-native tool call omitted|use the JSON action protocol/i.test(
+      result.summary,
+    );
+    const mutatingCommand = result.steps.some(
+      (step) =>
+        step.action === "run_command" &&
+        step.ok &&
+        /\b(mkdir|touch|mv|cp|rm|rmdir|ln|install|init|create|generate|write|format|rename)\b/i.test(
+          String(step.args.command ?? ""),
+        ),
+    );
+    const writeWithoutChange =
+      taskLooksLikeWrite(task) &&
+      result.changedFiles.length === 0 &&
+      !mutatingCommand &&
+      !summaryAllowsNoChanges(result.summary);
+    const verificationBlocker =
+      taskLooksLikeVerification(task) &&
+      summaryReportsBlocker(result.summary) &&
+      !summaryAllowsNoChanges(result.summary);
+    const pendingWork = reportsRemainingWork(result.summary);
+    const status =
+      result.stoppedReason === "aborted"
+        ? "blocked"
+        : result.stoppedReason !== "finished" ||
+            malformedToolReply ||
+            writeWithoutChange ||
+            verificationBlocker ||
+            pendingWork
+          ? "failed"
+          : "done";
+    if (status === "failed" && (malformedToolReply || /invalid tool protocol/i.test(result.summary))) {
+      avoidModels.add(`${taskConfig.id}::${taskConfig.model}`);
+    }
+    queue = markTask(queue, task.id, {
+      status,
+      completedAt: nowIso(),
+      resultSummary: result.summary,
+      changedFiles: result.changedFiles,
+      commands: result.ranCommands,
+      verification: taskVerification ?? (verification ? { command: verification } : undefined),
+    });
+    queue = await saveQueue(analysis.rootPath, queue);
+    await appendTaskContext(
+      analysis.rootPath,
+      `Task ${task.id} · ${task.title} · ${status}`,
+      [
+        `Provider: ${taskConfig.id}/${taskConfig.model}`,
+        result.summary,
+        result.changedFiles.length > 0 ? `Changed: ${result.changedFiles.join(", ")}` : "",
+        result.ranCommands.length > 0 ? `Commands: ${result.ranCommands.join(" | ")}` : "",
+        taskVerification ? `Verification ${taskVerification.ok ? "passed" : "failed"}: ${taskVerification.command ?? ""}` : "",
+      ]
+        .filter(Boolean)
+        .join("\n"),
+    );
+    emit({ type: "task", queue, task: queue.tasks.find((item) => item.id === task.id) });
+
+    if (status !== "done" && result.stoppedReason !== "aborted" && task.attempts === 0) {
+      const alternate = await pickAlternateAgentModel({
+        provider: taskConfig.id,
+        model: taskConfig.model,
+      }).catch(() => null);
+      queue = markTask(queue, task.id, {
+        status: "pending",
+        effort: task.effort === "simple" ? "standard" : task.effort,
+        role: "main",
+        modelOverride: alternate
+          ? { provider: alternate.provider, model: alternate.model }
+          : undefined,
+        provider: alternate?.provider ?? task.provider,
+        model: alternate?.model ?? task.model,
+      });
+      queue = await saveQueue(analysis.rootPath, queue);
+      emit({ type: "task", queue, task: queue.tasks.find((item) => item.id === task.id) });
+    }
+    if (result.stoppedReason === "aborted") break;
+  }
+
+  const unresolved = queue.tasks.some((task) => task.status === "pending" || task.status === "in_progress");
+  const failed = queue.tasks.some((task) => task.status === "failed" || task.status === "blocked");
+  const finalStatus =
+    signal?.aborted
+      ? "stopped"
+      : unresolved || failed
+        ? "failed"
+        : "completed";
+  queue = await saveQueue(analysis.rootPath, { ...queue, status: finalStatus });
+  emit({ type: "task", queue });
+  const result = aggregateResult(goal.trim(), queue, executed, main.id, main.model);
+  emit({ type: "done", result });
+  return {
+    queue,
+    summary: result.summary,
+    completed: queue.tasks.filter((task) => task.status === "done").length,
+    failed: queue.tasks.filter((task) => task.status === "failed" || task.status === "blocked").length,
+    stopped: finalStatus === "stopped",
+  };
+}
+
+export async function getProjectTaskQueue(projectId: string): Promise<ProjectTaskQueue | null> {
+  const analysis = await loadAnalysis(projectId);
+  return loadQueue(analysis.rootPath, projectId);
+}
