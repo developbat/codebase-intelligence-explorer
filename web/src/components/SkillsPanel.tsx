@@ -51,7 +51,7 @@ export function SkillsPanel({ projectId }: SkillsPanelProps) {
   const [source, setSource] = useState("");
   const [sourceRef, setSourceRef] = useState("");
   const [scopeChoice, setScopeChoice] = useState<SkillInstallScope>("project");
-  const [enableOnInstall, setEnableOnInstall] = useState(false);
+  const [enableOnInstall, setEnableOnInstall] = useState(true);
   const [preview, setPreview] = useState<SkillSourcePreview | null>(null);
   const [selectedCandidates, setSelectedCandidates] = useState<Set<string>>(new Set());
   const [previewBusy, setPreviewBusy] = useState(false);
@@ -446,10 +446,19 @@ export function SkillsPanel({ projectId }: SkillsPanelProps) {
               <div key={source.id} className={source.exists ? "is-found" : ""}>
                 <span>{source.label}</span>
                 <code>{source.directory}</code>
-                <small>{source.exists ? t("{count} skills", { count: source.skillCount }) : t("Not found")}</small>
+                <small>
+                  {source.exists
+                    ? t("{count} skills", { count: source.skillCount })
+                    : t("Folder not created yet")}
+                </small>
               </div>
             ))}
           </div>
+          <small className="skills-footnote">
+            {t(
+              "“Folder not created yet” is normal: the folder appears after you add a SKILL.md or install a skill pack. Installed skills are enabled by default and can be switched off from the list.",
+            )}
+          </small>
         </div>
       ) : null}
 

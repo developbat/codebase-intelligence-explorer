@@ -8,6 +8,7 @@ import {
   Globe2,
   Library,
   RefreshCw,
+  Smartphone,
   Settings2,
   ShieldCheck,
   Sparkles,
@@ -29,7 +30,7 @@ export type SettingsTab =
   | "models"
   | "agents"
   | "catalog"
-  | "permissions"
+  | "devices"
   | "editor"
   | "usage"
   | "prompts"
@@ -65,7 +66,7 @@ const TABS: { id: SettingsTab; label: string; icon: typeof Settings2 }[] = [
   { id: "models", label: "Models", icon: Cpu },
   { id: "agents", label: "Agents", icon: Bot },
   { id: "catalog", label: "Model catalog", icon: Library },
-  { id: "permissions", label: "Permissions", icon: ShieldCheck },
+  { id: "devices", label: "Devices", icon: Smartphone },
   { id: "editor", label: "Editor & tests", icon: Code2 },
   { id: "usage", label: "Usage", icon: BarChart3 },
   { id: "prompts", label: "Prompts", icon: FileText },
@@ -232,8 +233,39 @@ export function SettingsScreen({
                   </div>
                 </section>
 
-                <MobileDevicesPanel projectId={projectId} />
                 <ToolchainsPanel />
+
+                <section className="settings-section">
+                  <h3>{t("General approvals")}</h3>
+                  <p>
+                    {t(
+                      "These are pre-approvals. When off, the agent pauses and asks Allow once / Always allow / Deny before the action.",
+                    )}
+                  </p>
+                  <div className="settings-toggle-list">
+                    <SettingsToggle
+                      checked={agentAllowWrite}
+                      onChange={onAgentAllowWriteChange}
+                      title={t("Pre-approve file writes")}
+                      description={t("Writes still create a timestamped local backup.")}
+                    />
+                    <SettingsToggle
+                      checked={agentAllowCommands}
+                      onChange={onAgentAllowCommandsChange}
+                      title={t("Pre-approve commands")}
+                      description={t("Build, test and typecheck commands can run without an extra prompt.")}
+                    />
+                  </div>
+                </section>
+
+                <section className="settings-section settings-note">
+                  <ShieldCheck size={14} />
+                  <p>
+                    {t(
+                      "Delete and rename always require a fresh confirmation. Dangerous commands such as sudo, git push, git reset --hard and curl | sh remain blocked.",
+                    )}
+                  </p>
+                </section>
 
                 <section className="settings-section">
                   <h3>{t("Local data")}</h3>
@@ -263,38 +295,9 @@ export function SettingsScreen({
 
             {tab === "catalog" ? <ModelCatalogPanel /> : null}
 
-            {tab === "permissions" ? (
+            {tab === "devices" ? (
               <div className="settings-stack">
-                <section className="settings-section">
-                  <h3>{t("Agent permissions")}</h3>
-                  <p>
-                    {t(
-                      "These are pre-approvals. When off, the agent pauses and asks Allow once / Always allow / Deny before the action.",
-                    )}
-                  </p>
-                  <div className="settings-toggle-list">
-                    <SettingsToggle
-                      checked={agentAllowWrite}
-                      onChange={onAgentAllowWriteChange}
-                      title={t("Pre-approve file writes")}
-                      description={t("Writes still create a timestamped local backup.")}
-                    />
-                    <SettingsToggle
-                      checked={agentAllowCommands}
-                      onChange={onAgentAllowCommandsChange}
-                      title={t("Pre-approve commands")}
-                      description={t("Build, test and typecheck commands can run without an extra prompt.")}
-                    />
-                  </div>
-                </section>
-                <section className="settings-section settings-note">
-                  <ShieldCheck size={14} />
-                  <p>
-                    {t(
-                      "Delete and rename always require a fresh confirmation. Dangerous commands such as sudo, git push, git reset --hard and curl | sh remain blocked.",
-                    )}
-                  </p>
-                </section>
+                <MobileDevicesPanel projectId={projectId} />
               </div>
             ) : null}
 
