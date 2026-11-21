@@ -3,11 +3,11 @@ import {
   ArrowRight,
   Boxes,
   Braces,
+  Code2,
   CheckCircle2,
   FolderOpen,
   FolderPlus,
   FolderSearch,
-  FolderClock,
   GitCommitHorizontal,
   Loader2,
   Lock,
@@ -15,69 +15,55 @@ import {
   Play,
   ShieldCheck,
   Sparkles,
-  Trash2,
   Workflow,
   X,
 } from "lucide-react";
-import type { ProjectTemplate, ProjectTemplateId, RecentProject } from "../../../shared/types";
+import type { ProjectTemplate, ProjectTemplateId } from "../../../shared/types";
 import { api } from "../api";
 import { useI18n } from "../i18n";
-import { truncate } from "../lib/constants";
 import { FolderBrowserDialog } from "./FolderBrowserDialog";
-import { ProjectIcon } from "./ProjectIcon";
 
 interface EmptyStateProps {
   onAnalyze: (path: string) => void;
   busy: boolean;
   error: string | null;
   lastPath: string;
-  recent: RecentProject[];
-  onLoadRecent: (project: RecentProject) => void;
-  onRemoveRecent: (id: string) => void;
 }
 
 const FEATURES = [
   {
     icon: FolderOpen,
-    title: "Read-only scanning",
-    text: "Folder trees, manifests, and source files are read without changing anything.",
+    title: "Read-only intelligence",
+    text: "Folder trees, manifests and source files are analyzed without changing anything.",
   },
   {
-    icon: Braces,
-    title: "Multi-language symbols",
-    text: "TypeScript/JavaScript, PHP, and Python symbols, imports, calls, and framework routes. More languages appear at file level.",
+    icon: Code2,
+    title: "Code Studio editor",
+    text: "A write-enabled editor with file tabs, diffs, preview and a real terminal for the same project.",
   },
   {
-    icon: Workflow,
-    title: "Knowledge graph + evidence",
-    text: "Files, folders, classes, functions, routes, database objects, events, and every relationship with certainty.",
+    icon: Sparkles,
+    title: "Agent task loop",
+    text: "Plan, queue and execute coding tasks with model roles, permissions, retries and automatic verification.",
   },
   {
-    icon: GitCommitHorizontal,
-    title: "Git change intelligence",
-    text: "Branch, last commit, paginated commit graph, commit detail, diffs, structural impact, and map highlighting.",
+    icon: Play,
+    title: "Run, test and preview",
+    text: "Run checks, tests, builds and dev servers, then inspect pages, mobile apps and game canvases.",
+  },
+  {
+    icon: Network,
+    title: "Knowledge graph + 3D",
+    text: "Files, symbols, routes, database objects and relationships as 2D maps and a 3D explorer.",
   },
   {
     icon: Boxes,
-    title: "2D + 3D architecture",
-    text: "React Flow maps and a Three.js 3D explorer with hybrid, hierarchical, clustered, and force layouts.",
-  },
-  {
-    icon: FolderSearch,
-    title: "Saved project memory",
-    text: "Each project keeps its own analysis. Switch instantly without rescanning; local project icons are discovered automatically.",
+    title: "Game and mobile scaffolds",
+    text: "Canvas, Phaser, Three.js, Godot, Flutter, Expo and PWA templates with assets, audio and device tools.",
   },
 ];
 
-export function EmptyState({
-  onAnalyze,
-  busy,
-  error,
-  lastPath,
-  recent,
-  onLoadRecent,
-  onRemoveRecent,
-}: EmptyStateProps) {
+export function EmptyState({ onAnalyze, busy, error, lastPath }: EmptyStateProps) {
   const { t } = useI18n();
   const [path, setPath] = useState(lastPath);
   const [browserOpen, setBrowserOpen] = useState(false);
@@ -91,16 +77,16 @@ export function EmptyState({
       <div className="empty-glow" />
       <div className="empty-content">
         <div className="empty-badge">
-          <Sparkles size={13} /> {t("AI-free static code intelligence")}
+          <Sparkles size={13} /> {t("Read-only intelligence + write-enabled Code Studio")}
         </div>
         <h1>
-          {t("Explore your codebase")}
+          {t("Understand your code.")}
           <br />
-          <span>{t("spatially.")}</span>
+          <span>{t("Build it in Code Studio.")}</span>
         </h1>
         <p className="empty-lede">
           {t(
-            "Pick a TypeScript/JavaScript, PHP, or Python project folder. We will read its files, symbols, imports, calls, and routes and turn them into a navigable knowledge graph. Source code is never modified or executed.",
+            "Analyze a TypeScript/JavaScript, PHP or Python project read-only and explore its files, symbols, routes and dependencies as a knowledge graph. Switch to Code Studio to edit the same project, run commands, test, preview and let the agent plan and code.",
           )}
         </p>
 
@@ -135,63 +121,15 @@ export function EmptyState({
           <ArrowRight size={13} />
         </button>
 
-        {recent.length > 0 ? (
-          <div className="home-recent">
-            <div className="home-recent-head">
-              <span>
-                <FolderClock size={12} /> {t("Saved projects")}
-              </span>
-              <small>{t("Continue where you left off")}</small>
-            </div>
-            <div className="home-recent-list">
-              {recent.map((project) => (
-                <div
-                  key={project.id}
-                  className="home-recent-card"
-                  role="button"
-                  tabIndex={0}
-                  onClick={() => onLoadRecent(project)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter") onLoadRecent(project);
-                  }}
-                  title={project.rootPath}
-                >
-                  <ProjectIcon
-                    id={project.id}
-                    name={project.projectName}
-                    version={project.createdAt}
-                    languages={project.languages}
-                    frameworks={project.frameworks}
-                    size="md"
-                  />
-                  <span className="home-recent-main">
-                    <span className="home-recent-name">{truncate(project.projectName, 30)}</span>
-                    <span className="home-recent-path">{truncate(project.rootPath, 46)}</span>
-                    <span className="home-recent-stats">
-                      {t("{fileCount} files · {symbolCount} symbols", {
-                        fileCount: project.stats.files,
-                        symbolCount: project.stats.symbols,
-                      })}
-                      {project.frameworks && project.frameworks.length > 0
-                        ? ` · ${project.frameworks[0]}`
-                        : ""}
-                    </span>
-                  </span>
-                  <button
-                    className="icon-button subtle"
-                    title={t("Remove from history")}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      onRemoveRecent(project.id);
-                    }}
-                  >
-                    <Trash2 size={12} />
-                  </button>
-                </div>
-              ))}
-            </div>
-          </div>
-        ) : null}
+        <div className="empty-product-note">
+          <span>
+            <Network size={12} /> {t("Intelligence stays read-only")}
+          </span>
+          <span className="empty-product-sep" aria-hidden="true">→</span>
+          <span>
+            <Code2 size={12} /> {t("Code Studio writes with approvals")}
+          </span>
+        </div>
 
         {error ? (
           <div className="form-error">
@@ -219,7 +157,7 @@ export function EmptyState({
             <CheckCircle2 size={13} /> {t("TS/JS · PHP · Python · file-level multi-language")}
           </span>
           <span>
-            <Lock size={13} /> {t("Read-only")}
+            <Lock size={13} /> {t("Intelligence read-only · Studio writes with approval")}
           </span>
         </div>
       </div>

@@ -8,6 +8,7 @@ import {
   FileCode2,
   Flame,
   Folder,
+  FolderClock,
   FolderOpen,
   FolderTree,
   GitBranch,
@@ -28,6 +29,7 @@ import { buildTree, collectFolderPaths, type TreeNode } from "../lib/tree";
 import type { ViewMode } from "../lib/viewGraph";
 import { useI18n } from "../i18n";
 import { ProjectSwitcher } from "./ProjectSwitcher";
+import { ProjectIcon } from "./ProjectIcon";
 
 interface SidebarProps {
   analysis: AnalysisResult | null;
@@ -225,6 +227,57 @@ export function Sidebar({
             onLoadRecent={onLoadRecent}
             onRemoveRecent={onRemoveRecent}
           />
+        ) : recent.length > 0 ? (
+          <div className="sidebar-recent">
+            <div className="sidebar-recent-head">
+              <span>
+                <FolderClock size={11} /> {t("Saved projects")}
+              </span>
+              <small>{recent.length}</small>
+            </div>
+            <div className="sidebar-recent-list">
+              {recent.map((project) => (
+                <div
+                  key={project.id}
+                  className="sidebar-recent-item"
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => onLoadRecent(project)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") onLoadRecent(project);
+                  }}
+                  title={project.rootPath}
+                >
+                  <ProjectIcon
+                    id={project.id}
+                    name={project.projectName}
+                    version={project.createdAt}
+                    languages={project.languages}
+                    frameworks={project.frameworks}
+                    size="sm"
+                  />
+                  <span className="sidebar-recent-main">
+                    <span className="sidebar-recent-name">{truncate(project.projectName, 22)}</span>
+                    <span className="sidebar-recent-path">{truncate(project.rootPath, 30)}</span>
+                  </span>
+                  <button
+                    className="sidebar-recent-remove"
+                    title={t("Remove from history")}
+                    aria-label={t("Remove from history")}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onRemoveRecent(project.id);
+                    }}
+                  >
+                    <X size={10} />
+                  </button>
+                </div>
+              ))}
+            </div>
+            <small className="sidebar-recent-note">
+              {t("Click to reopen the saved analysis. Use Open Project for a new folder.")}
+            </small>
+          </div>
         ) : null}
 
         {analysis ? (

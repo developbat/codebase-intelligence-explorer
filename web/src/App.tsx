@@ -768,7 +768,7 @@ export default function App() {
           <img className="brand-logo" src={`/cbe.png?v=${logoVersion}`} alt="" width={31} height={31} />
           <div className="brand-text">
             <span className="brand-title">Codebase Explorer</span>
-            <span className="brand-sub">{t("Static code intelligence")}</span>
+            <span className="brand-sub">{t("Intelligence + Code Studio")}</span>
           </div>
         </div>
 
@@ -1209,9 +1209,6 @@ export default function App() {
               busy={busy !== null}
               error={error}
               lastPath={lastPath}
-              recent={recent}
-              onLoadRecent={loadRecent}
-              onRemoveRecent={removeRecent}
             />
           )}
         </main>
