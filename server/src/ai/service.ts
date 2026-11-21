@@ -4010,7 +4010,8 @@ export async function runAgentTask(
   await recordModelOutcome(config.id, config.model, {
     success: stoppedReason === "finished" && invalidProtocolSteps < 2,
     protocolFailure:
-      invalidProtocolSteps >= 2 || /invalid tool protocol/i.test(summary || errorMessage || ""),
+      invalidProtocolSteps >= 2 ||
+      /invalid tool protocol|provider-native tool call omitted/i.test(summary || errorMessage || ""),
     emptyFailure: /empty response/i.test(summary || errorMessage || ""),
   }).catch(() => {
     // health tracking must never break an agent run
