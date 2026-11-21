@@ -677,6 +677,11 @@ export const api = {
   },
 
   ai: {
+    stop: (projectId: string) =>
+      request<{ stopped: number }>(`/api/projects/${projectId}/ai/stop`, {
+        method: "POST",
+      }),
+
     autoConfigureAgents: () =>
       request<AiAgentAutoResult>("/api/ai/agents/auto", {
         method: "POST",

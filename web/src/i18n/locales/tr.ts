@@ -1071,6 +1071,8 @@ export const tr: Dictionary = {
   "enabled": "etkin",
   "{count} skills found": "{count} yetenek bulundu",
   "Skills": "Yetenekler",
+  "Continue remaining tasks": "Kalan görevlere devam et",
+  "Connection lost. The task is still running on the server; progress will refresh automatically.": "Bağlantı koptu. Görev sunucuda çalışmaya devam ediyor; ilerleme otomatik yenilenecek.",
   "Devices": "Cihazlar",
   "General approvals": "Genel onaylar",
   "Folder not created yet": "Klasör henüz oluşturulmadı",

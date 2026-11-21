@@ -121,7 +121,7 @@ export function TaskQueueCard({
             }}
             disabled={queue.status === "running"}
           >
-            {t("Retry failed tasks")}
+            {t(queue.status === "stopped" ? "Continue remaining tasks" : "Retry failed tasks")}
           </button>
         ) : null}
       </div>

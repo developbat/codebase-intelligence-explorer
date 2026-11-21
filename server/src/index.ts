@@ -127,6 +127,31 @@ const TRANSPARENT_PNG = Buffer.from(
 const SERVE_WEB = process.argv.includes("--serve-web") || process.env.CIE_SERVE_WEB === "1";
 
 const app = express();
+
+// Agent runs are server-owned. Disconnecting the browser (screen lock, reload,
+// sleeping laptop) must not abort work that is already in progress.
+const activeAgentRuns = new Map<string, Set<AbortController>>();
+
+function registerAgentRun(projectId: string, controller: AbortController): void {
+  const runs = activeAgentRuns.get(projectId) ?? new Set<AbortController>();
+  runs.add(controller);
+  activeAgentRuns.set(projectId, runs);
+}
+
+function unregisterAgentRun(projectId: string, controller: AbortController): void {
+  const runs = activeAgentRuns.get(projectId);
+  if (!runs) return;
+  runs.delete(controller);
+  if (runs.size === 0) activeAgentRuns.delete(projectId);
+}
+
+function stopAgentRuns(projectId: string): number {
+  const runs = activeAgentRuns.get(projectId);
+  if (!runs) return 0;
+  for (const controller of runs) controller.abort();
+  return runs.size;
+}
+
 app.use(express.json({ limit: "1mb" }));
 
 // Local desktop companion: never expose the analysis server to the network.
@@ -971,13 +996,12 @@ app.post("/api/projects/:id/ai/agent/stream", async (req, res) => {
   res.flushHeaders?.();
 
   const controller = new AbortController();
-  const onClose = () => {
-    if (!res.writableEnded) controller.abort();
-  };
-  res.on("close", onClose);
-  req.on("aborted", onClose);
+  registerAgentRun(req.params.id, controller);
+  res.on("error", () => undefined);
   const write = (event: unknown) => {
-    if (!res.writableEnded) res.write(`${JSON.stringify(event)}\n`);
+    if (res.writable && !res.destroyed && !res.writableEnded) {
+      res.write(`${JSON.stringify(event)}\n`);
+    }
   };
 
   try {
@@ -1015,7 +1039,7 @@ app.post("/api/projects/:id/ai/agent/stream", async (req, res) => {
   } catch (error) {
     write({ type: "error", message: error instanceof Error ? error.message : "Agent run failed." });
   } finally {
-    res.off("close", onClose);
+    unregisterAgentRun(req.params.id, controller);
     res.end();
   }
 });
@@ -1060,13 +1084,12 @@ app.post("/api/projects/:id/ai/loop/stream", async (req, res) => {
   res.flushHeaders?.();
 
   const controller = new AbortController();
-  const onClose = () => {
-    if (!res.writableEnded) controller.abort();
-  };
-  res.on("close", onClose);
-  req.on("aborted", onClose);
+  registerAgentRun(req.params.id, controller);
+  res.on("error", () => undefined);
   const write = (event: unknown) => {
-    if (!res.writableEnded) res.write(`${JSON.stringify(event)}\n`);
+    if (res.writable && !res.destroyed && !res.writableEnded) {
+      res.write(`${JSON.stringify(event)}\n`);
+    }
   };
 
   try {
@@ -1091,9 +1114,13 @@ app.post("/api/projects/:id/ai/loop/stream", async (req, res) => {
   } catch (error) {
     write({ type: "error", message: error instanceof Error ? error.message : "Task loop failed." });
   } finally {
-    res.off("close", onClose);
+    unregisterAgentRun(req.params.id, controller);
     res.end();
   }
+});
+
+app.post("/api/projects/:id/ai/stop", (req, res) => {
+  res.json({ stopped: stopAgentRuns(req.params.id) });
 });
 
 app.post("/api/projects/:id/agent/permissions/:requestId", (req, res) => {
@@ -1548,8 +1575,11 @@ app.post("/api/projects/:id/run/stream", async (req, res) => {
   };
   res.on("close", onClose);
   req.on("aborted", onClose);
+  res.on("error", () => undefined);
   const write = (event: unknown) => {
-    if (!res.writableEnded) res.write(`${JSON.stringify(event)}\n`);
+    if (res.writable && !res.destroyed && !res.writableEnded) {
+      res.write(`${JSON.stringify(event)}\n`);
+    }
   };
 
   try {
@@ -1729,8 +1759,11 @@ app.get("/api/projects/:id/terminals/:sessionId/stream", (req, res) => {
   res.setHeader("Connection", "keep-alive");
   res.setHeader("X-Accel-Buffering", "no");
   res.flushHeaders?.();
+  res.on("error", () => undefined);
   const write = (event: unknown) => {
-    if (!res.writableEnded) res.write(`${JSON.stringify(event)}\n`);
+    if (res.writable && !res.destroyed && !res.writableEnded) {
+      res.write(`${JSON.stringify(event)}\n`);
+    }
   };
   let unsubscribe: (() => void) | null = null;
   let ended = false;
@@ -1844,8 +1877,11 @@ app.post("/api/projects/:id/tests/stream", async (req, res) => {
     if (!res.writableEnded) controller.abort();
   };
   res.on("close", onClose);
+  res.on("error", () => undefined);
   const write = (event: unknown) => {
-    if (!res.writableEnded) res.write(`${JSON.stringify(event)}\n`);
+    if (res.writable && !res.destroyed && !res.writableEnded) {
+      res.write(`${JSON.stringify(event)}\n`);
+    }
   };
 
   try {

@@ -521,6 +521,7 @@ export function CodeStudio({
   const [testGenBusy, setTestGenBusy] = useState(false);
   const [testGenResult, setTestGenResult] = useState<AiTestGenerationResult | null>(null);
   const agentAbortRef = useRef<AbortController | null>(null);
+  const agentStopRequestedRef = useRef(false);
   const [agentAllowWrite, setAgentAllowWrite] = useState(() =>
     localStorage.getItem("cie:agent-write") !== "off",
   );
@@ -780,6 +781,25 @@ export function CodeStudio({
       cancelled = true;
     };
   }, [analysis.id]);
+
+  // While the server owns a running task loop, keep the queue fresh even if
+  // the chat stream was interrupted or the page was reloaded.
+  useEffect(() => {
+    if (taskQueue?.status !== "running") return;
+    let cancelled = false;
+    const timer = window.setInterval(() => {
+      void api.tasks
+        .get(analysis.id)
+        .then((result) => {
+          if (!cancelled && result.queue) setTaskQueue(result.queue);
+        })
+        .catch(() => undefined);
+    }, 4000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [analysis.id, taskQueue?.status]);
 
   useEffect(() => {
     let cancelled = false;
@@ -2096,6 +2116,7 @@ export function CodeStudio({
     setChatBusy(true);
     setChatError(null);
     setChatRetryQuestion(null);
+    agentStopRequestedRef.current = false;
     setChatLiveSteps([]);
     setChatLiveLogs([]);
     setChatLivePlan(null);
@@ -2169,7 +2190,7 @@ export function CodeStudio({
         );
       }
     } catch (requestError) {
-      if (controller.signal.aborted) {
+      if (controller.signal.aborted && agentStopRequestedRef.current) {
         holder.result = {
           instruction: text,
           summary: t("Stopped by the user."),
@@ -2181,6 +2202,16 @@ export function CodeStudio({
           model: active.model,
           createdAt: new Date().toISOString(),
         };
+      } else if (controller.signal.aborted) {
+        // The browser connection dropped (screen lock, sleep, reload). The run
+        // keeps going on the server, so do not report it as a user stop.
+        const queue = await api.tasks.get(analysis.id).catch(() => null);
+        if (queue?.queue) setTaskQueue(queue.queue);
+        setChatError(
+          t(
+            "Connection lost. The task is still running on the server; progress will refresh automatically.",
+          ),
+        );
       } else {
         setChatError(requestError instanceof Error ? requestError.message : t("Project chat failed"));
         setChatRetryQuestion(text);
@@ -3222,7 +3253,11 @@ export function CodeStudio({
             {chatBusy ? (
               <button
                 className="studio-send-button is-stop"
-                onClick={() => agentAbortRef.current?.abort()}
+                onClick={() => {
+                  agentStopRequestedRef.current = true;
+                  void api.ai.stop(analysis.id).catch(() => undefined);
+                  agentAbortRef.current?.abort();
+                }}
                 title={t("Stop agent")}
               >
                 <Square size={12} />
