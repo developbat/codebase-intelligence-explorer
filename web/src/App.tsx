@@ -6,7 +6,6 @@ import {
   Clapperboard,
   Code2,
   Crosshair,
-  FolderOpen,
   FolderTree,
   GitBranch,
   GitCommitHorizontal,
@@ -17,6 +16,7 @@ import {
   Network,
   PanelRight,
   RefreshCw,
+  Settings2,
   ShieldCheck,
   Sparkles,
   TriangleAlert,
@@ -37,6 +37,8 @@ import { GitCommitDialog } from "./components/GitCommitDialog";
 import { ShowcaseDemo, type ShowcaseActions } from "./components/ShowcaseDemo";
 import { BusinessFlowPanel } from "./components/BusinessFlowPanel";
 import { TourButton } from "./components/TourButton";
+import { IndexStatusBadge } from "./components/IndexStatusBadge";
+import type { SettingsTab } from "./components/SettingsScreen";
 import type { AiSettingsPublic } from "../../shared/ai";
 import { buildViewGraph, findDataFlowStart, type CommitHighlight, type ViewMode } from "./lib/viewGraph";
 import { build3DGraph } from "./lib/threeGraph";
@@ -120,6 +122,10 @@ export default function App() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [studioInitialPrompt, setStudioInitialPrompt] = useState("");
   const [studioAutoRunPrompt, setStudioAutoRunPrompt] = useState(false);
+  const [settingsRequest, setSettingsRequest] = useState<{
+    tab: SettingsTab;
+    nonce: number;
+  } | null>(null);
   const [gitStatus, setGitStatus] = useState<GitStatus | null>(null);
   const [changeReport, setChangeReport] = useState<ChangeReport | null>(null);
   const [gitLoading, setGitLoading] = useState(false);
@@ -879,13 +885,19 @@ export default function App() {
               <Clapperboard size={14} /> {t("Demo")}
             </button>
           ) : null}
-          {analysis ? (
-            <button className="ghost-button" onClick={rescan} disabled={busy !== null}>
-              <RefreshCw size={14} className={busy === "rescan" ? "spin" : ""} /> {t("Rescan")}
-            </button>
-          ) : null}
-          <button className="primary-button" onClick={() => setDialogOpen(true)}>
-            <FolderOpen size={14} /> {t("New project")}
+          {analysis ? <IndexStatusBadge projectId={analysis.id} /> : null}
+          <button
+            className="icon-button topbar-icon"
+            onClick={() => {
+              if (!analysis) return;
+              changeProduct("studio");
+              setSettingsRequest({ tab: "general", nonce: Date.now() });
+            }}
+            disabled={!analysis}
+            title={t("Settings")}
+            aria-label={t("Settings")}
+          >
+            <Settings2 size={15} />
           </button>
         </div>
       </header>
@@ -905,6 +917,9 @@ export default function App() {
             recent={recent}
             onSettingsSaved={setAiSettings}
             onRescan={rescan}
+            onOpenProject={() => setDialogOpen(true)}
+            settingsRequest={settingsRequest}
+            onSettingsRequestConsumed={() => setSettingsRequest(null)}
             onLoadRecent={loadRecent}
             onRemoveRecent={removeRecent}
             initialPrompt={studioInitialPrompt}

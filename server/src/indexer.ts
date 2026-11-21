@@ -40,11 +40,13 @@ interface BuildState {
 
 interface StoredConversation {
   id: string;
+  chatId?: string;
   question: string;
   answer: string;
   provider: string;
   model: string;
   createdAt: string;
+  updatedAt?: string;
 }
 
 const MAX_FILE_CHARS = 60_000;
@@ -500,9 +502,23 @@ export async function recordConversation(
   answer: string,
   provider: string,
   model: string,
+  chatId?: string,
 ): Promise<void> {
   if (!question.trim() || !answer.trim()) return;
   const conversations = await readConversations(projectId);
+  const now = new Date().toISOString();
+  if (chatId) {
+    const existing = conversations.find((entry) => entry.chatId === chatId);
+    if (existing) {
+      existing.question = question.trim();
+      existing.answer = answer.trim();
+      existing.provider = provider;
+      existing.model = model;
+      existing.updatedAt = now;
+      await saveConversations(projectId, conversations);
+      return;
+    }
+  }
   if (
     conversations.some(
       (entry) => entry.question === question.trim() && entry.answer === answer.trim(),
@@ -511,12 +527,16 @@ export async function recordConversation(
     return;
   }
   const entry: StoredConversation = {
-    id: crypto.createHash("sha1").update(`${question}\n${answer}`).digest("hex").slice(0, 16),
+    id: chatId
+      ? crypto.createHash("sha1").update(`chat:${chatId}`).digest("hex").slice(0, 16)
+      : crypto.createHash("sha1").update(`${question}\n${answer}`).digest("hex").slice(0, 16),
+    chatId,
     question: question.trim(),
     answer: answer.trim(),
     provider,
     model,
-    createdAt: new Date().toISOString(),
+    createdAt: now,
+    updatedAt: now,
   };
   conversations.push(entry);
   await saveConversations(projectId, conversations);
@@ -524,14 +544,21 @@ export async function recordConversation(
 
 export async function importConversations(
   projectId: string,
-  pairs: { question: string; answer: string }[],
+  pairs: { question: string; answer: string; chatId?: string }[],
   provider = "imported",
   model = "imported",
 ): Promise<number> {
   let imported = 0;
   for (const pair of pairs.slice(0, 80)) {
     if (!pair.question.trim() || !pair.answer.trim()) continue;
-    await recordConversation(projectId, pair.question, pair.answer, provider, model);
+    await recordConversation(
+      projectId,
+      pair.question,
+      pair.answer,
+      provider,
+      model,
+      pair.chatId,
+    );
     imported += 1;
   }
   return imported;

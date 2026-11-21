@@ -279,7 +279,10 @@ export const api = {
   buildIndex: (id: string) =>
     request<ProjectIndexStatus>(`/api/projects/${id}/index/build`, { method: "POST" }),
 
-  importConversations: (id: string, pairs: { question: string; answer: string }[]) =>
+  importConversations: (
+    id: string,
+    pairs: { question: string; answer: string; chatId?: string }[],
+  ) =>
     request<{ imported: number }>(`/api/projects/${id}/conversations/import`, {
       method: "POST",
       body: JSON.stringify({ pairs }),

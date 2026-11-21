@@ -185,6 +185,9 @@ interface CodeStudioProps {
   recent?: RecentProject[];
   onSettingsSaved: (settings: AiSettingsPublic) => void;
   onRescan: () => void;
+  onOpenProject?: () => void;
+  settingsRequest?: { tab: SettingsTab; nonce: number } | null;
+  onSettingsRequestConsumed?: () => void;
   onLoadRecent?: (project: RecentProject) => void;
   onRemoveRecent?: (id: string) => void;
   initialPrompt?: string;
@@ -421,6 +424,9 @@ export function CodeStudio({
   recent = [],
   onSettingsSaved,
   onRescan,
+  onOpenProject,
+  settingsRequest,
+  onSettingsRequestConsumed,
   onLoadRecent,
   onRemoveRecent,
   initialPrompt,
@@ -566,6 +572,7 @@ export function CodeStudio({
   );
   const [waitSeconds, setWaitSeconds] = useState(0);
   const chatLiveLogsRef = useRef<AiAgentLogEntry[]>([]);
+  const lastIndexedChatRef = useRef<Record<string, string>>({});
   const chatHydratedRef = useRef(false);
   const skipChatSaveRef = useRef(false);
   const [summaryBusy, setSummaryBusy] = useState(false);
@@ -583,7 +590,16 @@ export function CodeStudio({
   const [rightTab, setRightTab] = useState<"preview" | string>("preview");
   const [consoleOpen, setConsoleOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+
   const [settingsTab, setSettingsTab] = useState<SettingsTab>("general");
+
+  useEffect(() => {
+    if (!settingsRequest) return;
+    setSettingsTab(settingsRequest.tab);
+    setSettingsOpen(true);
+    onSettingsRequestConsumed?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settingsRequest?.nonce]);
   const [settingsModelsAdd, setSettingsModelsAdd] = useState(false);
   const [indexStatus, setIndexStatus] = useState<ProjectIndexStatus | null>(null);
   const [checkCommand, setCheckCommand] = useState("");
@@ -855,26 +871,33 @@ export function CodeStudio({
   }, [analysis.id]);
 
   useEffect(() => {
-    if (chatMessages.length < 2) return;
-    const key = `cie:index-history:${analysis.id}`;
-    if (localStorage.getItem(key)) return;
-    const pairs: { question: string; answer: string }[] = [];
-    for (let index = 0; index < chatMessages.length - 1; index += 1) {
-      const user = chatMessages[index];
-      const assistant = chatMessages[index + 1];
-      if (user.role === "user" && assistant.role === "assistant") {
-        pairs.push({ question: user.content, answer: assistant.content });
-        index += 1;
-      }
-    }
-    if (pairs.length === 0) return;
-    localStorage.setItem(key, "1");
-    void api
-      .importConversations(analysis.id, pairs.slice(-40))
-      .catch(() => {
-        // conversation import is best-effort
-      });
-  }, [analysis.id, chatMessages.length]);
+    if (!activeChatId || chatMessages.length < 2 || chatBusy) return;
+    const timer = window.setTimeout(() => {
+      const firstUser = chatMessages.find((message) => message.role === "user");
+      const title =
+        firstUser?.content.slice(0, 500) ||
+        chatTabs.find((tab) => tab.id === activeChatId)?.title ||
+        t("New chat");
+      const answer = chatMessages
+        .map(
+          (message) =>
+            `${message.role === "user" ? "User" : "Agent"}: ${message.content}`,
+        )
+        .join("\n\n")
+        .slice(-24_000);
+      const signature = `${activeChatId}:${chatMessages.length}:${answer.length}`;
+      if (lastIndexedChatRef.current[activeChatId] === signature) return;
+      lastIndexedChatRef.current[activeChatId] = signature;
+      void api
+        .importConversations(analysis.id, [
+          { question: title, answer, chatId: activeChatId },
+        ])
+        .catch(() => {
+          // conversation import is best-effort
+        });
+    }, 1_200);
+    return () => window.clearTimeout(timer);
+  }, [analysis.id, activeChatId, chatBusy, chatMessages, chatTabs, t]);
 
   useEffect(() => {
     if (!chatTabs.length) return;
@@ -2470,6 +2493,11 @@ export function CodeStudio({
             />
           </div>
         ) : null}
+        {onOpenProject ? (
+          <button className="studio-open-project" onClick={onOpenProject}>
+            <FolderOpen size={12} /> {t("Open or create project")}
+          </button>
+        ) : null}
         <div className="studio-side-tabs">
           <button className={sidebarTab === "files" ? "is-active" : ""} onClick={() => setSidebarTab("files")}>
             <Folder size={12} /> {t("Files")}
@@ -2727,49 +2755,8 @@ export function CodeStudio({
                 <PanelLeftOpen size={11} /> {t("Files")}
               </button>
             ) : null}
-            {analysisStale ? (
-              <button className="studio-stale" onClick={onRescan}>
-                <RefreshCw size={11} /> {t("Rescan")}
-              </button>
-            ) : null}
-            {indexStatus ? (
-              <button
-                className={`studio-index-chip ${
-                  indexStatus.building
-                    ? "is-building"
-                    : indexStatus.error
-                      ? "is-warning"
-                      : indexStatus.ready && !indexStatus.stale
-                        ? "is-ready"
-                        : "is-warning"
-                }`}
-                onClick={() => void buildIndex()}
-                disabled={indexStatus.building}
-                title={t("Project search index")}
-              >
-                {indexStatus.building ? (
-                  <Loader2 size={11} className="spin" />
-                ) : (
-                  <Database size={11} />
-                )}
-                {indexStatus.building
-                  ? `${t("Indexing")} ${
-                      indexStatus.total > 0
-                        ? Math.round((indexStatus.processed / indexStatus.total) * 100)
-                        : 0
-                    }%`
-                  : indexStatus.ready && !indexStatus.stale
-                    ? t("Indexed")
-                    : indexStatus.ready
-                      ? t("Rebuild index")
-                      : t("Build index")}
-              </button>
-            ) : null}
             <button onClick={() => setIndexSearchOpen(true)} title={t("Search the project index")}>
               <Search size={12} /> {t("Search")}
-            </button>
-            <button onClick={() => openSettings("general")} title={t("Settings")}>
-              <Settings2 size={12} /> {t("Settings")}
             </button>
             <button
               className={consoleOpen ? "is-active" : ""}
@@ -3258,20 +3245,37 @@ export function CodeStudio({
         ) : null}
 
         {modelNotice ? (
-          <div className="studio-model-notice">
-            <AlertTriangle size={13} />
-            <div>
-              <strong>{t("Model switched")}</strong>
-              <span>
+          <div
+            className="studio-model-modal-backdrop"
+            role="presentation"
+            onMouseDown={() => setModelNotice(null)}
+          >
+            <div
+              className="studio-model-modal"
+              role="dialog"
+              aria-modal="true"
+              aria-label={t("Model switched")}
+              onMouseDown={(event) => event.stopPropagation()}
+            >
+              <div className="studio-model-modal-head">
+                <AlertTriangle size={16} />
+                <div>
+                  <strong>{t("Model switched")}</strong>
+                  <small>{t("The selected model was unavailable. This run continues with a different model.")}</small>
+                </div>
+              </div>
+              <div className="studio-model-modal-route">
                 <code>{modelNotice.from.provider}/{modelNotice.from.model}</code>
                 <b>→</b>
                 <code>{modelNotice.to.provider}/{modelNotice.to.model}</code>
-              </span>
-              <small>{modelNotice.reason}</small>
+              </div>
+              <p>{modelNotice.reason}</p>
+              <div className="studio-model-modal-actions">
+                <button className="primary-button" onClick={() => setModelNotice(null)}>
+                  {t("Got it")}
+                </button>
+              </div>
             </div>
-            <button onClick={() => setModelNotice(null)} aria-label={t("Dismiss")}>
-              <X size={12} />
-            </button>
           </div>
         ) : null}
 

@@ -1164,6 +1164,8 @@ app.post("/api/projects/:id/ai/loop/stream", async (req, res) => {
   };
 
   let intent = undefined as Awaited<ReturnType<typeof analyzeIntent>>["intent"] | undefined;
+  let intentProvider: string | undefined;
+  let intentModel: string | undefined;
   const existing = await getProjectTaskQueue(req.params.id).catch(() => null);
   const resuming =
     Boolean(existing) &&
@@ -1180,6 +1182,8 @@ app.post("/api/projects/:id/ai/loop/stream", async (req, res) => {
         clarified: req.body?.clarified === true,
       });
       intent = analyzed.intent;
+      intentProvider = analyzed.provider;
+      intentModel = analyzed.model;
       write({
         type: "intent",
         intent: analyzed.intent,
@@ -1207,6 +1211,39 @@ app.post("/api/projects/:id/ai/loop/stream", async (req, res) => {
       res.end();
       return;
     }
+  }
+
+  if (intent && (intent.kind === "question" || intent.kind === "analyze")) {
+    try {
+      const result = await runAgentTask(
+        req.params.id,
+        goal,
+        {
+          activeFile: typeof req.body?.activeFile === "string" ? req.body.activeFile : undefined,
+          provider: intentProvider as AiProviderId | undefined,
+          model: intentModel,
+          allowWrite: false,
+          allowCommands: false,
+          language: typeof req.body?.language === "string" ? req.body.language : undefined,
+          maxSteps: 6,
+          mode: "auto",
+          interactive: false,
+          intent,
+        },
+        write,
+        controller.signal,
+      );
+      write({ type: "done", result });
+    } catch (error) {
+      write({
+        type: "error",
+        message: error instanceof Error ? error.message : "Question answering failed.",
+      });
+    } finally {
+      unregisterAgentRun(req.params.id, controller);
+      res.end();
+    }
+    return;
   }
 
   try {
@@ -1743,11 +1780,13 @@ app.post("/api/projects/:id/conversations/import", async (req, res) => {
     const raw = Array.isArray(req.body?.pairs) ? req.body.pairs : [];
     const pairs = raw
       .filter(
-        (pair: unknown): pair is { question: string; answer: string } =>
+        (pair: unknown): pair is { question: string; answer: string; chatId?: string } =>
           typeof pair === "object" &&
           pair !== null &&
           typeof (pair as { question?: unknown }).question === "string" &&
-          typeof (pair as { answer?: unknown }).answer === "string",
+          typeof (pair as { answer?: unknown }).answer === "string" &&
+          ((pair as { chatId?: unknown }).chatId === undefined ||
+            typeof (pair as { chatId?: unknown }).chatId === "string"),
       )
       .slice(0, 80);
     res.json({ imported: await importConversations(req.params.id, pairs) });
