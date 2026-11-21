@@ -17,10 +17,10 @@ import type {
 
 const execFileAsync = promisify(execFile);
 
-async function run(command: string, args: string[]): Promise<string | null> {
+async function run(command: string, args: string[], timeoutMs = 8_000): Promise<string | null> {
   try {
     const result = await execFileAsync(command, args, {
-      timeout: 8_000,
+      timeout: timeoutMs,
       maxBuffer: 2 * 1024 * 1024,
     });
     return result.stdout;
@@ -136,7 +136,7 @@ export async function bootMobileDevice(
 ): Promise<MobileBootResult> {
   if (platform === "ios") {
     if (id.startsWith("avd:")) throw new Error("This is not an iOS Simulator.");
-    const boot = await run("xcrun", ["simctl", "boot", id]);
+    const boot = await run("xcrun", ["simctl", "boot", id], 30_000);
     if (boot === null) {
       const state = await run("xcrun", ["simctl", "list", "devices", "--json"]);
       if (state?.includes(id) && state?.includes("Booted")) {
@@ -144,7 +144,7 @@ export async function bootMobileDevice(
       }
       throw new Error("Could not boot the iOS Simulator.");
     }
-    await run("xcrun", ["simctl", "bootstatus", id, "-b"]);
+    await run("xcrun", ["simctl", "bootstatus", id, "-b"], 120_000);
     return { platform, id, state: "booted", message: "iOS Simulator booted." };
   }
   if (id.startsWith("avd:")) {
@@ -175,7 +175,7 @@ export async function captureMobileScreenshot(
   const target = screenshotPath(rootPath, platform);
   await fs.mkdir(path.dirname(target.absolute), { recursive: true });
   if (platform === "ios") {
-    const result = await run("xcrun", ["simctl", "io", id, "screenshot", target.absolute]);
+    const result = await run("xcrun", ["simctl", "io", id, "screenshot", target.absolute], 45_000);
     if (result === null) throw new Error("Could not capture the iOS Simulator screenshot. Is it booted?");
     const stat = await fs.stat(target.absolute);
     return { path: target.relative, bytes: stat.size, platform, deviceId: id };
@@ -206,11 +206,11 @@ export async function openMobileUrl(
   if (!/^https?:\/\//i.test(target)) throw new Error("Mobile URL must start with http:// or https://.");
   if (id.startsWith("avd:")) throw new Error("Boot the Android emulator before opening a URL.");
   if (platform === "ios") {
-    const result = await run("xcrun", ["simctl", "openurl", id, target]);
+    const result = await run("xcrun", ["simctl", "openurl", id, target], 30_000);
     if (result === null) throw new Error("Could not open the URL on the iOS Simulator.");
     return { platform, deviceId: id, url: target, message: "URL opened in iOS Simulator." };
   }
-  const result = await run("adb", ["-s", id, "shell", "am", "start", "-a", "android.intent.action.VIEW", "-d", target]);
+  const result = await run("adb", ["-s", id, "shell", "am", "start", "-a", "android.intent.action.VIEW", "-d", target], 30_000);
   if (result === null) throw new Error("Could not open the URL on the Android device.");
   return { platform, deviceId: id, url: target, message: "URL opened on Android device." };
 }
@@ -224,8 +224,8 @@ export async function readMobileLogs(
   if (id.startsWith("avd:")) throw new Error("Boot the Android emulator before reading logs.");
   const output =
     platform === "ios"
-      ? await run("xcrun", ["simctl", "spawn", id, "log", "show", "--last", "2m", "--style", "compact"])
-      : await run("adb", ["-s", id, "logcat", "-d", "-t", String(lines)]);
+      ? await run("xcrun", ["simctl", "spawn", id, "log", "show", "--last", "2m", "--style", "compact"], 60_000)
+      : await run("adb", ["-s", id, "logcat", "-d", "-t", String(lines)], 30_000);
   if (output === null) throw new Error("Could not read mobile logs.");
   const trimmed = output.split("\n").slice(-lines).join("\n").slice(-24_000);
   return { platform, deviceId: id, lines: trimmed.split("\n").length, output: trimmed };
@@ -252,12 +252,12 @@ export async function installMobileApp(
     if (!stat.isDirectory() || !realApp.endsWith(".app")) {
       throw new Error("iOS install expects a built .app directory.");
     }
-    const result = await run("xcrun", ["simctl", "install", id, realApp]);
+    const result = await run("xcrun", ["simctl", "install", id, realApp], 120_000);
     if (result === null) throw new Error("Could not install the iOS app. Is the simulator booted?");
     return { platform, deviceId: id, path: path.relative(rootPath, realApp), message: "iOS app installed." };
   }
   if (!realApp.endsWith(".apk")) throw new Error("Android install expects an .apk file.");
-  const result = await run("adb", ["-s", id, "install", "-r", realApp]);
+  const result = await run("adb", ["-s", id, "install", "-r", realApp], 120_000);
   if (result === null) throw new Error("Could not install the APK. Is the emulator/device connected?");
   return { platform, deviceId: id, path: path.relative(rootPath, realApp), message: result.trim().slice(-300) || "APK installed." };
 }
@@ -270,21 +270,25 @@ export async function launchMobileApp(
   const value = target.trim();
   if (!value) throw new Error("A package name or bundle id is required.");
   if (platform === "ios") {
-    const result = await run("xcrun", ["simctl", "launch", id, value]);
+    const result = await run("xcrun", ["simctl", "launch", id, value], 30_000);
     if (result === null) throw new Error("Could not launch the iOS app.");
     return { platform, deviceId: id, target: value, message: "iOS app launched." };
   }
-  const result = await run("adb", [
-    "-s",
-    id,
-    "shell",
-    "monkey",
-    "-p",
-    value,
-    "-c",
-    "android.intent.category.LAUNCHER",
-    "1",
-  ]);
+  const result = await run(
+    "adb",
+    [
+      "-s",
+      id,
+      "shell",
+      "monkey",
+      "-p",
+      value,
+      "-c",
+      "android.intent.category.LAUNCHER",
+      "1",
+    ],
+    30_000,
+  );
   if (result === null) throw new Error("Could not launch the Android app.");
   return { platform, deviceId: id, target: value, message: "Android app launched." };
 }

@@ -953,7 +953,12 @@ const FLUTTER_MOBILE: ExtraTemplateDefinition = {
     "README.md",
     ".gitignore",
   ],
-  suggestedCommands: ["flutter pub get", "flutter run -d chrome", "flutter test"],
+  suggestedCommands: [
+    "flutter create --platforms=android,ios,web .",
+    "flutter pub get",
+    "flutter run -d chrome",
+    "flutter test",
+  ],
   build: (name) => {
     const packageName = dartPackage(name);
     return [
@@ -965,12 +970,14 @@ publish_to: "none"
 version: 1.0.0+1
 
 environment:
-  sdk: ">=3.4.0 <4.0.0"
+  sdk: ">=3.13.0 <4.0.0"
+  flutter: ">=3.47.0"
 
 dependencies:
   flutter:
     sdk: flutter
   cupertino_icons: ^1.0.8
+  material_ui: ^1.11.1
 
 dev_dependencies:
   flutter_test:
@@ -983,7 +990,7 @@ flutter:
       },
       {
         path: "lib/main.dart",
-        content: `import 'package:flutter/material.dart';
+        content: `import 'package:material_ui/material_ui.dart';
 
 void main() {
   runApp(const MyApp());
@@ -1112,6 +1119,14 @@ void main() {
         content: readme(name, "A Material 3 Flutter mobile starter.", [
           "## Run",
           "",
+          "Generate the native platform folders once (Android/iOS/web):",
+          "",
+          "```bash",
+          "flutter create --platforms=android,ios,web .",
+          "```",
+          "",
+          "Then install packages and run:",
+          "",
           "```bash",
           "flutter pub get",
           "flutter run -d chrome",
@@ -1121,6 +1136,13 @@ void main() {
           "",
           "```bash",
           "flutter run",
+          "```",
+          "",
+          "## Build",
+          "",
+          "```bash",
+          "flutter build apk --debug",
+          "flutter build ios --simulator",
           "```",
           "",
           "## Verify",
@@ -1556,13 +1578,18 @@ const GODOT_GAME: ExtraTemplateDefinition = {
   framework: "Godot 4",
   files: [
     "project.godot",
+    "export_presets.cfg",
     "Main.tscn",
     "Main.gd",
     "icon.svg",
     "README.md",
     ".gitignore",
   ],
-  suggestedCommands: ["godot --path .", "godot --path . --editor"],
+  suggestedCommands: [
+    "godot --path .",
+    "godot --path . --editor",
+    "mkdir -p build/web && godot --headless --path . --export-release \"Web\" build/web/index.html",
+  ],
   build: (name) => [
     {
       path: "project.godot",
@@ -1589,6 +1616,53 @@ window/handheld/orientation=1
 renderer/rendering_method="gl_compatibility"
 renderer/rendering_method.mobile="gl_compatibility"
 environment/defaults/default_clear_color=Color(0.027, 0.043, 0.071, 1)
+`,
+    },
+    {
+      path: "export_presets.cfg",
+      content: `[preset.0]
+
+name="Web"
+platform="Web"
+runnable=true
+advanced_options=false
+dedicated_server=false
+custom_features=""
+export_filter="all_resources"
+include_filter=""
+exclude_filter=""
+export_path="build/web/index.html"
+patches=PackedStringArray()
+encryption_include_filters=""
+encryption_exclude_filters=""
+seed=0
+encrypt_pck=false
+encrypt_directory=false
+script_export_mode=2
+
+[preset.0.options]
+
+custom_template/debug=""
+custom_template/release=""
+variant/extensions_support=false
+variant/thread_support=false
+vram_texture_compression/for_desktop=true
+vram_texture_compression/for_mobile=false
+html/export_icon=true
+html/custom_html_shell=""
+html/head_include=""
+html/canvas_resize_policy=2
+html/focus_canvas_on_start=true
+html/experimental_virtual_keyboard=false
+progressive_web_app/enabled=false
+progressive_web_app/ensure_cross_origin_isolation_headers=true
+progressive_web_app/offline_page=""
+progressive_web_app/display=1
+progressive_web_app/orientation=0
+progressive_web_app/icon_144x144=""
+progressive_web_app/icon_180x180=""
+progressive_web_app/icon_512x512=""
+progressive_web_app/background_color=Color(0, 0, 0, 1)
 `,
     },
     {
@@ -1714,9 +1788,21 @@ func _restart() -> void:
         "Or open `project.godot` in Godot 4.3+.",
         "",
         "The game uses the main scene, built-in UI labels and pointer input; no external assets are required.",
+        "",
+        "## Export web build",
+        "",
+        "Install export templates once from the Godot editor (`Editor -> Manage Export Templates`), then:",
+        "",
+        "```bash",
+        "mkdir -p build/web",
+        "godot --headless --path . --export-release \"Web\" build/web/index.html",
+        "python3 -m http.server 8123 --directory build/web",
+        "```",
+        "",
+        "Open `http://127.0.0.1:8123/` and run **Check game** in Code Studio.",
       ]),
     },
-    { path: ".gitignore", content: ".godot/\n*.import\n.DS_Store\n" },
+    { path: ".gitignore", content: ".godot/\n*.import\nbuild/\n.DS_Store\n" },
   ],
 };
 
