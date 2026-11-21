@@ -47,7 +47,11 @@ import {
   listProjectTools,
   recordProjectToolRun,
 } from "../projectTools";
-import { listMobileDevices } from "../mobileDevices";
+import {
+  bootMobileDevice,
+  captureMobileScreenshot,
+  listMobileDevices,
+} from "../mobileDevices";
 import { createPlaceholderAsset } from "../placeholderAssets";
 import {
   deleteProjectPath,
@@ -2424,6 +2428,8 @@ export function agentToolCatalog(
     tools.push(`{"action":"run_project_tool","args":{"name":"ui-check"}}${commandApproval}  // runs a saved project tool/script`);
     tools.push('{"action":"delegate_research","args":{"goal":"specific read-only question to investigate"}}  // returns a compact summary only');
     tools.push(`{"action":"placeholder_asset","args":{"path":"assets/player.svg","kind":"sprite","width":128,"height":128,"label":"player"}}${approval}`);
+    tools.push(`{"action":"boot_mobile_device","args":{"platform":"ios","id":"SIMULATOR-UDID"}}${commandApproval}`);
+    tools.push(`{"action":"mobile_screenshot","args":{"platform":"ios","id":"SIMULATOR-UDID"}}${commandApproval}`);
   }
   tools.push('{"action":"finish","args":{"summary":"what changed and how it was verified"}}');
   return tools.map((tool) => `- ${tool}`).join("\n");
@@ -3170,6 +3176,8 @@ export async function runAgentTask(
       "delegate_research",
       "placeholder_asset",
       "list_mobile_devices",
+      "boot_mobile_device",
+      "mobile_screenshot",
       "write_file",
       "replace_in_file",
       "replace_many",
@@ -3207,6 +3215,8 @@ export async function runAgentTask(
         browser_check: "Inspecting the preview in a browser…",
         list_project_tools: "Listing saved project tools…",
         list_mobile_devices: "Listing mobile devices…",
+        boot_mobile_device: "Booting a mobile device…",
+        mobile_screenshot: "Capturing a mobile screenshot…",
         run_project_tool: "Running saved project tool…",
         delegate_research: "Delegating read-only research…",
         placeholder_asset: "Creating a placeholder asset…",
@@ -3670,6 +3680,37 @@ export async function runAgentTask(
           .filter(Boolean)
           .join("\n");
         log("info", "Mobile devices listed", `${report.ios.length} iOS · ${report.android.length} Android`);
+        ok = true;
+      } else if (action === "boot_mobile_device") {
+        const platform = args.platform === "android" ? "android" : "ios";
+        const id = String(args.id ?? "").trim();
+        if (!id) throw new Error("A device id is required.");
+        const allowed = await requirePermission(
+          "command",
+          "boot_mobile_device",
+          id,
+          `Boot ${platform} device ${id}.`,
+        );
+        if (!allowed) throw new Error("The user denied permission to boot the device.");
+        const result = await bootMobileDevice(platform, id);
+        observation = `${result.message}\n${platform} ${result.id} · ${result.state}`;
+        log("info", "Mobile device boot", `${platform} ${id} · ${result.state}`);
+        ok = result.state === "booted" || result.state === "device" || result.state === "starting";
+      } else if (action === "mobile_screenshot") {
+        const platform = args.platform === "android" ? "android" : "ios";
+        const id = String(args.id ?? "").trim();
+        if (!id) throw new Error("A device id is required.");
+        const allowed = await requirePermission(
+          "command",
+          "mobile_screenshot",
+          id,
+          `Capture a ${platform} screenshot from ${id}.`,
+        );
+        if (!allowed) throw new Error("The user denied permission to capture the screenshot.");
+        const shot = await captureMobileScreenshot(analysis.rootPath, platform, id);
+        evidence.push({ path: shot.path, label: "Mobile screenshot" });
+        observation = `Mobile screenshot saved: ${shot.path} (${shot.bytes} bytes).`;
+        log("success", "Mobile screenshot captured", shot.path);
         ok = true;
       } else if (action === "browser_check") {
         const browserPath = typeof args.path === "string" ? args.path : "index.html";

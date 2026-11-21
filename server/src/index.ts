@@ -22,7 +22,11 @@ import { clearModelCatalog, getModelCatalog, importModelCatalog } from "./ai/cat
 import { getModelHealth } from "./ai/modelStats";
 import { isBrowserCheckAvailable, runBrowserCheck } from "./browserCheck";
 import { listProjectTools } from "./projectTools";
-import { listMobileDevices } from "./mobileDevices";
+import {
+  bootMobileDevice,
+  captureMobileScreenshot,
+  listMobileDevices,
+} from "./mobileDevices";
 import { createPlaceholderAsset } from "./placeholderAssets";
 import { getProjectTaskQueue, planProjectTasks, runProjectLoop } from "./ai/loop";
 import { getPublicSettings, updateAiSettings } from "./ai/settings";
@@ -339,6 +343,35 @@ app.get("/api/ai/models", async (req, res) => {
     });
   } catch (error) {
     handleError(res, error);
+  }
+});
+
+app.post("/api/projects/:id/mobile/devices/boot", async (req, res) => {
+  try {
+    const platform = req.body?.platform === "android" ? "android" : "ios";
+    const id = typeof req.body?.id === "string" ? req.body.id : "";
+    if (!id) {
+      res.status(400).json({ error: "A device id is required." });
+      return;
+    }
+    res.json(await bootMobileDevice(platform, id));
+  } catch (error) {
+    handleError(res, error, 400);
+  }
+});
+
+app.post("/api/projects/:id/mobile/devices/screenshot", async (req, res) => {
+  try {
+    const analysis = await loadAnalysis(req.params.id);
+    const platform = req.body?.platform === "android" ? "android" : "ios";
+    const id = typeof req.body?.id === "string" ? req.body.id : "";
+    if (!id) {
+      res.status(400).json({ error: "A device id is required." });
+      return;
+    }
+    res.json(await captureMobileScreenshot(analysis.rootPath, platform, id));
+  } catch (error) {
+    handleError(res, error, 400);
   }
 });
 

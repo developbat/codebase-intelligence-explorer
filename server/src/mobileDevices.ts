@@ -1,6 +1,13 @@
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
+import fs from "node:fs/promises";
+import path from "node:path";
 import { promisify } from "node:util";
-import type { MobileDevice, MobileDeviceReport } from "../../shared/mobileDevices";
+import type {
+  MobileBootResult,
+  MobileDevice,
+  MobileDeviceReport,
+  MobileScreenshotResult,
+} from "../../shared/mobileDevices";
 
 const execFileAsync = promisify(execFile);
 
@@ -110,4 +117,76 @@ export async function listMobileDevices(): Promise<MobileDeviceReport> {
     },
     warnings,
   };
+}
+
+function screenshotPath(rootPath: string, platform: string): { absolute: string; relative: string } {
+  const relative = `.cie/agent/screenshots/mobile-${platform}-${Date.now()}.png`;
+  return { relative, absolute: path.join(rootPath, relative) };
+}
+
+export async function bootMobileDevice(
+  platform: "ios" | "android",
+  id: string,
+): Promise<MobileBootResult> {
+  if (platform === "ios") {
+    if (id.startsWith("avd:")) throw new Error("This is not an iOS Simulator.");
+    const boot = await run("xcrun", ["simctl", "boot", id]);
+    if (boot === null) {
+      const state = await run("xcrun", ["simctl", "list", "devices", "--json"]);
+      if (state?.includes(id) && state?.includes("Booted")) {
+        return { platform, id, state: "booted", message: "Simulator is already booted." };
+      }
+      throw new Error("Could not boot the iOS Simulator.");
+    }
+    await run("xcrun", ["simctl", "bootstatus", id, "-b"]);
+    return { platform, id, state: "booted", message: "iOS Simulator booted." };
+  }
+  if (id.startsWith("avd:")) {
+    const name = id.slice(4);
+    const child = spawn("emulator", ["-avd", name, "-no-snapshot-load"], {
+      detached: true,
+      stdio: "ignore",
+    });
+    child.unref();
+    return {
+      platform,
+      id,
+      state: "starting",
+      message: `Android emulator "${name}" is starting. Refresh device status in a few seconds.`,
+    };
+  }
+  if (id.startsWith("emulator-") || /^[A-Za-z0-9]+$/.test(id)) {
+    return { platform, id, state: "device", message: "Android device is already connected." };
+  }
+  throw new Error("Unknown Android device id.");
+}
+
+export async function captureMobileScreenshot(
+  rootPath: string,
+  platform: "ios" | "android",
+  id: string,
+): Promise<MobileScreenshotResult> {
+  const target = screenshotPath(rootPath, platform);
+  await fs.mkdir(path.dirname(target.absolute), { recursive: true });
+  if (platform === "ios") {
+    const result = await run("xcrun", ["simctl", "io", id, "screenshot", target.absolute]);
+    if (result === null) throw new Error("Could not capture the iOS Simulator screenshot. Is it booted?");
+    const stat = await fs.stat(target.absolute);
+    return { path: target.relative, bytes: stat.size, platform, deviceId: id };
+  }
+  const buffer = await new Promise<Buffer>((resolve, reject) => {
+    execFile(
+      "adb",
+      ["-s", id, "exec-out", "screencap", "-p"],
+      { encoding: "buffer", timeout: 20_000, maxBuffer: 20 * 1024 * 1024 },
+      (error, stdout) => {
+        if (error) reject(error);
+        else resolve(stdout as Buffer);
+      },
+    );
+  }).catch(() => {
+    throw new Error("Could not capture the Android screenshot. Is the device connected?");
+  });
+  await fs.writeFile(target.absolute, buffer);
+  return { path: target.relative, bytes: buffer.length, platform, deviceId: id };
 }

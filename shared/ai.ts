@@ -520,6 +520,8 @@ export type AiAgentAction =
   | "list_project_tools"
   | "run_project_tool"
   | "list_mobile_devices"
+  | "boot_mobile_device"
+  | "mobile_screenshot"
   | "delegate_research"
   | "placeholder_asset"
   | "write_file"

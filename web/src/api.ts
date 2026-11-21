@@ -58,7 +58,11 @@ import type {
   BrowserCheckResult,
 } from "../../shared/browserCheck";
 import type { ModelHealth } from "../../shared/modelHealth";
-import type { MobileDeviceReport } from "../../shared/mobileDevices";
+import type {
+  MobileBootResult,
+  MobileDeviceReport,
+  MobileScreenshotResult,
+} from "../../shared/mobileDevices";
 import type {
   PlaceholderAssetRequest,
   PlaceholderAssetResult,
@@ -477,6 +481,18 @@ export const api = {
   },
 
   mobileDevices: () => request<MobileDeviceReport>("/api/mobile/devices"),
+
+  mobileBoot: (projectId: string, platform: "ios" | "android", id: string) =>
+    request<MobileBootResult>(`/api/projects/${projectId}/mobile/devices/boot`, {
+      method: "POST",
+      body: JSON.stringify({ platform, id }),
+    }),
+
+  mobileScreenshot: (projectId: string, platform: "ios" | "android", id: string) =>
+    request<MobileScreenshotResult>(`/api/projects/${projectId}/mobile/devices/screenshot`, {
+      method: "POST",
+      body: JSON.stringify({ platform, id }),
+    }),
 
   placeholderAsset: (projectId: string, input: PlaceholderAssetRequest) =>
     request<PlaceholderAssetResult>(`/api/projects/${projectId}/assets/placeholder`, {

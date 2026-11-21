@@ -8,6 +8,20 @@ export interface MobileDevice {
   model?: string;
 }
 
+export interface MobileBootResult {
+  platform: "ios" | "android";
+  id: string;
+  state: "booted" | "starting" | "device" | "unsupported";
+  message: string;
+}
+
+export interface MobileScreenshotResult {
+  path: string;
+  bytes: number;
+  platform: "ios" | "android";
+  deviceId: string;
+}
+
 export interface MobileDeviceReport {
   ios: MobileDevice[];
   android: MobileDevice[];

@@ -231,7 +231,7 @@ export function SettingsScreen({
                   </div>
                 </section>
 
-                <MobileDevicesPanel />
+                <MobileDevicesPanel projectId={projectId} />
 
                 <section className="settings-section">
                   <h3>{t("Local data")}</h3>
