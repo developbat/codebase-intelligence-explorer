@@ -51,6 +51,8 @@ import {
   bootMobileDevice,
   captureMobileScreenshot,
   listMobileDevices,
+  openMobileUrl,
+  readMobileLogs,
 } from "../mobileDevices";
 import { createPlaceholderAsset } from "../placeholderAssets";
 import {
@@ -2432,6 +2434,8 @@ export function agentToolCatalog(
     tools.push(`{"action":"placeholder_asset","args":{"path":"assets/beep.wav","kind":"sound","durationMs":500,"frequency":660}}${approval}`);
     tools.push(`{"action":"boot_mobile_device","args":{"platform":"ios","id":"SIMULATOR-UDID"}}${commandApproval}`);
     tools.push(`{"action":"mobile_screenshot","args":{"platform":"ios","id":"SIMULATOR-UDID"}}${commandApproval}`);
+    tools.push(`{"action":"open_mobile_url","args":{"platform":"android","id":"emulator-5554","url":"http://localhost:8081"}}${commandApproval}`);
+    tools.push(`{"action":"mobile_logs","args":{"platform":"android","id":"emulator-5554","limit":200}}${commandApproval}`);
   }
   tools.push('{"action":"finish","args":{"summary":"what changed and how it was verified"}}');
   return tools.map((tool) => `- ${tool}`).join("\n");
@@ -3180,6 +3184,8 @@ export async function runAgentTask(
       "list_mobile_devices",
       "boot_mobile_device",
       "mobile_screenshot",
+      "open_mobile_url",
+      "mobile_logs",
       "write_file",
       "replace_in_file",
       "replace_many",
@@ -3219,6 +3225,8 @@ export async function runAgentTask(
         list_mobile_devices: "Listing mobile devices…",
         boot_mobile_device: "Booting a mobile device…",
         mobile_screenshot: "Capturing a mobile screenshot…",
+        open_mobile_url: "Opening a URL on the mobile device…",
+        mobile_logs: "Reading mobile logs…",
         run_project_tool: "Running saved project tool…",
         delegate_research: "Delegating read-only research…",
         placeholder_asset: "Creating a placeholder asset…",
@@ -3713,6 +3721,37 @@ export async function runAgentTask(
         evidence.push({ path: shot.path, label: "Mobile screenshot" });
         observation = `Mobile screenshot saved: ${shot.path} (${shot.bytes} bytes).`;
         log("success", "Mobile screenshot captured", shot.path);
+        ok = true;
+      } else if (action === "open_mobile_url") {
+        const platform = args.platform === "android" ? "android" : "ios";
+        const id = String(args.id ?? "").trim();
+        const url = String(args.url ?? "").trim();
+        if (!id || !url) throw new Error("Device id and URL are required.");
+        const allowed = await requirePermission(
+          "command",
+          "open_mobile_url",
+          url,
+          `Open ${url} on ${platform} ${id}.`,
+        );
+        if (!allowed) throw new Error("The user denied permission to open the URL.");
+        const result = await openMobileUrl(platform, id, url);
+        observation = `${result.message}\n${url}`;
+        log("info", "Mobile URL opened", `${platform} ${id} · ${url}`);
+        ok = true;
+      } else if (action === "mobile_logs") {
+        const platform = args.platform === "android" ? "android" : "ios";
+        const id = String(args.id ?? "").trim();
+        if (!id) throw new Error("A device id is required.");
+        const allowed = await requirePermission(
+          "command",
+          "mobile_logs",
+          id,
+          `Read the last logs from ${platform} ${id}.`,
+        );
+        if (!allowed) throw new Error("The user denied permission to read mobile logs.");
+        const logs = await readMobileLogs(platform, id, Number(args.limit) || 200);
+        observation = clampObservation(`Mobile logs (${logs.lines} lines):\n${logs.output}`);
+        log("info", "Mobile logs read", `${platform} ${id} · ${logs.lines} lines`);
         ok = true;
       } else if (action === "browser_check") {
         const browserPath = typeof args.path === "string" ? args.path : "index.html";

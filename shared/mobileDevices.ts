@@ -22,6 +22,20 @@ export interface MobileScreenshotResult {
   deviceId: string;
 }
 
+export interface MobileOpenUrlResult {
+  platform: "ios" | "android";
+  deviceId: string;
+  url: string;
+  message: string;
+}
+
+export interface MobileLogsResult {
+  platform: "ios" | "android";
+  deviceId: string;
+  lines: number;
+  output: string;
+}
+
 export interface MobileDeviceReport {
   ios: MobileDevice[];
   android: MobileDevice[];

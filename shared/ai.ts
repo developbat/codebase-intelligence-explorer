@@ -522,6 +522,8 @@ export type AiAgentAction =
   | "list_mobile_devices"
   | "boot_mobile_device"
   | "mobile_screenshot"
+  | "open_mobile_url"
+  | "mobile_logs"
   | "delegate_research"
   | "placeholder_asset"
   | "write_file"

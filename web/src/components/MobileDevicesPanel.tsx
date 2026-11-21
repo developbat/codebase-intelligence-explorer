@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Camera, Loader2, Play, RefreshCw, Smartphone } from "lucide-react";
+import { Camera, FileText, Loader2, Play, RefreshCw, Smartphone } from "lucide-react";
 import type { MobileDevice } from "../../../shared/mobileDevices";
 import type { MobileDeviceReport } from "../../../shared/mobileDevices";
 import { api } from "../api";
@@ -56,16 +56,36 @@ export function MobileDevicesPanel({ projectId }: { projectId?: string }) {
     }
   }
 
+  async function logs(device: MobileDevice) {
+    if (!projectId) return;
+    setActionBusy(`logs:${device.id}`);
+    setMessage(null);
+    try {
+      const result = await api.mobileLogs(projectId, device.platform, device.id, 200);
+      setMessage(result.output.slice(-4_000) || t("No mobile logs."));
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : t("Could not read mobile logs."));
+    } finally {
+      setActionBusy(null);
+    }
+  }
+
   function deviceAction(device: MobileDevice) {
     if (!projectId) return null;
     const booted =
       device.platform === "ios" ? device.state === "booted" : device.state === "device";
     if (booted) {
       return (
-        <button className="ghost-button" onClick={() => void screenshot(device)} disabled={actionBusy !== null}>
-          {actionBusy === `shot:${device.id}` ? <Loader2 size={9} className="spin" /> : <Camera size={9} />}
-          {t("Screenshot")}
-        </button>
+        <>
+          <button className="ghost-button" onClick={() => void screenshot(device)} disabled={actionBusy !== null}>
+            {actionBusy === `shot:${device.id}` ? <Loader2 size={9} className="spin" /> : <Camera size={9} />}
+            {t("Screenshot")}
+          </button>
+          <button className="ghost-button" onClick={() => void logs(device)} disabled={actionBusy !== null}>
+            {actionBusy === `logs:${device.id}` ? <Loader2 size={9} className="spin" /> : <FileText size={9} />}
+            {t("Logs")}
+          </button>
+        </>
       );
     }
     if (device.platform === "ios" || device.id.startsWith("avd:")) {

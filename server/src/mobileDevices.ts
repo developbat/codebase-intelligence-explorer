@@ -6,6 +6,8 @@ import type {
   MobileBootResult,
   MobileDevice,
   MobileDeviceReport,
+  MobileLogsResult,
+  MobileOpenUrlResult,
   MobileScreenshotResult,
 } from "../../shared/mobileDevices";
 
@@ -189,4 +191,38 @@ export async function captureMobileScreenshot(
   });
   await fs.writeFile(target.absolute, buffer);
   return { path: target.relative, bytes: buffer.length, platform, deviceId: id };
+}
+
+export async function openMobileUrl(
+  platform: "ios" | "android",
+  id: string,
+  url: string,
+): Promise<MobileOpenUrlResult> {
+  const target = url.trim();
+  if (!/^https?:\/\//i.test(target)) throw new Error("Mobile URL must start with http:// or https://.");
+  if (id.startsWith("avd:")) throw new Error("Boot the Android emulator before opening a URL.");
+  if (platform === "ios") {
+    const result = await run("xcrun", ["simctl", "openurl", id, target]);
+    if (result === null) throw new Error("Could not open the URL on the iOS Simulator.");
+    return { platform, deviceId: id, url: target, message: "URL opened in iOS Simulator." };
+  }
+  const result = await run("adb", ["-s", id, "shell", "am", "start", "-a", "android.intent.action.VIEW", "-d", target]);
+  if (result === null) throw new Error("Could not open the URL on the Android device.");
+  return { platform, deviceId: id, url: target, message: "URL opened on Android device." };
+}
+
+export async function readMobileLogs(
+  platform: "ios" | "android",
+  id: string,
+  limit = 200,
+): Promise<MobileLogsResult> {
+  const lines = Math.max(10, Math.min(1000, Math.round(limit)));
+  if (id.startsWith("avd:")) throw new Error("Boot the Android emulator before reading logs.");
+  const output =
+    platform === "ios"
+      ? await run("xcrun", ["simctl", "spawn", id, "log", "show", "--last", "2m", "--style", "compact"])
+      : await run("adb", ["-s", id, "logcat", "-d", "-t", String(lines)]);
+  if (output === null) throw new Error("Could not read mobile logs.");
+  const trimmed = output.split("\n").slice(-lines).join("\n").slice(-24_000);
+  return { platform, deviceId: id, lines: trimmed.split("\n").length, output: trimmed };
 }

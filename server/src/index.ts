@@ -26,6 +26,8 @@ import {
   bootMobileDevice,
   captureMobileScreenshot,
   listMobileDevices,
+  openMobileUrl,
+  readMobileLogs,
 } from "./mobileDevices";
 import { createPlaceholderAsset } from "./placeholderAssets";
 import { getProjectTaskQueue, planProjectTasks, runProjectLoop } from "./ai/loop";
@@ -355,6 +357,35 @@ app.post("/api/projects/:id/mobile/devices/boot", async (req, res) => {
       return;
     }
     res.json(await bootMobileDevice(platform, id));
+  } catch (error) {
+    handleError(res, error, 400);
+  }
+});
+
+app.post("/api/projects/:id/mobile/devices/open-url", async (req, res) => {
+  try {
+    const platform = req.body?.platform === "android" ? "android" : "ios";
+    const id = typeof req.body?.id === "string" ? req.body.id : "";
+    const url = typeof req.body?.url === "string" ? req.body.url : "";
+    if (!id || !url) {
+      res.status(400).json({ error: "Device id and URL are required." });
+      return;
+    }
+    res.json(await openMobileUrl(platform, id, url));
+  } catch (error) {
+    handleError(res, error, 400);
+  }
+});
+
+app.post("/api/projects/:id/mobile/devices/logs", async (req, res) => {
+  try {
+    const platform = req.body?.platform === "android" ? "android" : "ios";
+    const id = typeof req.body?.id === "string" ? req.body.id : "";
+    if (!id) {
+      res.status(400).json({ error: "Device id is required." });
+      return;
+    }
+    res.json(await readMobileLogs(platform, id, Number(req.body?.limit) || 200));
   } catch (error) {
     handleError(res, error, 400);
   }
