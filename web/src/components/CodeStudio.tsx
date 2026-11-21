@@ -138,10 +138,7 @@ import { AgentPlanCard } from "./AgentPlanCard";
 import { ShellTerminalView } from "./ShellTerminalView";
 import { TaskQueueCard } from "./TaskQueueCard";
 import type { ProjectTaskQueue } from "../../../shared/tasks";
-import {
-  detectClarification,
-  type ClarificationRequest,
-} from "../../../shared/clarification";
+import type { ClarificationRequest, IntentAnalysis } from "../../../shared/intent";
 import type { BrowserCheckResult } from "../../../shared/browserCheck";
 import type { ProjectToolList } from "../../../shared/projectTools";
 import type {
@@ -165,14 +162,6 @@ interface TerminalSession {
   busy: boolean;
 }
 
-function looksLikeQuestion(value: string): boolean {
-  const text = value.trim();
-  if (!text) return false;
-  if (text.endsWith("?")) return true;
-  return /^(what|why|how|where|which|who|when|explain|describe|tell me|nasıl|neden|niçin|nedir|ne|hangi|kim|nerede|açıkla|anlat)\b/i.test(
-    text,
-  );
-}
 
 let terminalCounter = 0;
 
@@ -564,6 +553,12 @@ export function CodeStudio({
     from: { provider: string; model: string };
     to: { provider: string; model: string };
     reason: string;
+  } | null>(null);
+  const [intentNotice, setIntentNotice] = useState<{
+    intent: IntentAnalysis;
+    provider: string;
+    model: string;
+    totalTokens: number;
   } | null>(null);
   const [taskPanelOpen, setTaskPanelOpen] = useState(false);
   const [taskLoopEnabled, setTaskLoopEnabled] = useState(
@@ -2115,14 +2110,6 @@ export function CodeStudio({
   ) {
     if (!active || !question.trim() || chatBusy) return;
     const text = question.trim();
-    if (!runOptions.skipClarify) {
-      const intent = detectClarification(text);
-      if (intent) {
-        setClarification({ request: intent, original: text });
-        setChatInput(text);
-        return;
-      }
-    }
     const userMessage = { role: "user" as const, content: text };
     let history = chatMessages.map((message) => ({ role: message.role, content: message.content }));
     if (appendUser) {
@@ -2136,6 +2123,7 @@ export function CodeStudio({
     }
     setClarification(null);
     setModelNotice(null);
+    setIntentNotice(null);
     setChatBusy(true);
     setChatError(null);
     setChatRetryQuestion(null);
@@ -2151,7 +2139,7 @@ export function CodeStudio({
     agentAbortRef.current = controller;
     const liveSteps: AiAgentStep[] = [];
     const holder: { result: AiAgentResult | null } = { result: null };
-    const useTaskLoop = taskLoopEnabled && !looksLikeQuestion(text);
+    const useTaskLoop = taskLoopEnabled;
     if (useTaskLoop) setTaskQueue(null);
 
     const handleEvent = (event: AiAgentEvent) => {
@@ -2165,6 +2153,13 @@ export function CodeStudio({
       } else if (event.type === "permission") {
         setPermissionQueue((queue) => [...queue, event.request]);
         setPermissionBusy(false);
+      } else if (event.type === "intent") {
+        setIntentNotice({
+          intent: event.intent,
+          provider: event.provider,
+          model: event.model,
+          totalTokens: event.totalTokens,
+        });
       } else if (event.type === "clarify") {
         setClarification({ request: event.request, original: text });
       } else if (event.type === "model") {
@@ -3238,6 +3233,26 @@ export function CodeStudio({
             >
               <ListChecks size={12} />
               {taskQueue.tasks.filter((task) => task.status === "done").length}/{taskQueue.tasks.length}
+            </button>
+          </div>
+        ) : null}
+
+        {intentNotice ? (
+          <div className="studio-intent-notice">
+            <Sparkles size={13} />
+            <div>
+              <strong>{t("Understood request")}</strong>
+              <p>{intentNotice.intent.understanding}</p>
+              <small>
+                {t("Scope")}: {t(intentNotice.intent.scope)} · {t("Mode")}:{" "}
+                {t(intentNotice.intent.mode === "single" ? "Single task" : "Task loop")}
+                {intentNotice.intent.areas.length > 0
+                  ? ` · ${intentNotice.intent.areas.slice(0, 4).join(", ")}`
+                  : ""}
+              </small>
+            </div>
+            <button onClick={() => setIntentNotice(null)} aria-label={t("Dismiss")}>
+              <X size={12} />
             </button>
           </div>
         ) : null}

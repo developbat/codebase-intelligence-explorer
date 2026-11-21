@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { blockDependentsOf, shouldRetryWithEditFirst, taskLooksLikeInspection } from "./ai/loop";
 import {
-  isFastEditTask,
   preferredVerificationCommand,
   readRangeCovered,
   reportsRemainingWork,
@@ -22,24 +21,6 @@ test("typecheck is preferred over build for automatic verification", () => {
   );
   assert.equal(preferredVerificationCommand({ typecheckCommands: [], buildCommands: [] }), undefined);
   assert.equal(preferredVerificationCommand(undefined), undefined);
-});
-
-test("small edit instructions select the fast task profile", () => {
-  assert.equal(isFastEditTask("projeye users get servisi oluştur", false), true);
-  assert.equal(isFastEditTask("add a GET /users endpoint", false), true);
-  assert.equal(isFastEditTask("fix the null check in order.service.ts", false), true);
-  assert.equal(isFastEditTask("arka planı siyah yap", false), true);
-  assert.equal(isFastEditTask("buton rengini yeşil yap", false), true);
-  assert.equal(
-    isFastEditTask("görev eklemeye bir alan daha ekleyelim görev detayı.", false),
-    true,
-  );
-  assert.equal(isFastEditTask("görev detayını güncelleyelim", false), true);
-  assert.equal(isFastEditTask("Bu projeyi analiz edilen graph üzerinden açıkla", false), false);
-  assert.equal(isFastEditTask("How do I fix this?", false), false);
-  assert.equal(isFastEditTask("why does the user service fail?", false), false);
-  assert.equal(isFastEditTask("projeye users get servisi oluştur", true), false);
-  assert.equal(isFastEditTask(`add ${"x".repeat(300)}`, false), false);
 });
 
 test("read range coverage prevents duplicate reads", () => {

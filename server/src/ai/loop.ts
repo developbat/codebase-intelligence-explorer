@@ -1,5 +1,6 @@
 import type { AnalysisResult } from "../../../shared/types";
 import type { AiAgentEvent, AiAgentResult, AiTokenUsage } from "../../../shared/ai";
+import type { IntentAnalysis } from "../../../shared/intent";
 import type {
   ProjectTask,
   ProjectTaskEffort,
@@ -22,7 +23,7 @@ import { recordUsage } from "./usage";
 import { getPublicSettings, resolveAgentRole, resolveProvider } from "./settings";
 import { pickAlternateAgentModel } from "./agents";
 import { healthKey, modelHealthByProviderModel } from "./modelStats";
-import { isFastEditTask, preferredVerificationCommand, reportsRemainingWork, runAgentTask } from "./service";
+import { preferredVerificationCommand, reportsRemainingWork, runAgentTask } from "./service";
 
 const MAX_PLANNED_TASKS = 12;
 const DEFAULT_MAX_TASKS = 12;
@@ -191,7 +192,12 @@ function normalizeTasks(raw: unknown, goal: string, verification?: string): Proj
 export async function planProjectTasks(
   projectId: string,
   goal: string,
-  options: { language?: string; signal?: AbortSignal; replan?: boolean } = {},
+  options: {
+    language?: string;
+    signal?: AbortSignal;
+    replan?: boolean;
+    intent?: IntentAnalysis;
+  } = {},
 ): Promise<ProjectTaskQueue> {
   const analysis = await loadAnalysis(projectId);
   const verification = preferredVerificationCommand(analysis.tooling);
@@ -200,7 +206,28 @@ export async function planProjectTasks(
     { role: "system", content: PLANNER_SYSTEM },
     {
       role: "user",
-      content: `${projectFacts(analysis)}\n\nVerification command: ${verification ?? "none detected"}\n\nUser goal:\n${goal.trim()}`,
+      content: [
+        projectFacts(analysis),
+        `Verification command: ${verification ?? "none detected"}`,
+        options.intent
+          ? [
+              "Intent analyst:",
+              `Understanding: ${options.intent.understanding}`,
+              `Scope: ${options.intent.scope} · mode: ${options.intent.mode}`,
+              options.intent.areas.length > 0
+                ? `Likely areas: ${options.intent.areas.join(", ")}`
+                : "",
+              options.intent.assumptions.length > 0
+                ? `Assumptions: ${options.intent.assumptions.join("; ")}`
+                : "",
+            ]
+              .filter(Boolean)
+              .join("\n")
+          : "",
+        `User goal:\n${goal.trim()}`,
+      ]
+        .filter(Boolean)
+        .join("\n\n"),
     },
   ];
   let tokenUsage: AiTokenUsage | undefined;
@@ -231,6 +258,24 @@ export async function planProjectTasks(
       totalTokens: tokenUsage.totalTokens,
     });
     tasks = normalizeTasks(extractJson(text), goal, verification);
+    if (options.intent && tasks.length > 0) {
+      const limit =
+        options.intent.scope === "small"
+          ? 3
+          : options.intent.scope === "medium"
+            ? 5
+            : options.intent.scope === "large"
+              ? 8
+              : 2;
+      if (tasks.length > limit) {
+        const verificationTask = [...tasks].reverse().find((task) => taskLooksLikeVerification(task));
+        const kept = tasks.slice(0, limit);
+        if (verificationTask && !kept.includes(verificationTask)) {
+          kept[limit - 1] = verificationTask;
+        }
+        tasks = kept;
+      }
+    }
   } catch {
     tasks = fallbackTasks(goal, verification);
   }
@@ -239,7 +284,15 @@ export async function planProjectTasks(
   await appendTaskContext(
     analysis.rootPath,
     `Plan · ${new Date().toLocaleString()}`,
-    `Goal: ${goal.trim()}\nPlanner: ${config.id}/${config.model}\nTasks: ${tasks.length}`,
+    [
+      `Goal: ${goal.trim()}`,
+      `Planner: ${config.id}/${config.model}`,
+      `Tasks: ${tasks.length}`,
+      options.intent ? `Intent: ${options.intent.understanding}` : "",
+      options.intent ? `Scope: ${options.intent.scope} · mode: ${options.intent.mode}` : "",
+    ]
+      .filter(Boolean)
+      .join("\n"),
   );
   return queue;
 }
@@ -406,21 +459,39 @@ function aggregateResult(
   };
 }
 
-function simpleTask(goal: string, verification?: string): ProjectTask {
+function intentTask(
+  goal: string,
+  intent: IntentAnalysis,
+  verification?: string,
+): ProjectTask {
   const at = nowIso();
+  const readOnly = intent.kind === "question" || intent.kind === "analyze" || intent.kind === "run";
+  const effort = readOnly
+    ? "simple"
+    : intent.scope === "trivial" || intent.scope === "small"
+      ? "simple"
+      : intent.scope === "medium"
+        ? "standard"
+        : "hard";
   return {
     id: "task-1",
     title: goal.length > 90 ? `${goal.slice(0, 87)}…` : goal,
-    detail: goal,
+    detail: [
+      intent.understanding,
+      intent.areas.length > 0 ? `Likely areas: ${intent.areas.join(", ")}` : "",
+      intent.assumptions.length > 0 ? `Assumptions: ${intent.assumptions.join("; ")}` : goal,
+    ]
+      .filter(Boolean)
+      .join("\n"),
     acceptance: "The requested change is implemented and verified.",
     status: "pending",
-    effort: "simple",
-    role: "fast",
+    effort,
+    role: effort === "simple" ? "fast" : "main",
     dependsOn: [],
     attempts: 0,
     changedFiles: [],
     commands: [],
-    verification: verification ? { command: verification } : undefined,
+    verification: verification && !readOnly ? { command: verification } : undefined,
     createdAt: at,
     updatedAt: at,
   };
@@ -481,35 +552,37 @@ export async function runProjectLoop(
   const verification = preferredVerificationCommand(analysis.tooling);
   let queue = await loadQueue(analysis.rootPath, projectId);
   const sameGoal = queue?.goal.trim() === goal.trim();
-  const simpleGoal = isFastEditTask(goal, false);
+  const intent = options.intent;
+  const intentSingle = intent?.mode === "single";
   if (
     !queue ||
     options.replan ||
     queue.tasks.length === 0 ||
     !sameGoal ||
     queue.status === "completed" ||
-    (simpleGoal && queue.status === "failed" && !options.retryFailed)
+    (intentSingle && queue.status === "failed" && !options.retryFailed)
   ) {
-    if (
-      simpleGoal &&
-      (options.replan ||
-        !queue ||
-        !sameGoal ||
-        queue.status === "completed" ||
-        queue.status === "failed")
-    ) {
+    if (intent && intentSingle) {
       queue = await createQueue(analysis.rootPath, projectId, goal.trim(), [
-        simpleTask(goal, verification),
+        intentTask(goal, intent, verification),
       ]);
       await appendTaskContext(
         analysis.rootPath,
         `Plan · ${new Date().toLocaleString()}`,
-        `Goal: ${goal.trim()}\nFast path: single focused task (planner skipped)`,
+        [
+          `Goal: ${goal.trim()}`,
+          `Intent: ${intent.understanding}`,
+          `Scope: ${intent.scope} · mode: single`,
+          intent.areas.length > 0 ? `Areas: ${intent.areas.join(", ")}` : "",
+        ]
+          .filter(Boolean)
+          .join("\n"),
       );
     } else {
       queue = await planProjectTasks(projectId, goal, {
         language: options.language,
         signal,
+        intent,
       });
     }
   }
@@ -621,6 +694,7 @@ export async function runProjectLoop(
           mode: "auto",
           interactive: true,
           forceFast: current.effort === "simple",
+          intent: options.intent,
         },
         (event) => {
           if (event.type === "done") {
@@ -672,7 +746,11 @@ export async function runProjectLoop(
           String(step.args.command ?? ""),
         ),
     );
-    const inspectionTask = taskLooksLikeInspection(task);
+    const inspectionTask =
+      taskLooksLikeInspection(task) ||
+      options.intent?.kind === "question" ||
+      options.intent?.kind === "analyze" ||
+      options.intent?.kind === "run";
     const writeWithoutChange =
       !inspectionTask &&
       taskLooksLikeWrite(task) &&

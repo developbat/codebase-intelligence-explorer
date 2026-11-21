@@ -41,7 +41,8 @@ import { getProjectTaskQueue, planProjectTasks, runProjectLoop } from "./ai/loop
 import { getPublicSettings, updateAiSettings } from "./ai/settings";
 import { getPrompt, getPromptVersion, listPrompts, renderPrompt, resetPrompt, savePrompt } from "./ai/prompts";
 import { resolvePermission } from "./ai/permissions";
-import { detectClarification } from "../../shared/clarification";
+import { analyzeIntent } from "./ai/intent";
+import type { IntentAnalysis } from "../../shared/intent";
 import { getProjectUsage } from "./ai/usage";
 import { buildChangeReport } from "./changes";
 import { formatProjectFile } from "./formatter";
@@ -955,6 +956,28 @@ app.post("/api/projects/:id/ai/agent", async (req, res) => {
       return;
     }
     const provider = typeof req.body?.provider === "string" ? (req.body.provider as AiProviderId) : undefined;
+    let intent: IntentAnalysis | undefined;
+    if (req.body?.mode !== "ask") {
+      const analyzed = await analyzeIntent(req.params.id, instruction, {
+        provider,
+        model: typeof req.body?.model === "string" ? req.body.model : undefined,
+        language: typeof req.body?.language === "string" ? req.body.language : undefined,
+        activeFile: typeof req.body?.activeFile === "string" ? req.body.activeFile : undefined,
+        clarified: req.body?.clarified === true,
+      });
+      if (analyzed.intent.needsClarification) {
+        res.status(409).json({
+          error: analyzed.intent.question,
+          clarification: {
+            question: analyzed.intent.question,
+            options: analyzed.intent.options ?? [],
+            original: instruction,
+          },
+        });
+        return;
+      }
+      intent = analyzed.intent;
+    }
     const result = await runAgentTask(req.params.id, instruction, {
       activeFile: typeof req.body?.activeFile === "string" ? req.body.activeFile : undefined,
       provider,
@@ -963,6 +986,7 @@ app.post("/api/projects/:id/ai/agent", async (req, res) => {
       allowCommands: req.body?.allowCommands === true,
       language: typeof req.body?.language === "string" ? req.body.language : undefined,
       maxSteps: Number(req.body?.maxSteps) || undefined,
+      intent,
       mode:
         req.body?.mode === "ask" ? "ask" : req.body?.mode === "auto" ? "auto" : "coding",
       interactive: false,
@@ -1007,14 +1031,47 @@ app.post("/api/projects/:id/ai/agent/stream", async (req, res) => {
     }
   };
 
-  const clarification =
-    req.body?.clarified === true
-      ? null
-      : detectClarification(instruction, { askMode: req.body?.mode === "ask" });
-  if (clarification) {
-    write({ type: "clarify", request: clarification });
-    res.end();
-    return;
+  let intent: IntentAnalysis | undefined;
+  if (req.body?.mode !== "ask") {
+    try {
+      const analyzed = await analyzeIntent(req.params.id, instruction, {
+        provider: typeof req.body?.provider === "string" ? req.body.provider : undefined,
+        model: typeof req.body?.model === "string" ? req.body.model : undefined,
+        language: typeof req.body?.language === "string" ? req.body.language : undefined,
+        activeFile: typeof req.body?.activeFile === "string" ? req.body.activeFile : undefined,
+        clarified: req.body?.clarified === true,
+        signal: controller.signal,
+      });
+      intent = analyzed.intent;
+      write({
+        type: "intent",
+        intent: analyzed.intent,
+        provider: analyzed.provider,
+        model: analyzed.model,
+        totalTokens: analyzed.totalTokens,
+      });
+      if (analyzed.intent.needsClarification) {
+        write({
+          type: "clarify",
+          request: {
+            question: analyzed.intent.question,
+            options: analyzed.intent.options ?? [],
+            original: instruction,
+          },
+        });
+        unregisterAgentRun(req.params.id, controller);
+        res.end();
+        return;
+      }
+    } catch (error) {
+      write({
+        type: "error",
+        message: error instanceof Error ? error.message : "Intent analysis failed.",
+      });
+      unregisterAgentRun(req.params.id, controller);
+      res.end();
+      return;
+    }
   }
 
   try {
@@ -1030,6 +1087,7 @@ app.post("/api/projects/:id/ai/agent/stream", async (req, res) => {
         allowCommands: req.body?.allowCommands === true,
         language: typeof req.body?.language === "string" ? req.body.language : undefined,
         maxSteps: Number(req.body?.maxSteps) || undefined,
+        intent,
         mode:
           req.body?.mode === "ask" ? "ask" : req.body?.mode === "auto" ? "auto" : "coding",
         history: Array.isArray(req.body?.history)
@@ -1105,12 +1163,50 @@ app.post("/api/projects/:id/ai/loop/stream", async (req, res) => {
     }
   };
 
-  const clarification =
-    req.body?.clarified === true ? null : detectClarification(goal);
-  if (clarification) {
-    write({ type: "clarify", request: clarification });
-    res.end();
-    return;
+  let intent = undefined as Awaited<ReturnType<typeof analyzeIntent>>["intent"] | undefined;
+  const existing = await getProjectTaskQueue(req.params.id).catch(() => null);
+  const resuming =
+    Boolean(existing) &&
+    existing!.goal.trim() === goal.trim() &&
+    existing!.status !== "completed" &&
+    req.body?.replan !== true;
+  if (!resuming) {
+    try {
+      const analyzed = await analyzeIntent(req.params.id, goal, {
+        provider: typeof req.body?.provider === "string" ? req.body.provider : undefined,
+        model: typeof req.body?.model === "string" ? req.body.model : undefined,
+        language: typeof req.body?.language === "string" ? req.body.language : undefined,
+        activeFile: typeof req.body?.activeFile === "string" ? req.body.activeFile : undefined,
+        clarified: req.body?.clarified === true,
+      });
+      intent = analyzed.intent;
+      write({
+        type: "intent",
+        intent: analyzed.intent,
+        provider: analyzed.provider,
+        model: analyzed.model,
+        totalTokens: analyzed.totalTokens,
+      });
+      if (analyzed.intent.needsClarification) {
+        write({
+          type: "clarify",
+          request: {
+            question: analyzed.intent.question,
+            options: analyzed.intent.options ?? [],
+            original: goal,
+          },
+        });
+        res.end();
+        return;
+      }
+    } catch (error) {
+      write({
+        type: "error",
+        message: error instanceof Error ? error.message : "Intent analysis failed.",
+      });
+      res.end();
+      return;
+    }
   }
 
   try {
@@ -1128,6 +1224,7 @@ app.post("/api/projects/:id/ai/loop/stream", async (req, res) => {
         maxMinutes: Number(req.body?.maxMinutes) || undefined,
         replan: req.body?.replan === true,
         retryFailed: req.body?.retryFailed === true,
+        intent,
       },
       write,
       controller.signal,

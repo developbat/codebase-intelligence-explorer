@@ -73,6 +73,7 @@ import { chat, type ChatMessage } from "./providers";
 import { resolveProvider } from "./settings";
 import { recordUsage } from "./usage";
 import { recordModelOutcome } from "./modelStats";
+import type { IntentAnalysis } from "../../../shared/intent";
 import { pickAlternateAgentModel } from "./agents";
 import { getPrompt, renderPrompt } from "./prompts";
 import { listSkills, loadEnabledSkills, renderSkillsForPrompt, setSkillEnabled } from "../skills";
@@ -1627,16 +1628,6 @@ export function reportsRemainingWork(summary: string): boolean {
   return remaining && !none;
 }
 
-export function isFastEditTask(instruction: string, askMode: boolean): boolean {
-  const trimmed = instruction.trim();
-  return (
-    !askMode &&
-    trimmed.length <= 260 &&
-    ACTION_INTENT.test(trimmed) &&
-    !QUESTION_INTENT.test(trimmed) &&
-    !trimmed.endsWith("?")
-  );
-}
 
 export function readRangeCovered(
   ranges: { start: number; end: number; wholeFile: boolean }[],
@@ -2649,6 +2640,64 @@ export function queryProjectSymbols(
     .slice(0, Math.max(1, Math.min(50, limit)));
 }
 
+function buildPlanFromIntent(
+  intent: IntentAnalysis,
+  activeFile: string | undefined,
+  verificationCommand: string | undefined,
+): AiAgentPlan {
+  const needsWrite = intent.kind === "edit" || intent.kind === "scaffold";
+  const needsCommand =
+    intent.kind === "run" ||
+    intent.verification === "test" ||
+    intent.verification === "build";
+  const planIntent: AiAgentPlan["intent"] =
+    intent.kind === "question" || intent.kind === "analyze"
+      ? "question"
+      : intent.kind === "run"
+        ? "run"
+        : intent.kind === "scaffold"
+          ? "scaffold"
+          : intent.scope === "medium" || intent.scope === "large"
+            ? "multi_file"
+            : "edit";
+  const risk: AiAgentPlan["risk"] =
+    intent.scope === "large" ? "high" : needsWrite || needsCommand ? "medium" : "low";
+  const scope =
+    intent.areas.length > 0
+      ? intent.areas
+      : activeFile
+        ? [activeFile]
+        : [];
+  const steps: AiAgentPlan["steps"] =
+    planIntent === "question"
+      ? [
+          { label: "Inspect relevant files" },
+          { label: "Answer with evidence" },
+        ]
+      : planIntent === "run"
+        ? [
+            { label: "Inspect scripts and configuration" },
+            { label: "Run the requested command" },
+            { label: "Report the result" },
+          ]
+        : [
+            { label: intent.understanding },
+            ...(scope.length > 0 ? [{ label: `Focus: ${scope.slice(0, 4).join(", ")}` }] : []),
+            { label: "Make the focused change" },
+            { label: "Verify the result" },
+          ];
+  return {
+    intent: planIntent,
+    summary: intent.understanding,
+    needsWrite,
+    needsCommand,
+    risk,
+    scope,
+    verification: needsWrite ? verificationCommand : undefined,
+    steps,
+  };
+}
+
 export async function runAgentTask(
   projectId: string,
   instruction: string,
@@ -2664,6 +2713,7 @@ export async function runAgentTask(
     history?: { role: "user" | "assistant"; content: string }[];
     interactive?: boolean;
     forceFast?: boolean;
+    intent?: IntentAnalysis;
   } = {},
   emit: (event: AiAgentEvent) => void = () => {},
   signal?: AbortSignal,
@@ -2677,7 +2727,11 @@ export async function runAgentTask(
   let commandsApproved = !askMode && options.allowCommands === true;
   const interactive = !askMode && options.interactive !== false;
   const runId = `run_${crypto.randomUUID()}`;
-  const fastTask = options.forceFast === true || isFastEditTask(instruction, askMode);
+  const fastTask =
+    options.forceFast === true ||
+    (options.intent
+      ? options.intent.scope === "trivial" || options.intent.scope === "small"
+      : false);
   // maxSteps limits model turns, not individual tool actions from a multi-call reply.
   const maxSteps = Math.max(
     2,
@@ -2895,11 +2949,13 @@ export async function runAgentTask(
     return verification;
   };
 
-  const plan = buildAgentPlan(analysis, instruction, {
-    activeFile: options.activeFile,
-    askMode,
-    verificationCommand,
-  });
+  const plan = options.intent
+    ? buildPlanFromIntent(options.intent, options.activeFile, verificationCommand)
+    : buildAgentPlan(analysis, instruction, {
+        activeFile: options.activeFile,
+        askMode,
+        verificationCommand,
+      });
   activePlan = plan;
   const seed = await agentSeedContext(analysis, instruction, options.activeFile);
   const seedLimit = fastTask ? 6_000 : 12_000;

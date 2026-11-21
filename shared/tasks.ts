@@ -1,3 +1,5 @@
+import type { IntentAnalysis } from "./intent";
+
 export type ProjectTaskStatus = "pending" | "in_progress" | "done" | "failed" | "blocked";
 
 export type ProjectTaskEffort = "simple" | "standard" | "hard";
@@ -65,6 +67,7 @@ export interface ProjectTaskLoopOptions {
   activeFile?: string;
   replan?: boolean;
   retryFailed?: boolean;
+  intent?: IntentAnalysis;
 }
 
 export interface ProjectTaskLoopResult {

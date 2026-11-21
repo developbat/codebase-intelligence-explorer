@@ -10785,6 +10785,68 @@ button.canvas-stat {
   text-decoration: underline;
 }
 
+.studio-intent-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0 12px 6px;
+  padding: 8px 10px;
+  border: 1px solid rgba(167, 139, 250, 0.3);
+  border-radius: 8px;
+  background: rgba(124, 58, 237, 0.07);
+  color: #ddd2ff;
+}
+
+.studio-intent-notice > svg {
+  flex: none;
+  margin-top: 1px;
+  color: #a78bfa;
+}
+
+.studio-intent-notice > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.studio-intent-notice strong {
+  color: #eee7ff;
+  font-size: 9px;
+}
+
+.studio-intent-notice p {
+  margin: 0;
+  color: #c9bdf0;
+  font-size: 8.5px;
+  line-height: 1.45;
+}
+
+.studio-intent-notice small {
+  color: #8f80b8;
+  font-size: 7.5px;
+}
+
+.studio-intent-notice > button {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: #9c8fc4;
+  cursor: pointer;
+}
+
+.studio-intent-notice > button:hover {
+  background: rgba(148, 163, 184, 0.12);
+  color: #e7eef9;
+}
+
 .studio-model-notice {
   display: flex;
   align-items: flex-start;
