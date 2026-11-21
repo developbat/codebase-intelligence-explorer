@@ -3,13 +3,21 @@ import {
   AlertTriangle,
   FileText,
   FolderOpen,
+  Plus,
+  Trash2,
   Loader2,
   RefreshCw,
   Search,
   ShieldCheck,
   Sparkles,
 } from "lucide-react";
-import type { SkillDetail, SkillListResponse, SkillRecord } from "../../../shared/skills";
+import type {
+  SkillDetail,
+  SkillInstallScope,
+  SkillListResponse,
+  SkillRecord,
+  SkillSourcePreview,
+} from "../../../shared/skills";
 import { api } from "../api";
 import { useI18n } from "../i18n";
 
@@ -39,6 +47,16 @@ export function SkillsPanel({ projectId }: SkillsPanelProps) {
   const [fileLoading, setFileLoading] = useState(false);
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [reloadToken, setReloadToken] = useState(0);
+  const [addOpen, setAddOpen] = useState(false);
+  const [source, setSource] = useState("");
+  const [sourceRef, setSourceRef] = useState("");
+  const [scopeChoice, setScopeChoice] = useState<SkillInstallScope>("project");
+  const [enableOnInstall, setEnableOnInstall] = useState(false);
+  const [preview, setPreview] = useState<SkillSourcePreview | null>(null);
+  const [selectedCandidates, setSelectedCandidates] = useState<Set<string>>(new Set());
+  const [previewBusy, setPreviewBusy] = useState(false);
+  const [installBusy, setInstallBusy] = useState(false);
+  const [addMessage, setAddMessage] = useState<string | null>(null);
 
   async function load() {
     setLoading(true);
@@ -139,6 +157,88 @@ export function SkillsPanel({ projectId }: SkillsPanelProps) {
     }
   }
 
+  async function previewSource() {
+    if (!source.trim()) return;
+    setPreviewBusy(true);
+    setAddMessage(null);
+    try {
+      const result = await api.skills.previewSource(projectId, source.trim(), sourceRef.trim() || undefined);
+      setPreview(result);
+      setSelectedCandidates(new Set(result.candidates.map((candidate) => candidate.id)));
+    } catch (requestError) {
+      setAddMessage(
+        requestError instanceof Error ? requestError.message : t("Could not preview this skill source."),
+      );
+    } finally {
+      setPreviewBusy(false);
+    }
+  }
+
+  async function installSelected() {
+    if (!preview || selectedCandidates.size === 0) return;
+    setInstallBusy(true);
+    setAddMessage(null);
+    try {
+      const result = await api.skills.install(projectId, {
+        source: preview.source,
+        ref: preview.ref,
+        skills: [...selectedCandidates],
+        scope: scopeChoice,
+        enable: enableOnInstall,
+      });
+      setAddMessage(
+        t("{count} skills installed · {path}", {
+          count: result.installed.length,
+          path: result.registryPath,
+        }),
+      );
+      setAddOpen(false);
+      setPreview(null);
+      setSource("");
+      await load();
+    } catch (requestError) {
+      setAddMessage(
+        requestError instanceof Error ? requestError.message : t("Could not install these skills."),
+      );
+    } finally {
+      setInstallBusy(false);
+    }
+  }
+
+  async function updateSkill(skill: SkillDetail) {
+    if (busyKey) return;
+    setBusyKey(skill.key);
+    setAddMessage(null);
+    try {
+      const result = await api.skills.update(projectId, skill.key);
+      setAddMessage(t("Skill updated from {source}.", { source: result.ref }));
+      await load();
+    } catch (requestError) {
+      setAddMessage(
+        requestError instanceof Error ? requestError.message : t("Could not update this skill."),
+      );
+    } finally {
+      setBusyKey(null);
+    }
+  }
+
+  async function removeSkill(skill: SkillDetail) {
+    if (busyKey) return;
+    setBusyKey(skill.key);
+    try {
+      await api.skills.remove(projectId, skill.key);
+      setDetail(null);
+      setAddMessage(t("Skill removed."));
+      await load();
+    } catch (requestError) {
+      setAddMessage(
+        requestError instanceof Error ? requestError.message : t("Could not remove this skill."),
+      );
+    } finally {
+      setBusyKey(null);
+    }
+  }
+
   async function openFile(filePath: string) {
     if (!selectedKey) return;
     setFileLoading(true);
@@ -171,9 +271,14 @@ export function SkillsPanel({ projectId }: SkillsPanelProps) {
             {t("enabled")}
           </span>
         </div>
-        <button className="ghost-button" onClick={() => void load()} disabled={loading}>
-          <RefreshCw size={12} className={loading ? "spin" : ""} /> {t("Rescan skills")}
-        </button>
+        <div className="skills-head-actions">
+          <button className="ghost-button" onClick={() => setAddOpen((value) => !value)}>
+            <Plus size={12} /> {t("Add from GitHub")}
+          </button>
+          <button className="ghost-button" onClick={() => void load()} disabled={loading}>
+            <RefreshCw size={12} className={loading ? "spin" : ""} /> {t("Rescan skills")}
+          </button>
+        </div>
       </div>
 
       <p className="skills-intro">
@@ -181,6 +286,117 @@ export function SkillsPanel({ projectId }: SkillsPanelProps) {
           "Skills are SKILL.md instruction packs discovered from project and global agent folders. Disabled skills are never sent to the model. Scripts are not executed.",
         )}
       </p>
+
+      {addOpen ? (
+        <div className="skills-add-panel">
+          <div className="skills-add-row">
+            <input
+              className="text-input mono"
+              value={source}
+              onChange={(event) => setSource(event.target.value)}
+              placeholder="owner/repo, GitHub URL or local folder"
+              spellCheck={false}
+            />
+            <input
+              className="text-input mono"
+              value={sourceRef}
+              onChange={(event) => setSourceRef(event.target.value)}
+              placeholder={t("ref (optional)")}
+              spellCheck={false}
+            />
+            <button className="ghost-button" onClick={() => void previewSource()} disabled={previewBusy || !source.trim()}>
+              {previewBusy ? <Loader2 size={11} className="spin" /> : <Search size={11} />}
+              {t("Preview source")}
+            </button>
+          </div>
+          <div className="skills-add-options">
+            <label>
+              {t("Scope")}
+              <select
+                className="settings-select"
+                value={scopeChoice}
+                onChange={(event) => setScopeChoice(event.target.value as SkillInstallScope)}
+              >
+                <option value="project">{t("Project")}</option>
+                <option value="global">{t("Global")}</option>
+              </select>
+            </label>
+            <label className="checkbox-row">
+              <input
+                type="checkbox"
+                checked={enableOnInstall}
+                onChange={(event) => setEnableOnInstall(event.target.checked)}
+              />
+              {t("Enable after install")}
+            </label>
+            <span>{t("Scripts are not executed.")}</span>
+          </div>
+          {preview ? (
+            <div className="skills-candidates">
+              <div className="skills-candidates-head">
+                <span>
+                  {preview.repository ?? preview.source} · {preview.ref} · {preview.candidates.length}{" "}
+                  {t("skills")}
+                </span>
+                <button
+                  className="ghost-button"
+                  onClick={() =>
+                    setSelectedCandidates(
+                      selectedCandidates.size === preview.candidates.length
+                        ? new Set()
+                        : new Set(preview.candidates.map((candidate) => candidate.id)),
+                    )
+                  }
+                >
+                  {selectedCandidates.size === preview.candidates.length ? t("Select none") : t("Select all")}
+                </button>
+              </div>
+              {preview.candidates.map((candidate) => (
+                <label key={candidate.id} className="skills-candidate">
+                  <input
+                    type="checkbox"
+                    checked={selectedCandidates.has(candidate.id)}
+                    onChange={(event) => {
+                      setSelectedCandidates((current) => {
+                        const next = new Set(current);
+                        if (event.target.checked) next.add(candidate.id);
+                        else next.delete(candidate.id);
+                        return next;
+                      });
+                    }}
+                  />
+                  <span>
+                    <strong>{candidate.name}</strong>
+                    <small>
+                      {candidate.description || t("No description.")} · {candidate.files.length}{" "}
+                      {t("files")}
+                      {candidate.hasScripts ? ` · ${t("scripts")}` : ""}
+                    </small>
+                  </span>
+                </label>
+              ))}
+              {preview.warnings.map((warning) => (
+                <small key={warning} className="skills-candidate-warning">{warning}</small>
+              ))}
+              {addMessage ? <div className="skills-add-message">{addMessage}</div> : null}
+              <div className="skills-add-actions">
+                <button
+                  className="primary-button"
+                  onClick={() => void installSelected()}
+                  disabled={installBusy || selectedCandidates.size === 0}
+                >
+                  {installBusy ? <Loader2 size={12} className="spin" /> : <Plus size={12} />}
+                  {t("Install selected")}
+                </button>
+              </div>
+            </div>
+          ) : addMessage ? (
+            <div className="skills-add-message">{addMessage}</div>
+          ) : null}
+        </div>
+      ) : addMessage ? (
+        <div className="skills-add-message">{addMessage}</div>
+      ) : null}
 
       <div className="skills-toolbar">
         <div className="search-box skills-search">
@@ -222,7 +438,7 @@ export function SkillsPanel({ projectId }: SkillsPanelProps) {
           <strong>{t("No skills found yet")}</strong>
           <p>
             {t(
-              "Add a SKILL.md under .cie/skills, .agents/skills, .claude/skills or your global agent skills folder. GitHub install arrives in the next phase.",
+              "Add a SKILL.md under .cie/skills, .agents/skills, .claude/skills or your global agent skills folder, or install a skill pack from GitHub.",
             )}
           </p>
           <div className="skills-source-list">
@@ -325,6 +541,36 @@ export function SkillsPanel({ projectId }: SkillsPanelProps) {
 
                 <div className="skills-detail-badges">
                   <span className={`skill-scope is-${detail.scope}`}>{t(detail.scope)}</span>
+                  {detail.scope !== "external" &&
+                  (detail.source === "project-cie" || detail.source === "app-global") ? (
+                    <>
+                      <button
+                        className="ghost-button skills-remove"
+                        onClick={() => void updateSkill(detail)}
+                        disabled={busyKey === detail.key}
+                        title={t("Re-download from the recorded source")}
+                      >
+                        {busyKey === detail.key ? (
+                          <Loader2 size={9} className="spin" />
+                        ) : (
+                          <RefreshCw size={9} />
+                        )}
+                        {t("Update")}
+                      </button>
+                      <button
+                        className="ghost-button skills-remove"
+                        onClick={() => void removeSkill(detail)}
+                        disabled={busyKey === detail.key}
+                      >
+                        {busyKey === detail.key ? (
+                          <Loader2 size={9} className="spin" />
+                        ) : (
+                          <Trash2 size={9} />
+                        )}
+                        {t("Remove")}
+                      </button>
+                    </>
+                  ) : null}
                   {detail.allowedTools ? (
                     <span className="skill-tools" title={detail.allowedTools}>
                       {t("tools")}: {detail.allowedTools}

@@ -169,7 +169,7 @@ function stripQuotes(value: string): string {
   return trimmed;
 }
 
-function parseSkillMd(raw: string): ParsedSkillMd {
+export function parseSkillMd(raw: string): ParsedSkillMd {
   const text = raw.replace(/^\uFEFF/, "").replace(/\r\n/g, "\n");
   if (!text.startsWith("---")) return { body: text.trim() };
   const lines = text.split("\n");
@@ -206,7 +206,7 @@ function parseSkillMd(raw: string): ParsedSkillMd {
   };
 }
 
-function fileKind(relativePath: string): SkillFile["kind"] {
+export function fileKind(relativePath: string): SkillFile["kind"] {
   if (relativePath.toLowerCase().endsWith(".md")) return "markdown";
   if (relativePath.startsWith("scripts/") || SCRIPT_PATTERN.test(relativePath)) return "script";
   if (relativePath.startsWith("references/")) return "reference";

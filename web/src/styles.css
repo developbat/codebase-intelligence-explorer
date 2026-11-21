@@ -14472,7 +14472,150 @@ button.canvas-stat {
   font-size: 7px;
 }
 
+.skills-head-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.skills-add-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(12, 22, 36, 0.72);
+}
+
+.skills-add-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.skills-add-row .text-input {
+  flex: 1;
+  min-width: 0;
+  font-size: 8px;
+}
+
+.skills-add-row .text-input:nth-child(2) {
+  flex: 0 0 130px;
+}
+
+.skills-add-options {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  color: #7f9bbd;
+  font-size: 7.5px;
+}
+
+.skills-add-options > label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.skills-add-options .checkbox-row {
+  gap: 4px;
+}
+
+.skills-add-options select {
+  font-size: 7.5px;
+}
+
+.skills-candidates {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  max-height: 300px;
+  overflow: auto;
+  padding-top: 6px;
+  border-top: 1px solid var(--line);
+}
+
+.skills-candidates-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: #9fb6d1;
+  font-size: 7.5px;
+}
+
+.skills-candidate {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  padding: 5px 6px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.skills-candidate:hover {
+  border-color: var(--line);
+  background: rgba(94, 234, 212, 0.04);
+}
+
+.skills-candidate input {
+  margin-top: 2px;
+}
+
+.skills-candidate > span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.skills-candidate strong {
+  color: #e6effa;
+  font-size: 8px;
+  font-weight: 600;
+}
+
+.skills-candidate small,
+.skills-candidate-warning {
+  color: #6f89a7;
+  font-size: 7px;
+  line-height: 1.5;
+}
+
+.skills-candidate-warning {
+  color: #e6c284;
+}
+
+.skills-add-message {
+  padding: 5px 8px;
+  border: 1px solid rgba(94, 234, 212, 0.18);
+  border-radius: 6px;
+  background: rgba(94, 234, 212, 0.06);
+  color: #9fe8d8;
+  font-size: 7.5px;
+}
+
+.skills-add-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.skills-detail-badges .skills-remove {
+  padding: 2px 6px;
+  font-size: 7px;
+}
+
 @media (max-width: 900px) {
+  .skills-add-row {
+    flex-wrap: wrap;
+  }
+
+  .skills-add-row .text-input:nth-child(2) {
+    flex: 1 1 120px;
+  }
+
   .skills-layout {
     grid-template-columns: 1fr;
     max-height: none;

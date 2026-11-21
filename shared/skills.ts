@@ -54,3 +54,53 @@ export interface SkillFileResponse {
   bytes: number;
   content: string;
 }
+
+export type SkillInstallScope = "project" | "global";
+
+export interface SkillCandidate {
+  id: string;
+  name: string;
+  description: string;
+  relativePath: string;
+  body: string;
+  files: SkillFile[];
+  bytes: number;
+  hasScripts: boolean;
+  hasReferences: boolean;
+  allowedTools?: string;
+}
+
+export interface SkillSourcePreview {
+  source: string;
+  repository?: string;
+  ref: string;
+  hash?: string;
+  candidates: SkillCandidate[];
+  warnings: string[];
+}
+
+export interface SkillInstallRequest {
+  source: string;
+  ref?: string;
+  skills: string[];
+  scope: SkillInstallScope;
+  enable?: boolean;
+}
+
+export interface InstalledSkillInfo {
+  key: string;
+  name: string;
+  directory: string;
+  scope: SkillInstallScope;
+  source: string;
+  ref: string;
+  hash: string;
+  enabled: boolean;
+}
+
+export interface SkillInstallResult {
+  installed: InstalledSkillInfo[];
+  skipped: string[];
+  registryPath: string;
+  warnings: string[];
+}

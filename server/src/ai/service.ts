@@ -75,7 +75,8 @@ import { recordUsage } from "./usage";
 import { recordModelOutcome } from "./modelStats";
 import { pickAlternateAgentModel } from "./agents";
 import { getPrompt, renderPrompt } from "./prompts";
-import { loadEnabledSkills, renderSkillsForPrompt } from "../skills";
+import { listSkills, loadEnabledSkills, renderSkillsForPrompt, setSkillEnabled } from "../skills";
+import { installSkills, previewSkillSource, removeInstalledSkill } from "../skillInstall";
 import { requestPermission } from "./permissions";
 import {
   recordConversation,
@@ -1557,6 +1558,8 @@ const READ_ONLY_ACTIONS = new Set([
   "browser_check",
   "game_check",
   "graphic_check",
+  "list_skills",
+  "preview_skill_source",
   "list_mobile_devices",
 ]);
 const AGENT_MAX_WRITES = 10;
@@ -2425,6 +2428,8 @@ export function agentToolCatalog(
     '{"action":"browser_check","args":{"path":"index.html","steps":[{"action":"fill","selector":"#task-input","value":"Test"},{"action":"click","selector":"#add-task"},{"action":"expectText","selector":"#task-list","text":"Test"}]}}',
     '{"action":"list_project_tools","args":{}}',
     '{"action":"list_mobile_devices","args":{}}',
+    '{"action":"list_skills","args":{}}',
+    '{"action":"preview_skill_source","args":{"source":"owner/repo","ref":"main"}}',
     '{"action":"check_toolchains","args":{}}',
     '{"action":"game_check","args":{"path":"index.html","steps":[{"action":"expectVisible","selector":"canvas"}]}}',
     '{"action":"create_graphic","args":{"path":"assets/report.svg","kind":"bar","title":"Weekly progress","data":[{"label":"Mon","value":4},{"label":"Tue","value":7},{"label":"Wed","value":5}]}}',
@@ -2454,6 +2459,9 @@ export function agentToolCatalog(
     tools.push(`{"action":"install_mobile_app","args":{"platform":"android","id":"emulator-5554","path":"build/app.apk"}}${commandApproval}`);
     tools.push(`{"action":"launch_mobile_app","args":{"platform":"android","id":"emulator-5554","target":"com.example.app"}}${commandApproval}`);
     tools.push(`{"action":"install_toolchain","args":{"id":"godot"}}${commandApproval}  // brew/snap/choco install; requires user approval`);
+    tools.push(`{"action":"install_skill","args":{"source":"owner/repo","ref":"main","skills":["skill-folder"],"scope":"project","enable":true}}${approval}  // install SKILL.md packs; scripts are never executed`);
+    tools.push(`{"action":"set_skill_enabled","args":{"key":"project:project-cie:my-skill","enabled":true}}${approval}`);
+    tools.push(`{"action":"remove_skill","args":{"key":"project:project-cie:my-skill"}}  // always requires confirmation`);
     tools.push(`{"action":"mobile_check","args":{"platform":"android","id":"emulator-5554","boot":true,"screenshot":true,"logs":true,"openUrl":"http://localhost:8081"}}${commandApproval}`);
   }
   tools.push('{"action":"finish","args":{"summary":"what changed and how it was verified"}}');
@@ -3211,6 +3219,11 @@ export async function runAgentTask(
       "check_toolchains",
       "install_toolchain",
       "game_check",
+      "list_skills",
+      "preview_skill_source",
+      "install_skill",
+      "set_skill_enabled",
+      "remove_skill",
       "create_graphic",
       "graphic_check",
       "write_file",
@@ -3259,6 +3272,11 @@ export async function runAgentTask(
         mobile_check: "Checking a mobile device…",
         check_toolchains: "Checking toolchains…",
         game_check: "Checking the game scene…",
+        list_skills: "Listing skills…",
+        preview_skill_source: "Previewing a skill source…",
+        install_skill: "Installing skills…",
+        set_skill_enabled: "Updating a skill…",
+        remove_skill: "Removing a skill…",
         create_graphic: "Creating a graphic…",
         graphic_check: "Checking a graphic…",
         install_toolchain: "Installing a toolchain…",
@@ -3693,6 +3711,104 @@ export async function runAgentTask(
         invalidateReadCaches();
         observation = `Deleted ${deleted.path}${deleted.kind === "directory" ? " (empty directory)" : ""}.`;
         log("success", "Path deleted", deleted.path);
+        ok = true;
+      } else if (action === "list_skills") {
+        const listed = await listSkills(analysis.rootPath, projectId);
+        const enabled = listed.skills.filter((skill) => skill.enabled);
+        observation = [
+          `${listed.skills.length} skills · ${enabled.length} enabled`,
+          ...listed.skills.slice(0, 30).map(
+            (skill) =>
+              `${skill.enabled ? "on" : "off"} · ${skill.name} · ${skill.scope} · ${skill.key}${
+                skill.description ? ` · ${skill.description}` : ""
+              }`,
+          ),
+        ].join("\n");
+        log("info", "Skills listed", `${listed.skills.length} total · ${enabled.length} enabled`);
+        ok = true;
+      } else if (action === "preview_skill_source") {
+        const source = typeof args.source === "string" ? args.source.trim() : "";
+        if (!source) throw new Error("A skill source is required.");
+        const preview = await previewSkillSource(
+          source,
+          typeof args.ref === "string" ? args.ref : undefined,
+        );
+        observation = [
+          `${preview.repository ?? preview.source} · ${preview.ref} · ${preview.candidates.length} candidates`,
+          ...preview.candidates.map(
+            (candidate) =>
+              `${candidate.name} (id: ${candidate.id}) · ${candidate.files.length} files${
+                candidate.hasScripts ? " · contains scripts (never executed)" : ""
+              } · ${candidate.description || "no description"}`,
+          ),
+          ...preview.warnings,
+        ].join("\n");
+        log("success", "Skill source previewed", `${preview.candidates.length} candidates`);
+        ok = true;
+      } else if (action === "install_skill") {
+        const source = typeof args.source === "string" ? args.source.trim() : "";
+        const skills = Array.isArray(args.skills)
+          ? args.skills.filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+          : [];
+        if (!source) throw new Error("A skill source is required.");
+        if (skills.length === 0) {
+          throw new Error("Pass candidate ids from preview_skill_source in the skills array.");
+        }
+        const scope = args.scope === "global" ? "global" : "project";
+        const installAllowed = await requirePermission(
+          "write",
+          "install_skill",
+          source,
+          `Install ${skills.length} skill(s) into ${scope} skills. Scripts are stored but never executed.`,
+          { preview: skills.join(", ") },
+        );
+        if (!installAllowed) throw new Error("The user denied permission to install these skills.");
+        const installed = await installSkills(analysis.rootPath, projectId, {
+          source,
+          ref: typeof args.ref === "string" ? args.ref : undefined,
+          skills,
+          scope,
+          enable: args.enable === true,
+        });
+        observation = [
+          `Installed ${installed.installed.length} skill(s) into ${scope}.`,
+          ...installed.installed.map(
+            (skill) => `${skill.name} · ${skill.key}${skill.enabled ? " · enabled" : ""}`,
+          ),
+          `Registry: ${installed.registryPath}`,
+          ...installed.warnings,
+        ].join("\n");
+        log("success", "Skills installed", installed.installed.map((skill) => skill.name).join(", "));
+        ok = true;
+      } else if (action === "set_skill_enabled") {
+        const key = typeof args.key === "string" ? args.key.trim() : "";
+        const enabled = args.enabled === true;
+        if (!key) throw new Error("A skill key is required.");
+        const toggleAllowed = await requirePermission(
+          "write",
+          "set_skill_enabled",
+          key,
+          enabled ? "Enable this skill for the agent prompt." : "Disable this skill.",
+        );
+        if (!toggleAllowed) throw new Error("The user denied permission to update this skill.");
+        await setSkillEnabled(analysis.rootPath, projectId, key, enabled);
+        observation = `${key} is now ${enabled ? "enabled" : "disabled"}.`;
+        log("success", "Skill updated", key);
+        ok = true;
+      } else if (action === "remove_skill") {
+        const key = typeof args.key === "string" ? args.key.trim() : "";
+        if (!key) throw new Error("A skill key is required.");
+        const removeAllowed = await requirePermission(
+          "write",
+          "remove_skill",
+          key,
+          "Remove an installed skill folder. This cannot be undone.",
+          { destructive: true },
+        );
+        if (!removeAllowed) throw new Error("The user denied permission to remove this skill.");
+        await removeInstalledSkill(analysis.rootPath, projectId, key);
+        observation = `Removed ${key}.`;
+        log("success", "Skill removed", key);
         ok = true;
       } else if (action === "list_project_tools") {
         const projectTools = await listProjectTools(analysis.rootPath);

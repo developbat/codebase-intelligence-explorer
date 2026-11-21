@@ -89,6 +89,12 @@ import { discoverTests, runTests } from "./tests";
 import { listFolders } from "./fsbrowse";
 import { listProjectTemplates, scaffoldProject } from "./scaffold";
 import { getSkill, listSkills, readSkillFile, setSkillEnabled } from "./skills";
+import {
+  installSkills,
+  previewSkillSource,
+  removeInstalledSkill,
+  updateInstalledSkill,
+} from "./skillInstall";
 import { searchCode } from "./search";
 import { subscribeProjectEvents } from "./watcher";
 import { isWithin } from "./scanner";
@@ -604,6 +610,71 @@ app.get("/api/projects/:id/skills", async (req, res) => {
   try {
     const analysis = await loadAnalysis(req.params.id);
     res.json(await listSkills(analysis.rootPath, req.params.id));
+  } catch (error) {
+    handleError(res, error, 400);
+  }
+});
+
+app.post("/api/projects/:id/skills/preview", async (req, res) => {
+  try {
+    const source = typeof req.body?.source === "string" ? req.body.source : "";
+    if (!source.trim()) {
+      res.status(400).json({ error: "A skill source is required." });
+      return;
+    }
+    res.json(await previewSkillSource(source, typeof req.body?.ref === "string" ? req.body.ref : undefined));
+  } catch (error) {
+    handleError(res, error, 400);
+  }
+});
+
+app.post("/api/projects/:id/skills/install", async (req, res) => {
+  try {
+    const analysis = await loadAnalysis(req.params.id);
+    const source = typeof req.body?.source === "string" ? req.body.source : "";
+    const skills = Array.isArray(req.body?.skills) ? req.body.skills.filter((item: unknown): item is string => typeof item === "string") : [];
+    if (!source.trim() || skills.length === 0) {
+      res.status(400).json({ error: "Source and at least one skill are required." });
+      return;
+    }
+    res.json(
+      await installSkills(analysis.rootPath, req.params.id, {
+        source,
+        ref: typeof req.body?.ref === "string" ? req.body.ref : undefined,
+        skills,
+        scope: req.body?.scope === "global" ? "global" : "project",
+        enable: req.body?.enable === true,
+      }),
+    );
+  } catch (error) {
+    handleError(res, error, 400);
+  }
+});
+
+app.post("/api/projects/:id/skills/update", async (req, res) => {
+  try {
+    const analysis = await loadAnalysis(req.params.id);
+    const key = typeof req.body?.key === "string" ? req.body.key : "";
+    if (!key) {
+      res.status(400).json({ error: "A skill key is required." });
+      return;
+    }
+    res.json(await updateInstalledSkill(analysis.rootPath, req.params.id, key));
+  } catch (error) {
+    handleError(res, error, 400);
+  }
+});
+
+app.post("/api/projects/:id/skills/remove", async (req, res) => {
+  try {
+    const analysis = await loadAnalysis(req.params.id);
+    const key = typeof req.body?.key === "string" ? req.body.key : "";
+    if (!key) {
+      res.status(400).json({ error: "A skill key is required." });
+      return;
+    }
+    await removeInstalledSkill(analysis.rootPath, req.params.id, key);
+    res.json({ ok: true });
   } catch (error) {
     handleError(res, error, 400);
   }

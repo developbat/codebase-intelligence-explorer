@@ -87,8 +87,11 @@ import type {
 import type {
   SkillDetail,
   SkillFileResponse,
+  SkillInstallRequest,
+  SkillInstallResult,
   SkillListResponse,
   SkillRecord,
+  SkillSourcePreview,
 } from "../../shared/skills";
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
@@ -315,6 +318,33 @@ export const api = {
 
   skills: {
     list: (id: string) => request<SkillListResponse>(`/api/projects/${id}/skills`),
+
+    previewSource: (id: string, source: string, ref?: string) =>
+      request<SkillSourcePreview>(`/api/projects/${id}/skills/preview`, {
+        method: "POST",
+        body: JSON.stringify({ source, ref }),
+      }),
+
+    install: (id: string, input: SkillInstallRequest) =>
+      request<SkillInstallResult>(`/api/projects/${id}/skills/install`, {
+        method: "POST",
+        body: JSON.stringify(input),
+      }),
+
+    update: (id: string, key: string) =>
+      request<{ key: string; name: string; directory: string; scope: string; source: string; ref: string; hash: string; enabled: boolean }>(
+        `/api/projects/${id}/skills/update`,
+        {
+          method: "POST",
+          body: JSON.stringify({ key }),
+        },
+      ),
+
+    remove: (id: string, key: string) =>
+      request<{ ok: boolean }>(`/api/projects/${id}/skills/remove`, {
+        method: "POST",
+        body: JSON.stringify({ key }),
+      }),
 
     get: (id: string, key: string) =>
       request<SkillDetail>(`/api/projects/${id}/skills/${encodeURIComponent(key)}`),
