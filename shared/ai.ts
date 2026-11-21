@@ -527,6 +527,8 @@ export type AiAgentAction =
   | "install_mobile_app"
   | "launch_mobile_app"
   | "mobile_check"
+  | "check_toolchains"
+  | "install_toolchain"
   | "delegate_research"
   | "placeholder_asset"
   | "write_file"

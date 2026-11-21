@@ -75,6 +75,10 @@ import type {
 } from "../../shared/assetPlaceholder";
 import type { ProjectToolList } from "../../shared/projectTools";
 import type {
+  ToolchainInstallResult,
+  ToolchainReport,
+} from "../../shared/toolchains";
+import type {
   SkillDetail,
   SkillFileResponse,
   SkillListResponse,
@@ -487,6 +491,14 @@ export const api = {
   },
 
   mobileDevices: () => request<MobileDeviceReport>("/api/mobile/devices"),
+
+  toolchains: () => request<ToolchainReport>("/api/toolchains"),
+
+  installToolchain: (id: string) =>
+    request<ToolchainInstallResult>("/api/toolchains/install", {
+      method: "POST",
+      body: JSON.stringify({ id }),
+    }),
 
   mobileBoot: (projectId: string, platform: "ios" | "android", id: string) =>
     request<MobileBootResult>(`/api/projects/${projectId}/mobile/devices/boot`, {

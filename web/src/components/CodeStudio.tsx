@@ -342,6 +342,12 @@ function quickCommandsFor(analysis: AnalysisResult): string[] {
   if (analysis.languages.php > 0 && !analysis.frameworks?.includes("Laravel")) {
     commands.push("vendor/bin/phpunit");
   }
+  if (analysis.frameworks?.includes("Flutter")) {
+    commands.push("flutter test", "flutter analyze");
+  }
+  if (analysis.files.some((file) => file.path === "project.godot")) {
+    commands.push("godot --headless --path . --quit");
+  }
   if (commands.length === 0) commands.push("npm test");
   return [...new Set(commands)].slice(0, 4);
 }

@@ -22,6 +22,7 @@ import { SkillsPanel } from "./SkillsPanel";
 import { AgentSettingsPanel } from "./AgentSettingsPanel";
 import { ModelCatalogPanel } from "./ModelCatalogPanel";
 import { MobileDevicesPanel } from "./MobileDevicesPanel";
+import { ToolchainsPanel } from "./ToolchainsPanel";
 
 export type SettingsTab =
   | "general"
@@ -232,6 +233,7 @@ export function SettingsScreen({
                 </section>
 
                 <MobileDevicesPanel projectId={projectId} />
+                <ToolchainsPanel />
 
                 <section className="settings-section">
                   <h3>{t("Local data")}</h3>

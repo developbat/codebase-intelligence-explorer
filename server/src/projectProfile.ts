@@ -561,6 +561,16 @@ export async function detectProjectProfile(
     }
   }
 
+  // Godot
+  if (exists("project.godot")) {
+    addEcosystem("Godot");
+    addFramework("Godot 4");
+    addManifest("project.godot");
+    addManager("godot");
+    addCommand(buildCommands, "godot --headless --path . --quit");
+    addCommand(typecheckCommands, "godot --headless --path . --quit");
+  }
+
   // C / C++ + CMake
   if (exists("CMakeLists.txt")) {
     addEcosystem("C/C++");

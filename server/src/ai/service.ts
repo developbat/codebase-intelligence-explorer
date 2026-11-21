@@ -58,6 +58,7 @@ import {
   runMobileCheck,
 } from "../mobileDevices";
 import { createPlaceholderAsset } from "../placeholderAssets";
+import { checkToolchains, installToolchain } from "../toolchains";
 import {
   deleteProjectPath,
   readSourceFile,
@@ -2419,6 +2420,7 @@ export function agentToolCatalog(
     '{"action":"browser_check","args":{"path":"index.html","steps":[{"action":"fill","selector":"#task-input","value":"Test"},{"action":"click","selector":"#add-task"},{"action":"expectText","selector":"#task-list","text":"Test"}]}}',
     '{"action":"list_project_tools","args":{}}',
     '{"action":"list_mobile_devices","args":{}}',
+    '{"action":"check_toolchains","args":{}}',
   ];
   if (!readOnly) {
     const approval = writeApproved ? "" : "  // requires user approval";
@@ -2443,6 +2445,7 @@ export function agentToolCatalog(
     tools.push(`{"action":"mobile_logs","args":{"platform":"android","id":"emulator-5554","limit":200}}${commandApproval}`);
     tools.push(`{"action":"install_mobile_app","args":{"platform":"android","id":"emulator-5554","path":"build/app.apk"}}${commandApproval}`);
     tools.push(`{"action":"launch_mobile_app","args":{"platform":"android","id":"emulator-5554","target":"com.example.app"}}${commandApproval}`);
+    tools.push(`{"action":"install_toolchain","args":{"id":"godot"}}${commandApproval}  // brew/snap/choco install; requires user approval`);
     tools.push(`{"action":"mobile_check","args":{"platform":"android","id":"emulator-5554","boot":true,"screenshot":true,"logs":true,"openUrl":"http://localhost:8081"}}${commandApproval}`);
   }
   tools.push('{"action":"finish","args":{"summary":"what changed and how it was verified"}}');
@@ -3197,6 +3200,8 @@ export async function runAgentTask(
       "install_mobile_app",
       "launch_mobile_app",
       "mobile_check",
+      "check_toolchains",
+      "install_toolchain",
       "write_file",
       "replace_in_file",
       "replace_many",
@@ -3241,6 +3246,8 @@ export async function runAgentTask(
         install_mobile_app: "Installing a mobile app…",
         launch_mobile_app: "Launching a mobile app…",
         mobile_check: "Checking a mobile device…",
+        check_toolchains: "Checking toolchains…",
+        install_toolchain: "Installing a toolchain…",
         run_project_tool: "Running saved project tool…",
         delegate_research: "Delegating read-only research…",
         placeholder_asset: "Creating a placeholder asset…",
@@ -3768,6 +3775,36 @@ export async function runAgentTask(
         observation = result.message;
         log("success", "Mobile app launched", target);
         ok = true;
+      } else if (action === "check_toolchains") {
+        const report = await checkToolchains();
+        observation = report.tools
+          .map(
+            (tool) =>
+              `${tool.installed ? "installed" : "MISSING"} · ${tool.name}${tool.version ? ` · ${tool.version}` : ""}${
+                !tool.installed && tool.installCommands.length > 0
+                  ? ` · install: ${tool.installCommands.find((item) => item.platform === report.platform)?.command ?? "manual"}`
+                  : ""
+              }`,
+          )
+          .join("\n");
+        log("info", "Toolchains checked", `${report.missing.length} missing`);
+        ok = true;
+      } else if (action === "install_toolchain") {
+        const id = String(args.id ?? "").trim();
+        if (!id) throw new Error("A toolchain id is required.");
+        const allowed = await requirePermission(
+          "command",
+          "install_toolchain",
+          id,
+          `Install the missing ${id} toolchain using the platform package manager.`,
+        );
+        if (!allowed) throw new Error("The user denied permission to install the toolchain.");
+        const result = await installToolchain(id);
+        observation = result.ok
+          ? `${id} installed${result.command ? ` with: ${result.command}` : ""}.\n${result.output}`
+          : `${id} install failed${result.command ? ` (${result.command})` : ""}.\n${result.output}`;
+        log(result.ok ? "success" : "error", result.ok ? "Toolchain installed" : "Toolchain install failed", id);
+        ok = result.ok;
       } else if (action === "mobile_check") {
         const allowed = await requirePermission(
           "command",

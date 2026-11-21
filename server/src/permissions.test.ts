@@ -109,8 +109,8 @@ test("agent tool catalog marks approval requirements and hides writes in read-on
   assert.match(needsApproval, /rename_path[\s\S]*always requires confirmation/);
 
   const approved = agentToolCatalog(false, true, true);
-  assert.doesNotMatch(approved, /write_file[\s\S]*requires user approval/);
-  assert.doesNotMatch(approved, /run_command[\s\S]*requires user approval/);
+  assert.doesNotMatch(approved, /write_file[^\n]*requires user approval/);
+  assert.doesNotMatch(approved, /run_command[^\n]*requires user approval/);
 
   const readOnly = agentToolCatalog(true, false, false);
   assert.doesNotMatch(readOnly, /write_file/);

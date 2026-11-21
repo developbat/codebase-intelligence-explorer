@@ -33,6 +33,7 @@ import {
   runMobileCheck,
 } from "./mobileDevices";
 import { createPlaceholderAsset } from "./placeholderAssets";
+import { checkToolchains, installToolchain } from "./toolchains";
 import { getProjectTaskQueue, planProjectTasks, runProjectLoop } from "./ai/loop";
 import { getPublicSettings, updateAiSettings } from "./ai/settings";
 import { getPrompt, getPromptVersion, listPrompts, renderPrompt, resetPrompt, savePrompt } from "./ai/prompts";
@@ -478,6 +479,27 @@ app.post("/api/projects/:id/assets/placeholder", async (req, res) => {
         fps: Number(req.body?.fps) || undefined,
       }),
     );
+  } catch (error) {
+    handleError(res, error, 400);
+  }
+});
+
+app.get("/api/toolchains", async (_req, res) => {
+  try {
+    res.json(await checkToolchains());
+  } catch (error) {
+    handleError(res, error);
+  }
+});
+
+app.post("/api/toolchains/install", async (req, res) => {
+  try {
+    const id = typeof req.body?.id === "string" ? req.body.id : "";
+    if (!id) {
+      res.status(400).json({ error: "A toolchain id is required." });
+      return;
+    }
+    res.json(await installToolchain(id));
   } catch (error) {
     handleError(res, error, 400);
   }
