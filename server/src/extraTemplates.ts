@@ -1548,6 +1548,178 @@ html, body, #app {
   ],
 };
 
+const GODOT_GAME: ExtraTemplateDefinition = {
+  id: "godot-game",
+  name: "Godot 4 game",
+  description: "Godot 4 project skeleton with score, timer, pointer input, restart and a runnable main scene.",
+  language: "GDScript",
+  framework: "Godot 4",
+  files: [
+    "project.godot",
+    "Main.tscn",
+    "Main.gd",
+    "icon.svg",
+    "README.md",
+    ".gitignore",
+  ],
+  suggestedCommands: ["godot --path .", "godot --path . --editor"],
+  build: (name) => [
+    {
+      path: "project.godot",
+      content: `; Engine configuration file.
+; Edit with the Godot editor or by hand.
+config_version=5
+
+[application]
+
+config/name="${name}"
+run/main_scene="res://Main.tscn"
+config/features=PackedStringArray("4.3", "GL Compatibility")
+config/icon="res://icon.svg"
+
+[display]
+
+window/size/viewport_width=960
+window/size/viewport_height=600
+window/stretch/mode="canvas_items"
+window/handheld/orientation=1
+
+[rendering]
+
+renderer/rendering_method="gl_compatibility"
+renderer/rendering_method.mobile="gl_compatibility"
+environment/defaults/default_clear_color=Color(0.027, 0.043, 0.071, 1)
+`,
+    },
+    {
+      path: "Main.tscn",
+      content: `[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://Main.gd" id="1_main"]
+
+[node name="Main" type="Node2D"]
+script = ExtResource("1_main")
+
+[node name="Score" type="Label" parent="."]
+offset_left = 24.0
+offset_top = 18.0
+offset_right = 240.0
+offset_bottom = 52.0
+theme_override_font_sizes/font_size = 24
+text = "Score 0"
+
+[node name="Time" type="Label" parent="."]
+offset_left = 24.0
+offset_top = 52.0
+offset_right = 240.0
+offset_bottom = 80.0
+theme_override_font_sizes/font_size = 16
+text = "Time 30s"
+
+[node name="Status" type="Label" parent="."]
+offset_left = 240.0
+offset_top = 540.0
+offset_right = 720.0
+offset_bottom = 580.0
+theme_override_font_sizes/font_size = 16
+text = "Tap the glowing target"
+horizontal_alignment = 1
+
+[node name="Timer" type="Timer" parent="."]
+wait_time = 1.0
+autostart = true
+`,
+    },
+    {
+      path: "Main.gd",
+      content: `extends Node2D
+
+var score := 0
+var time_left := 30
+var target_position := Vector2(480, 300)
+var target_radius := 48.0
+var running := true
+
+@onready var score_label: Label = $Score
+@onready var time_label: Label = $Time
+@onready var status_label: Label = $Status
+@onready var timer: Timer = $Timer
+
+func _ready() -> void:
+	timer.timeout.connect(_on_timer_timeout)
+	_randomize_target()
+	queue_redraw()
+
+func _draw() -> void:
+	draw_circle(target_position, target_radius * 1.9, Color(0.369, 0.918, 0.831, 0.16))
+	draw_circle(target_position, target_radius, Color(0.369, 0.918, 0.831, 1.0))
+	draw_circle(target_position + Vector2(-12, -14), target_radius * 0.22, Color(0.043, 0.071, 0.11, 1.0))
+	draw_circle(target_position + Vector2(12, -14), target_radius * 0.22, Color(0.043, 0.071, 0.11, 1.0))
+
+func _unhandled_input(event: InputEvent) -> void:
+	if not running:
+		if event is InputEventMouseButton and event.pressed:
+			_restart()
+		return
+	if event is InputEventMouseButton and event.pressed:
+		if event.position.distance_to(target_position) <= target_radius + 8:
+			score += 1
+			score_label.text = "Score " + str(score)
+			_randomize_target()
+			queue_redraw()
+
+func _on_timer_timeout() -> void:
+	if not running:
+		return
+	time_left -= 1
+	time_label.text = "Time " + str(time_left) + "s"
+	if time_left <= 0:
+		_end_game()
+
+func _randomize_target() -> void:
+	target_position = Vector2(randf_range(120, 840), randf_range(120, 470))
+	target_radius = randf_range(34, 58)
+
+func _end_game() -> void:
+	running = false
+	timer.stop()
+	status_label.text = "Game over · " + str(score) + " points · tap to restart"
+
+func _restart() -> void:
+	score = 0
+	time_left = 30
+	running = true
+	timer.start()
+	score_label.text = "Score 0"
+	time_label.text = "Time 30s"
+	status_label.text = "Tap the glowing target"
+	_randomize_target()
+	queue_redraw()
+`,
+    },
+    {
+      path: "icon.svg",
+      content: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128"><rect width="128" height="128" rx="28" fill="#070b12"/><circle cx="64" cy="64" r="36" fill="#5eead4"/><circle cx="52" cy="52" r="7" fill="#070b12"/><circle cx="76" cy="52" r="7" fill="#070b12"/></svg>
+`,
+    },
+    {
+      path: "README.md",
+      content: readme(name, "A Godot 4.3 arcade starter.", [
+        "## Run",
+        "",
+        "```bash",
+        "godot --path .",
+        "```",
+        "",
+        "Or open `project.godot` in Godot 4.3+.",
+        "",
+        "The game uses the main scene, built-in UI labels and pointer input; no external assets are required.",
+      ]),
+    },
+    { path: ".gitignore", content: ".godot/\n*.import\n.DS_Store\n" },
+  ],
+};
+
 export const EXTRA_TEMPLATES: ExtraTemplateDefinition[] = [
   CANVAS_GAME,
   PWA_MOBILE,
@@ -1555,4 +1727,5 @@ export const EXTRA_TEMPLATES: ExtraTemplateDefinition[] = [
   FLUTTER_MOBILE,
   PHASER_GAME,
   THREE_SCENE,
+  GODOT_GAME,
 ];

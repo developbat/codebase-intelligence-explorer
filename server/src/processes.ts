@@ -206,6 +206,9 @@ export async function detectDevCommands(rootPath: string): Promise<DevCommandSug
   if (await exists("pubspec.yaml")) {
     suggestions.push({ label: "Flutter web", command: "flutter run -d chrome", kind: "node" });
   }
+  if (await exists("project.godot")) {
+    suggestions.push({ label: "Godot", command: "godot --path .", kind: "node" });
+  }
   if ((await exists("go.mod")) && suggestions.length === 0) {
     suggestions.push({ label: "Go", command: "go run .", kind: "go" });
   }

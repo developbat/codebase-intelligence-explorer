@@ -507,7 +507,8 @@ export type ProjectTemplateId =
   | "expo-mobile"
   | "flutter-mobile"
   | "phaser-game"
-  | "three-scene";
+  | "three-scene"
+  | "godot-game";
 
 export interface ProjectTemplate {
   id: ProjectTemplateId;

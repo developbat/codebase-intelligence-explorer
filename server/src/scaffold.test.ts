@@ -27,6 +27,7 @@ test("lists the built-in project templates", () => {
       "flutter-mobile",
       "phaser-game",
       "three-scene",
+      "godot-game",
     ],
   );
   for (const template of templates) {
@@ -201,6 +202,26 @@ test("scaffolds Phaser and Three.js game templates", async () => {
     };
     assert.ok(threePackage.dependencies.three);
     assert.match(await fs.readFile(path.join(three.rootPath, "src", "main.ts"), "utf8"), /WebGLRenderer/);
+  } finally {
+    await fs.rm(parent, { recursive: true, force: true });
+  }
+});
+
+test("scaffolds a Godot 4 game project", async () => {
+  const parent = await tempParent();
+  try {
+    const result = await scaffoldProject({
+      parentPath: parent,
+      name: "godot-demo",
+      template: "godot-game",
+    });
+    const project = await fs.readFile(path.join(result.rootPath, "project.godot"), "utf8");
+    assert.match(project, /run\/main_scene="res:\/\/Main.tscn"/);
+    const scene = await fs.readFile(path.join(result.rootPath, "Main.tscn"), "utf8");
+    assert.match(scene, /ext_resource type="Script"/);
+    const script = await fs.readFile(path.join(result.rootPath, "Main.gd"), "utf8");
+    assert.match(script, /extends Node2D/);
+    assert.match(script, /_unhandled_input/);
   } finally {
     await fs.rm(parent, { recursive: true, force: true });
   }
