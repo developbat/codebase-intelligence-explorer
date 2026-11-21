@@ -36,6 +36,20 @@ export interface MobileLogsResult {
   output: string;
 }
 
+export interface MobileInstallResult {
+  platform: "ios" | "android";
+  deviceId: string;
+  path: string;
+  message: string;
+}
+
+export interface MobileLaunchResult {
+  platform: "ios" | "android";
+  deviceId: string;
+  target: string;
+  message: string;
+}
+
 export interface MobileDeviceReport {
   ios: MobileDevice[];
   android: MobileDevice[];

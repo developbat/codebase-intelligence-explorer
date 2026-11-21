@@ -930,8 +930,215 @@ const styles = StyleSheet.create({
   ],
 };
 
+function dartPackage(name: string): string {
+  const value = name
+    .toLowerCase()
+    .replace(/[^a-z0-9_]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 50);
+  return /^[a-z]/.test(value) ? value : `app_${value || "mobile"}`;
+}
+
+const FLUTTER_MOBILE: ExtraTemplateDefinition = {
+  id: "flutter-mobile",
+  name: "Flutter mobile app",
+  description: "Material 3 Flutter app with a task list, widget test and web/mobile run scripts.",
+  language: "Dart",
+  framework: "Flutter",
+  files: [
+    "pubspec.yaml",
+    "lib/main.dart",
+    "test/widget_test.dart",
+    "analysis_options.yaml",
+    "README.md",
+    ".gitignore",
+  ],
+  suggestedCommands: ["flutter pub get", "flutter run -d chrome", "flutter test"],
+  build: (name) => {
+    const packageName = dartPackage(name);
+    return [
+      {
+        path: "pubspec.yaml",
+        content: `name: ${packageName}
+description: ${name} mobile app
+publish_to: "none"
+version: 1.0.0+1
+
+environment:
+  sdk: ">=3.4.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: true
+`,
+      },
+      {
+        path: "lib/main.dart",
+        content: `import 'package:flutter/material.dart';
+
+void main() {
+  runApp(const MyApp());
+}
+
+class MyApp extends StatelessWidget {
+  const MyApp({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: '${name}',
+      debugShowCheckedModeBanner: false,
+      theme: ThemeData(
+        useMaterial3: true,
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: const Color(0xFF2563EB),
+          brightness: Brightness.dark,
+        ),
+        scaffoldBackgroundColor: const Color(0xFF070B12),
+      ),
+      home: const HomePage(),
+    );
+  }
+}
+
+class HomePage extends StatefulWidget {
+  const HomePage({super.key});
+
+  @override
+  State<HomePage> createState() => _HomePageState();
+}
+
+class _HomePageState extends State<HomePage> {
+  final TextEditingController _controller = TextEditingController();
+  final List<String> _tasks = <String>[];
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _addTask() {
+    final value = _controller.text.trim();
+    if (value.isEmpty) return;
+    setState(() {
+      _tasks.add(value);
+      _controller.clear();
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('${name}')),
+      body: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(18),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: _controller,
+                      onSubmitted: (_) => _addTask(),
+                      decoration: const InputDecoration(
+                        hintText: 'Add a task',
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  FilledButton(onPressed: _addTask, child: const Text('Add')),
+                ],
+              ),
+              const SizedBox(height: 14),
+              Text('\${_tasks.length} task(s)'),
+              const SizedBox(height: 8),
+              Expanded(
+                child: ListView.builder(
+                  itemCount: _tasks.length,
+                  itemBuilder: (context, index) => Card(
+                    child: ListTile(
+                      leading: const Icon(Icons.check_circle_outline),
+                      title: Text(_tasks[index]),
+                      trailing: IconButton(
+                        icon: const Icon(Icons.delete_outline),
+                        onPressed: () => setState(() => _tasks.removeAt(index)),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+`,
+      },
+      {
+        path: "test/widget_test.dart",
+        content: `import 'package:flutter_test/flutter_test.dart';
+import 'package:${packageName}/main.dart';
+
+void main() {
+  testWidgets('renders the app title and task input', (WidgetTester tester) async {
+    await tester.pumpWidget(const MyApp());
+    expect(find.text('${name}'), findsOneWidget);
+    expect(find.text('Add'), findsOneWidget);
+  });
+}
+`,
+      },
+      {
+        path: "analysis_options.yaml",
+        content: `include: package:flutter_lints/flutter.yaml\n`,
+      },
+      {
+        path: "README.md",
+        content: readme(name, "A Material 3 Flutter mobile starter.", [
+          "## Run",
+          "",
+          "```bash",
+          "flutter pub get",
+          "flutter run -d chrome",
+          "```",
+          "",
+          "For a device or emulator:",
+          "",
+          "```bash",
+          "flutter run",
+          "```",
+          "",
+          "## Verify",
+          "",
+          "```bash",
+          "flutter test",
+          "flutter analyze",
+          "```",
+        ]),
+      },
+      { path: ".gitignore", content: `${GITIGNORE}.dart_tool/\n.flutter-plugins\n.flutter-plugins-dependencies\n` },
+    ];
+  },
+};
+
 export const EXTRA_TEMPLATES: ExtraTemplateDefinition[] = [
   CANVAS_GAME,
   PWA_MOBILE,
   EXPO_MOBILE,
+  FLUTTER_MOBILE,
 ];

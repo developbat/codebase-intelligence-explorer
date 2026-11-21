@@ -61,6 +61,8 @@ import type { ModelHealth } from "../../shared/modelHealth";
 import type {
   MobileBootResult,
   MobileDeviceReport,
+  MobileInstallResult,
+  MobileLaunchResult,
   MobileLogsResult,
   MobileOpenUrlResult,
   MobileScreenshotResult,
@@ -506,6 +508,18 @@ export const api = {
     request<MobileLogsResult>(`/api/projects/${projectId}/mobile/devices/logs`, {
       method: "POST",
       body: JSON.stringify({ platform, id, limit }),
+    }),
+
+  mobileInstall: (projectId: string, platform: "ios" | "android", id: string, pathValue: string) =>
+    request<MobileInstallResult>(`/api/projects/${projectId}/mobile/devices/install`, {
+      method: "POST",
+      body: JSON.stringify({ platform, id, path: pathValue }),
+    }),
+
+  mobileLaunch: (projectId: string, platform: "ios" | "android", id: string, target: string) =>
+    request<MobileLaunchResult>(`/api/projects/${projectId}/mobile/devices/launch`, {
+      method: "POST",
+      body: JSON.stringify({ platform, id, target }),
     }),
 
   placeholderAsset: (projectId: string, input: PlaceholderAssetRequest) =>

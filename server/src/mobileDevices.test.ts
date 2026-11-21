@@ -26,3 +26,18 @@ test("parses iOS simulators and Android devices", () => {
   assert.equal(android[1].state, "offline");
   assert.equal(parseAvds("Pixel_9\nTablet_API_35\n").length, 2);
 });
+
+test("mobile install rejects paths outside the project", async () => {
+  const fs = await import("node:fs/promises");
+  const os = await import("node:os");
+  const path = await import("node:path");
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "cie-mobile-"));
+  try {
+    await assert.rejects(
+      () => import("./mobileDevices").then((m) => m.installMobileApp(root, "android", "emulator-5554", "../outside.apk")),
+      /does not exist|outside the project/i,
+    );
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});

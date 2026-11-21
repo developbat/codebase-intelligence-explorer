@@ -24,6 +24,7 @@ test("lists the built-in project templates", () => {
       "canvas-game",
       "pwa-mobile",
       "expo-mobile",
+      "flutter-mobile",
     ],
   );
   for (const template of templates) {
@@ -154,6 +155,27 @@ test("scaffolds canvas game, PWA and Expo mobile templates", async () => {
     assert.equal(expoPackage.scripts.web, "expo start --web");
     assert.ok(expoPackage.dependencies.expo);
     assert.match(await fs.readFile(path.join(expo.rootPath, "App.tsx"), "utf8"), /SafeAreaView/);
+  } finally {
+    await fs.rm(parent, { recursive: true, force: true });
+  }
+});
+
+test("scaffolds a Flutter mobile app", async () => {
+  const parent = await tempParent();
+  try {
+    const result = await scaffoldProject({
+      parentPath: parent,
+      name: "flutter-demo",
+      template: "flutter-mobile",
+    });
+    const pubspec = await fs.readFile(path.join(result.rootPath, "pubspec.yaml"), "utf8");
+    assert.match(pubspec, /name: flutter_demo/);
+    assert.match(pubspec, /flutter:/);
+    const main = await fs.readFile(path.join(result.rootPath, "lib", "main.dart"), "utf8");
+    assert.match(main, /MaterialApp/);
+    assert.match(main, /flutter-demo/);
+    const testFile = await fs.readFile(path.join(result.rootPath, "test", "widget_test.dart"), "utf8");
+    assert.match(testFile, /package:flutter_demo\/main.dart/);
   } finally {
     await fs.rm(parent, { recursive: true, force: true });
   }

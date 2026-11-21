@@ -25,6 +25,8 @@ import { listProjectTools } from "./projectTools";
 import {
   bootMobileDevice,
   captureMobileScreenshot,
+  installMobileApp,
+  launchMobileApp,
   listMobileDevices,
   openMobileUrl,
   readMobileLogs,
@@ -357,6 +359,37 @@ app.post("/api/projects/:id/mobile/devices/boot", async (req, res) => {
       return;
     }
     res.json(await bootMobileDevice(platform, id));
+  } catch (error) {
+    handleError(res, error, 400);
+  }
+});
+
+app.post("/api/projects/:id/mobile/devices/install", async (req, res) => {
+  try {
+    const analysis = await loadAnalysis(req.params.id);
+    const platform = req.body?.platform === "android" ? "android" : "ios";
+    const id = typeof req.body?.id === "string" ? req.body.id : "";
+    const pathValue = typeof req.body?.path === "string" ? req.body.path : "";
+    if (!id || !pathValue) {
+      res.status(400).json({ error: "Device id and app path are required." });
+      return;
+    }
+    res.json(await installMobileApp(analysis.rootPath, platform, id, pathValue));
+  } catch (error) {
+    handleError(res, error, 400);
+  }
+});
+
+app.post("/api/projects/:id/mobile/devices/launch", async (req, res) => {
+  try {
+    const platform = req.body?.platform === "android" ? "android" : "ios";
+    const id = typeof req.body?.id === "string" ? req.body.id : "";
+    const target = typeof req.body?.target === "string" ? req.body.target : "";
+    if (!id || !target) {
+      res.status(400).json({ error: "Device id and package/bundle id are required." });
+      return;
+    }
+    res.json(await launchMobileApp(platform, id, target));
   } catch (error) {
     handleError(res, error, 400);
   }

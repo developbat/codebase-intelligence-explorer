@@ -4,6 +4,8 @@ import path from "node:path";
 import { promisify } from "node:util";
 import type {
   MobileBootResult,
+  MobileInstallResult,
+  MobileLaunchResult,
   MobileDevice,
   MobileDeviceReport,
   MobileLogsResult,
@@ -225,4 +227,62 @@ export async function readMobileLogs(
   if (output === null) throw new Error("Could not read mobile logs.");
   const trimmed = output.split("\n").slice(-lines).join("\n").slice(-24_000);
   return { platform, deviceId: id, lines: trimmed.split("\n").length, output: trimmed };
+}
+
+export async function installMobileApp(
+  rootPath: string,
+  platform: "ios" | "android",
+  id: string,
+  inputPath: string,
+): Promise<MobileInstallResult> {
+  const trimmed = inputPath.trim();
+  if (!trimmed) throw new Error("An app or APK path is required.");
+  const absolute = path.isAbsolute(trimmed) ? path.resolve(trimmed) : path.resolve(rootPath, trimmed);
+  const realRoot = await fs.realpath(rootPath);
+  const realApp = await fs.realpath(absolute).catch(() => {
+    throw new Error("App/APK path does not exist.");
+  });
+  if (!realApp.startsWith(`${realRoot}${path.sep}`) && realApp !== realRoot) {
+    throw new Error("App/APK path is outside the project.");
+  }
+  if (platform === "ios") {
+    const stat = await fs.stat(realApp);
+    if (!stat.isDirectory() || !realApp.endsWith(".app")) {
+      throw new Error("iOS install expects a built .app directory.");
+    }
+    const result = await run("xcrun", ["simctl", "install", id, realApp]);
+    if (result === null) throw new Error("Could not install the iOS app. Is the simulator booted?");
+    return { platform, deviceId: id, path: path.relative(rootPath, realApp), message: "iOS app installed." };
+  }
+  if (!realApp.endsWith(".apk")) throw new Error("Android install expects an .apk file.");
+  const result = await run("adb", ["-s", id, "install", "-r", realApp]);
+  if (result === null) throw new Error("Could not install the APK. Is the emulator/device connected?");
+  return { platform, deviceId: id, path: path.relative(rootPath, realApp), message: result.trim().slice(-300) || "APK installed." };
+}
+
+export async function launchMobileApp(
+  platform: "ios" | "android",
+  id: string,
+  target: string,
+): Promise<MobileLaunchResult> {
+  const value = target.trim();
+  if (!value) throw new Error("A package name or bundle id is required.");
+  if (platform === "ios") {
+    const result = await run("xcrun", ["simctl", "launch", id, value]);
+    if (result === null) throw new Error("Could not launch the iOS app.");
+    return { platform, deviceId: id, target: value, message: "iOS app launched." };
+  }
+  const result = await run("adb", [
+    "-s",
+    id,
+    "shell",
+    "monkey",
+    "-p",
+    value,
+    "-c",
+    "android.intent.category.LAUNCHER",
+    "1",
+  ]);
+  if (result === null) throw new Error("Could not launch the Android app.");
+  return { platform, deviceId: id, target: value, message: "Android app launched." };
 }

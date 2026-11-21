@@ -50,6 +50,8 @@ import {
 import {
   bootMobileDevice,
   captureMobileScreenshot,
+  installMobileApp,
+  launchMobileApp,
   listMobileDevices,
   openMobileUrl,
   readMobileLogs,
@@ -2436,6 +2438,8 @@ export function agentToolCatalog(
     tools.push(`{"action":"mobile_screenshot","args":{"platform":"ios","id":"SIMULATOR-UDID"}}${commandApproval}`);
     tools.push(`{"action":"open_mobile_url","args":{"platform":"android","id":"emulator-5554","url":"http://localhost:8081"}}${commandApproval}`);
     tools.push(`{"action":"mobile_logs","args":{"platform":"android","id":"emulator-5554","limit":200}}${commandApproval}`);
+    tools.push(`{"action":"install_mobile_app","args":{"platform":"android","id":"emulator-5554","path":"build/app.apk"}}${commandApproval}`);
+    tools.push(`{"action":"launch_mobile_app","args":{"platform":"android","id":"emulator-5554","target":"com.example.app"}}${commandApproval}`);
   }
   tools.push('{"action":"finish","args":{"summary":"what changed and how it was verified"}}');
   return tools.map((tool) => `- ${tool}`).join("\n");
@@ -3186,6 +3190,8 @@ export async function runAgentTask(
       "mobile_screenshot",
       "open_mobile_url",
       "mobile_logs",
+      "install_mobile_app",
+      "launch_mobile_app",
       "write_file",
       "replace_in_file",
       "replace_many",
@@ -3227,6 +3233,8 @@ export async function runAgentTask(
         mobile_screenshot: "Capturing a mobile screenshot…",
         open_mobile_url: "Opening a URL on the mobile device…",
         mobile_logs: "Reading mobile logs…",
+        install_mobile_app: "Installing a mobile app…",
+        launch_mobile_app: "Launching a mobile app…",
         run_project_tool: "Running saved project tool…",
         delegate_research: "Delegating read-only research…",
         placeholder_asset: "Creating a placeholder asset…",
@@ -3721,6 +3729,38 @@ export async function runAgentTask(
         evidence.push({ path: shot.path, label: "Mobile screenshot" });
         observation = `Mobile screenshot saved: ${shot.path} (${shot.bytes} bytes).`;
         log("success", "Mobile screenshot captured", shot.path);
+        ok = true;
+      } else if (action === "install_mobile_app") {
+        const platform = args.platform === "android" ? "android" : "ios";
+        const id = String(args.id ?? "").trim();
+        const appPath = String(args.path ?? "").trim();
+        if (!id || !appPath) throw new Error("Device id and app path are required.");
+        const allowed = await requirePermission(
+          "command",
+          "install_mobile_app",
+          appPath,
+          `Install ${appPath} on ${platform} ${id}.`,
+        );
+        if (!allowed) throw new Error("The user denied permission to install the app.");
+        const result = await installMobileApp(analysis.rootPath, platform, id, appPath);
+        observation = result.message;
+        log("success", "Mobile app installed", result.path);
+        ok = true;
+      } else if (action === "launch_mobile_app") {
+        const platform = args.platform === "android" ? "android" : "ios";
+        const id = String(args.id ?? "").trim();
+        const target = String(args.target ?? "").trim();
+        if (!id || !target) throw new Error("Device id and package/bundle id are required.");
+        const allowed = await requirePermission(
+          "command",
+          "launch_mobile_app",
+          target,
+          `Launch ${target} on ${platform} ${id}.`,
+        );
+        if (!allowed) throw new Error("The user denied permission to launch the app.");
+        const result = await launchMobileApp(platform, id, target);
+        observation = result.message;
+        log("success", "Mobile app launched", target);
         ok = true;
       } else if (action === "open_mobile_url") {
         const platform = args.platform === "android" ? "android" : "ios";

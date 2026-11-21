@@ -504,7 +504,8 @@ export type ProjectTemplateId =
   | "php-web"
   | "canvas-game"
   | "pwa-mobile"
-  | "expo-mobile";
+  | "expo-mobile"
+  | "flutter-mobile";
 
 export interface ProjectTemplate {
   id: ProjectTemplateId;
