@@ -245,6 +245,13 @@ export async function pickAlternateAgentModel(exclude?: {
     return !isModelUnhealthy(item, settings.modelHealth);
   });
   const pool = healthy.length > 0 ? healthy : candidates;
+  // Prefer an explicitly cheap/fast-looking model before role-based picks.
+  // This prevents a run that lost its original model from moving every later
+  // task onto an expensive reviewer/planner model.
+  const cheap = pool.find((candidate) =>
+    /flash|mini|nano|free|deepseek|ling|small|lite|qwen/i.test(candidate.model),
+  );
+  if (cheap) return cheap;
   const catalogFast = pool.find((candidate) => {
     const item = catalogLookup(catalog, candidate.provider, candidate.model);
     return item?.roles.includes("fast");
