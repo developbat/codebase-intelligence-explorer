@@ -58,6 +58,11 @@ import type {
   BrowserCheckResult,
 } from "../../shared/browserCheck";
 import type { ModelHealth } from "../../shared/modelHealth";
+import type { MobileDeviceReport } from "../../shared/mobileDevices";
+import type {
+  PlaceholderAssetRequest,
+  PlaceholderAssetResult,
+} from "../../shared/assetPlaceholder";
 import type { ProjectToolList } from "../../shared/projectTools";
 import type {
   SkillDetail,
@@ -470,6 +475,14 @@ export const api = {
       return request<FolderListing>(`/api/fs/list?${params.toString()}`);
     },
   },
+
+  mobileDevices: () => request<MobileDeviceReport>("/api/mobile/devices"),
+
+  placeholderAsset: (projectId: string, input: PlaceholderAssetRequest) =>
+    request<PlaceholderAssetResult>(`/api/projects/${projectId}/assets/placeholder`, {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
 
   projectTools: (projectId: string) =>
     request<ProjectToolList>(`/api/projects/${projectId}/tools`),

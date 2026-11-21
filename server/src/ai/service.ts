@@ -47,6 +47,8 @@ import {
   listProjectTools,
   recordProjectToolRun,
 } from "../projectTools";
+import { listMobileDevices } from "../mobileDevices";
+import { createPlaceholderAsset } from "../placeholderAssets";
 import {
   deleteProjectPath,
   readSourceFile,
@@ -1540,6 +1542,7 @@ const READ_ONLY_ACTIONS = new Set([
   "git_blame",
   "list_project_tools",
   "browser_check",
+  "list_mobile_devices",
 ]);
 const AGENT_MAX_WRITES = 10;
 const AGENT_MAX_COMMANDS = 5;
@@ -2406,6 +2409,7 @@ export function agentToolCatalog(
     '{"action":"git_blame","args":{"path":"src/app.ts","startLine":10,"endLine":25}}',
     '{"action":"browser_check","args":{"path":"index.html","steps":[{"action":"fill","selector":"#task-input","value":"Test"},{"action":"click","selector":"#add-task"},{"action":"expectText","selector":"#task-list","text":"Test"}]}}',
     '{"action":"list_project_tools","args":{}}',
+    '{"action":"list_mobile_devices","args":{}}',
   ];
   if (!readOnly) {
     const approval = writeApproved ? "" : "  // requires user approval";
@@ -2419,6 +2423,7 @@ export function agentToolCatalog(
     tools.push(`{"action":"run_command","args":{"command":"npm test","cwd":"."}}${commandApproval}`);
     tools.push(`{"action":"run_project_tool","args":{"name":"ui-check"}}${commandApproval}  // runs a saved project tool/script`);
     tools.push('{"action":"delegate_research","args":{"goal":"specific read-only question to investigate"}}  // returns a compact summary only');
+    tools.push(`{"action":"placeholder_asset","args":{"path":"assets/player.svg","kind":"sprite","width":128,"height":128,"label":"player"}}${approval}`);
   }
   tools.push('{"action":"finish","args":{"summary":"what changed and how it was verified"}}');
   return tools.map((tool) => `- ${tool}`).join("\n");
@@ -3163,8 +3168,11 @@ export async function runAgentTask(
       "list_project_tools",
       "run_project_tool",
       "delegate_research",
+      "placeholder_asset",
+      "list_mobile_devices",
       "write_file",
       "replace_in_file",
+      "replace_many",
       "rename_path",
       "delete_file",
       "format_file",
@@ -3198,8 +3206,10 @@ export async function runAgentTask(
         git_blame: "Reading git blame…",
         browser_check: "Inspecting the preview in a browser…",
         list_project_tools: "Listing saved project tools…",
+        list_mobile_devices: "Listing mobile devices…",
         run_project_tool: "Running saved project tool…",
         delegate_research: "Delegating read-only research…",
+        placeholder_asset: "Creating a placeholder asset…",
         write_file: "Writing file…",
         replace_in_file: "Editing file…",
         rename_path: "Moving path…",
@@ -3642,6 +3652,25 @@ export async function runAgentTask(
             : "No saved project tools. Create a reusable script under .cie/agent/tools/ and it will be auto-registered.";
         log("info", "Project tools listed", `${projectTools.tools.length} tools`);
         ok = true;
+      } else if (action === "list_mobile_devices") {
+        const report = await listMobileDevices();
+        const ios = report.ios
+          .map((device) => `- ${device.state} · ${device.name} · ${device.id}${device.runtime ? ` · ${device.runtime}` : ""}`)
+          .join("\n");
+        const android = report.android
+          .map((device) => `- ${device.state} · ${device.name} · ${device.id}`)
+          .join("\n");
+        observation = [
+          `iOS Simulators: ${report.tools.xcrun ? report.ios.length : "unavailable"}`,
+          ios,
+          `Android devices/emulators: ${report.tools.adb || report.tools.emulator ? report.android.length : "unavailable"}`,
+          android,
+          ...report.warnings,
+        ]
+          .filter(Boolean)
+          .join("\n");
+        log("info", "Mobile devices listed", `${report.ios.length} iOS · ${report.android.length} Android`);
+        ok = true;
       } else if (action === "browser_check") {
         const browserPath = typeof args.path === "string" ? args.path : "index.html";
         const rawSteps = Array.isArray(args.steps) ? args.steps : [];
@@ -3747,6 +3776,32 @@ export async function runAgentTask(
           tokenTotal.totalTokens += delegated.tokenUsage.totalTokens;
         }
         log("info", "Research subagent completed", goal.slice(0, 160));
+      } else if (action === "placeholder_asset") {
+        const assetPath = normalizeAgentPath(analysis.rootPath, args.path);
+        if (!assetPath) throw new Error("An asset path is required.");
+        if (isSecretAgentPath(assetPath)) throw new Error("Writing environment, key or Git internals assets is denied.");
+        const assetAllowed = await requirePermission(
+          "write",
+          "placeholder_asset",
+          assetPath,
+          "Create a deterministic SVG placeholder asset.",
+          { preview: String(args.kind ?? "icon") },
+        );
+        if (!assetAllowed) throw new Error("The user denied permission to create this asset.");
+        const created = await createPlaceholderAsset(analysis.rootPath, {
+          path: assetPath,
+          kind: args.kind as Parameters<typeof createPlaceholderAsset>[1]["kind"],
+          width: Number(args.width) || undefined,
+          height: Number(args.height) || undefined,
+          label: typeof args.label === "string" ? args.label : undefined,
+          color: typeof args.color === "string" ? args.color : undefined,
+          background: typeof args.background === "string" ? args.background : undefined,
+        });
+        if (!changedFiles.includes(created.path)) changedFiles.push(created.path);
+        evidence.push({ path: created.path, label: "Placeholder asset" });
+        observation = `Created ${created.kind} SVG placeholder: ${created.path} (${created.bytes} bytes).`;
+        log("success", "Placeholder asset created", created.path);
+        ok = true;
       } else if (action === "write_file") {
         if (changedFiles.length >= AGENT_MAX_WRITES) throw new Error(`Write limit reached (${AGENT_MAX_WRITES} files).`);
         const filePath = normalizeAgentPath(analysis.rootPath, args.path);

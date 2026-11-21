@@ -22,6 +22,8 @@ import { clearModelCatalog, getModelCatalog, importModelCatalog } from "./ai/cat
 import { getModelHealth } from "./ai/modelStats";
 import { isBrowserCheckAvailable, runBrowserCheck } from "./browserCheck";
 import { listProjectTools } from "./projectTools";
+import { listMobileDevices } from "./mobileDevices";
+import { createPlaceholderAsset } from "./placeholderAssets";
 import { getProjectTaskQueue, planProjectTasks, runProjectLoop } from "./ai/loop";
 import { getPublicSettings, updateAiSettings } from "./ai/settings";
 import { getPrompt, getPromptVersion, listPrompts, renderPrompt, resetPrompt, savePrompt } from "./ai/prompts";
@@ -335,6 +337,33 @@ app.get("/api/ai/models", async (req, res) => {
         refresh: req.query.refresh === "1" || req.query.refresh === "true",
       }),
     });
+  } catch (error) {
+    handleError(res, error);
+  }
+});
+
+app.post("/api/projects/:id/assets/placeholder", async (req, res) => {
+  try {
+    const analysis = await loadAnalysis(req.params.id);
+    res.status(201).json(
+      await createPlaceholderAsset(analysis.rootPath, {
+        path: typeof req.body?.path === "string" ? req.body.path : "",
+        kind: req.body?.kind,
+        width: Number(req.body?.width) || undefined,
+        height: Number(req.body?.height) || undefined,
+        label: typeof req.body?.label === "string" ? req.body.label : undefined,
+        color: typeof req.body?.color === "string" ? req.body.color : undefined,
+        background: typeof req.body?.background === "string" ? req.body.background : undefined,
+      }),
+    );
+  } catch (error) {
+    handleError(res, error, 400);
+  }
+});
+
+app.get("/api/mobile/devices", async (_req, res) => {
+  try {
+    res.json(await listMobileDevices());
   } catch (error) {
     handleError(res, error);
   }

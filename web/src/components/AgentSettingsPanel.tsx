@@ -58,6 +58,11 @@ export function AgentSettingsPanel({ settings, onSaved }: AgentSettingsPanelProp
   const [autoResult, setAutoResult] = useState<AiAgentAutoResult | null>(null);
   const [health, setHealth] = useState<ModelHealth[]>([]);
   const [healthBusy, setHealthBusy] = useState(false);
+  const [healthSettings, setHealthSettings] = useState({
+    protocolFailureLimit: 2,
+    emptyFailureLimit: 2,
+    penaltyPerFailure: 10,
+  });
 
   async function loadHealth() {
     setHealthBusy(true);
@@ -84,6 +89,7 @@ export function AgentSettingsPanel({ settings, onSaved }: AgentSettingsPanelProp
       if (configured) next[role] = { provider: configured.provider, model: configured.model };
     }
     setRoles(next);
+    setHealthSettings(settings.modelHealth);
   }, [settings]);
 
   const providers = useMemo(
@@ -123,6 +129,23 @@ export function AgentSettingsPanel({ settings, onSaved }: AgentSettingsPanelProp
       setMessage({ ok: false, text: error instanceof Error ? error.message : t("Could not save agent roles.") });
     } finally {
       setBusy(null);
+    }
+  }
+
+  async function saveHealthSettings() {
+    setHealthBusy(true);
+    setMessage(null);
+    try {
+      const next = await api.ai.updateSettings({ modelHealth: healthSettings });
+      onSaved(next);
+      setMessage({ ok: true, text: t("Model health thresholds saved.") });
+    } catch (error) {
+      setMessage({
+        ok: false,
+        text: error instanceof Error ? error.message : t("Could not save model health thresholds."),
+      });
+    } finally {
+      setHealthBusy(false);
     }
   }
 
@@ -298,6 +321,56 @@ export function AgentSettingsPanel({ settings, onSaved }: AgentSettingsPanelProp
           <button className="ghost-button" onClick={() => void loadHealth()} disabled={healthBusy}>
             {healthBusy ? <Loader2 size={11} className="spin" /> : <RefreshCw size={11} />}
             {t("Refresh")}
+          </button>
+        </div>
+        <div className="agent-health-thresholds">
+          <label>
+            {t("Protocol failure limit")}
+            <input
+              type="number"
+              min={1}
+              max={10}
+              value={healthSettings.protocolFailureLimit}
+              onChange={(event) =>
+                setHealthSettings((current) => ({
+                  ...current,
+                  protocolFailureLimit: Number(event.target.value) || 1,
+                }))
+              }
+            />
+          </label>
+          <label>
+            {t("Empty response limit")}
+            <input
+              type="number"
+              min={1}
+              max={10}
+              value={healthSettings.emptyFailureLimit}
+              onChange={(event) =>
+                setHealthSettings((current) => ({
+                  ...current,
+                  emptyFailureLimit: Number(event.target.value) || 1,
+                }))
+              }
+            />
+          </label>
+          <label>
+            {t("Penalty per failure")}
+            <input
+              type="number"
+              min={1}
+              max={100}
+              value={healthSettings.penaltyPerFailure}
+              onChange={(event) =>
+                setHealthSettings((current) => ({
+                  ...current,
+                  penaltyPerFailure: Number(event.target.value) || 1,
+                }))
+              }
+            />
+          </label>
+          <button className="ghost-button" onClick={() => void saveHealthSettings()} disabled={healthBusy}>
+            {t("Save thresholds")}
           </button>
         </div>
         {health.length === 0 ? (

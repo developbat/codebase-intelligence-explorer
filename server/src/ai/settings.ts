@@ -4,6 +4,7 @@ import type {
   AiAgentRole,
   AiAgentRoleConfig,
   AiCustomProviderInput,
+  AiModelHealthSettings,
   AiProviderId,
   AiSettingsInput,
   AiSettingsPublic,
@@ -43,9 +44,32 @@ interface StoredSettings {
   providers: Partial<Record<AiProviderId, StoredProvider>>;
   customProviders: StoredCustomProvider[];
   agentRoles: StoredAgentRoles;
+  modelHealth: AiModelHealthSettings;
 }
 
 export const AI_AGENT_ROLES: AiAgentRole[] = ["main", "planner", "fast", "reviewer"];
+const DEFAULT_MODEL_HEALTH: AiModelHealthSettings = {
+  protocolFailureLimit: 2,
+  emptyFailureLimit: 2,
+  penaltyPerFailure: 10,
+};
+
+function normalizeModelHealth(input?: Partial<AiModelHealthSettings>): AiModelHealthSettings {
+  return {
+    protocolFailureLimit: Math.max(
+      1,
+      Math.min(10, Math.round(input?.protocolFailureLimit ?? DEFAULT_MODEL_HEALTH.protocolFailureLimit)),
+    ),
+    emptyFailureLimit: Math.max(
+      1,
+      Math.min(10, Math.round(input?.emptyFailureLimit ?? DEFAULT_MODEL_HEALTH.emptyFailureLimit)),
+    ),
+    penaltyPerFailure: Math.max(
+      1,
+      Math.min(100, Math.round(input?.penaltyPerFailure ?? DEFAULT_MODEL_HEALTH.penaltyPerFailure)),
+    ),
+  };
+}
 
 export interface ResolvedProvider {
   id: AiProviderId;
@@ -108,6 +132,7 @@ function defaults(): StoredSettings {
     providers,
     customProviders: [],
     agentRoles: { main, planner: main, fast: main, reviewer: main },
+    modelHealth: DEFAULT_MODEL_HEALTH,
   };
 }
 
@@ -176,6 +201,7 @@ async function loadStored(): Promise<StoredSettings> {
       providers,
       customProviders,
       agentRoles,
+      modelHealth: normalizeModelHealth(parsed.modelHealth),
     };
   } catch {
     return base;
@@ -244,6 +270,7 @@ export async function getPublicSettings(): Promise<AiSettingsPublic> {
     defaultModel: stored.defaultModel,
     providers,
     agentRoles,
+    modelHealth: stored.modelHealth,
   };
 }
 
@@ -390,6 +417,10 @@ export async function updateAiSettings(input: AiSettingsInput): Promise<AiSettin
       provider: stored.defaultProvider,
       model: stored.defaultModel,
     };
+  }
+
+  if (input.modelHealth) {
+    stored.modelHealth = normalizeModelHealth({ ...stored.modelHealth, ...input.modelHealth });
   }
 
   if (input.agentRoles) {

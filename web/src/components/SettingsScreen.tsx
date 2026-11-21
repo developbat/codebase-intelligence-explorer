@@ -21,6 +21,7 @@ import { PromptManagerDialog } from "./PromptManagerDialog";
 import { SkillsPanel } from "./SkillsPanel";
 import { AgentSettingsPanel } from "./AgentSettingsPanel";
 import { ModelCatalogPanel } from "./ModelCatalogPanel";
+import { MobileDevicesPanel } from "./MobileDevicesPanel";
 
 export type SettingsTab =
   | "general"
@@ -229,6 +230,8 @@ export function SettingsScreen({
                     ) : null}
                   </div>
                 </section>
+
+                <MobileDevicesPanel />
 
                 <section className="settings-section">
                   <h3>{t("Local data")}</h3>

@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import type { AiModelHealthSettings } from "../../../shared/ai";
 import type { ModelHealth } from "../../../shared/modelHealth";
 import { getDataDir } from "../store";
 
@@ -74,12 +75,34 @@ export async function getModelHealth(): Promise<Record<string, ModelHealth>> {
   return (await readStats()).models;
 }
 
-export function modelHealthPenalty(health: ModelHealth | undefined): number {
+const DEFAULT_HEALTH_SETTINGS: AiModelHealthSettings = {
+  protocolFailureLimit: 2,
+  emptyFailureLimit: 2,
+  penaltyPerFailure: 10,
+};
+
+export function modelHealthPenalty(
+  health: ModelHealth | undefined,
+  settings: AiModelHealthSettings = DEFAULT_HEALTH_SETTINGS,
+): number {
   if (!health) return 0;
-  const failures = health.protocolFailures * 10 + health.emptyFailures * 5;
+  const failures =
+    health.protocolFailures * settings.penaltyPerFailure +
+    health.emptyFailures * Math.max(1, Math.round(settings.penaltyPerFailure / 2));
   const successOffset = Math.min(8, Math.floor(health.successCount / 2));
   const penalty = Math.max(0, failures - successOffset);
   return penalty === 0 ? 0 : -penalty;
+}
+
+export function isModelUnhealthy(
+  health: ModelHealth | undefined,
+  settings: AiModelHealthSettings = DEFAULT_HEALTH_SETTINGS,
+): boolean {
+  if (!health) return false;
+  return (
+    health.protocolFailures >= settings.protocolFailureLimit ||
+    health.emptyFailures >= settings.emptyFailureLimit
+  );
 }
 
 export async function modelHealthByProviderModel(): Promise<Map<string, ModelHealth>> {

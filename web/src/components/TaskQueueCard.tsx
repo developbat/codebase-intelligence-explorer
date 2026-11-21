@@ -13,6 +13,7 @@ interface TaskQueueCardProps {
   queue: ProjectTaskQueue;
   defaultOpen?: boolean;
   onRetryFailed?: () => void;
+  onOpenFile?: (path: string) => void;
 }
 
 function statusIcon(status: ProjectTask["status"]) {
@@ -26,6 +27,7 @@ export function TaskQueueCard({
   queue,
   defaultOpen = false,
   onRetryFailed,
+  onOpenFile,
 }: TaskQueueCardProps) {
   const { t } = useI18n();
   const done = queue.tasks.filter((task) => task.status === "done").length;
@@ -86,15 +88,30 @@ export function TaskQueueCard({
         ))}
       </div>
       <div className="task-queue-foot">
-        <span>
-          {t("Context notes")}: <code>{queue.contextPath}</code>
-        </span>
-        <span>
-          {t("Plan")}: <code>{queue.planPath}</code>
-        </span>
-        <span>
-          {t("Digest")}: <code>{queue.digestPath}</code>
-        </span>
+        <button
+          className="task-queue-file-link"
+          onClick={() => onOpenFile?.(queue.digestPath)}
+          disabled={!onOpenFile}
+          title={queue.digestPath}
+        >
+          {t("Digest")}: <code>{queue.digestPath.split("/").pop()}</code>
+        </button>
+        <button
+          className="task-queue-file-link"
+          onClick={() => onOpenFile?.(queue.planPath)}
+          disabled={!onOpenFile}
+          title={queue.planPath}
+        >
+          {t("Plan")}: <code>{queue.planPath.split("/").pop()}</code>
+        </button>
+        <button
+          className="task-queue-file-link"
+          onClick={() => onOpenFile?.(queue.contextPath)}
+          disabled={!onOpenFile}
+          title={queue.contextPath}
+        >
+          {t("Context notes")}: <code>{queue.contextPath.split("/").pop()}</code>
+        </button>
         {failed > 0 && onRetryFailed ? (
           <button
             className="task-queue-retry"

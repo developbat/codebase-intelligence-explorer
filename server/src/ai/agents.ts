@@ -10,6 +10,7 @@ import { getPublicSettings, updateAiSettings } from "./settings";
 import { getModelCatalog } from "./catalog";
 import {
   healthKey,
+  isModelUnhealthy,
   modelHealthByProviderModel,
   modelHealthPenalty,
 } from "./modelStats";
@@ -108,9 +109,9 @@ export async function autoConfigureAgents(): Promise<AiAgentAutoResult> {
   const main = pickMain(providers, settings.defaultProvider, settings.defaultModel);
   if (!main.model) throw new Error("The main provider has no model. Add a model in Models.");
   const mainHealth = health.get(healthKey(main.provider.id, main.model));
-  if (mainHealth && mainHealth.protocolFailures >= 2) {
+  if (mainHealth && isModelUnhealthy(mainHealth, settings.modelHealth)) {
     warnings.push(
-      `Main model has ${mainHealth.protocolFailures} tool-protocol failures. Consider a different main model.`,
+      `Main model is over the configured health limit (${mainHealth.protocolFailures} protocol, ${mainHealth.emptyFailures} empty). Consider a different main model.`,
     );
   }
 
@@ -125,7 +126,10 @@ export async function autoConfigureAgents(): Promise<AiAgentAutoResult> {
       let score = fastScore(
         model,
         catalogLookup(catalog, provider.id, model),
-        modelHealthPenalty(health.get(healthKey(provider.id, model))),
+        modelHealthPenalty(
+          health.get(healthKey(provider.id, model)),
+          settings.modelHealth,
+        ),
       );
       if (provider.id === main.provider.id) score += 5;
       if (score > fastBest) {
@@ -236,7 +240,7 @@ export async function pickAlternateAgentModel(exclude?: {
   if (candidates.length === 0) return null;
   const healthy = candidates.filter((candidate) => {
     const item = health.get(healthKey(candidate.provider, candidate.model));
-    return !item || item.protocolFailures < 2;
+    return !isModelUnhealthy(item, settings.modelHealth);
   });
   const pool = healthy.length > 0 ? healthy : candidates;
   const catalogBest = pool.find((candidate) => {

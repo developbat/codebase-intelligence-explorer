@@ -190,11 +190,18 @@ export interface AiAgentAutoResult {
   warnings: string[];
 }
 
+export interface AiModelHealthSettings {
+  protocolFailureLimit: number;
+  emptyFailureLimit: number;
+  penaltyPerFailure: number;
+}
+
 export interface AiSettingsPublic {
   defaultProvider: AiProviderId;
   defaultModel: string;
   providers: AiProviderState[];
   agentRoles: AiAgentRoleState[];
+  modelHealth: AiModelHealthSettings;
 }
 
 export interface AiCustomProviderInput {
@@ -219,6 +226,7 @@ export interface AiSettingsInput {
   customProvider?: AiCustomProviderInput;
   removeProviderId?: string;
   agentRoles?: Partial<Record<AiAgentRole, AiAgentRoleConfig>>;
+  modelHealth?: Partial<AiModelHealthSettings>;
 }
 
 export interface AiUsage {
@@ -511,7 +519,9 @@ export type AiAgentAction =
   | "browser_check"
   | "list_project_tools"
   | "run_project_tool"
+  | "list_mobile_devices"
   | "delegate_research"
+  | "placeholder_asset"
   | "write_file"
   | "rename_path"
   | "delete_file"

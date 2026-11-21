@@ -3057,6 +3057,7 @@ export function CodeStudio({
                 <TaskQueueCard
                   queue={taskQueue}
                   defaultOpen
+                  onOpenFile={(path) => void openFile(path)}
                   onRetryFailed={() => {
                     if (chatBusy || !taskQueue) return;
                     void askProject(taskQueue.goal, false, { retryFailed: true });
@@ -3123,6 +3124,7 @@ export function CodeStudio({
                 <TaskQueueCard
                   queue={taskQueue}
                   defaultOpen
+                  onOpenFile={(path) => void openFile(path)}
                   onRetryFailed={() => {
                     if (!taskQueue) return;
                     setTaskPanelOpen(false);
