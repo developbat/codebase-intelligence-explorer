@@ -16,6 +16,11 @@ interface TaskQueueCardProps {
   onOpenFile?: (path: string) => void;
 }
 
+function tokenLabel(tokens?: number): string {
+  if (!tokens) return "";
+  return tokens >= 1000 ? `${(tokens / 1000).toFixed(1)}k` : String(tokens);
+}
+
 function statusIcon(status: ProjectTask["status"]) {
   if (status === "done") return <CheckCircle2 size={11} />;
   if (status === "in_progress") return <Loader2 size={11} className="spin" />;
@@ -37,6 +42,7 @@ export function TaskQueueCard({
     queue.tasks.find((task) => task.status === "failed" || task.status === "blocked") ??
     queue.tasks.find((task) => task.status === "pending");
   const percent = queue.tasks.length > 0 ? Math.round((done / queue.tasks.length) * 100) : 0;
+  const totalTokens = queue.tasks.reduce((sum, task) => sum + (task.tokenUsage?.totalTokens ?? 0), 0);
   return (
     <details className={`task-queue-card is-${queue.status}`} open={defaultOpen ? true : undefined}>
       <summary>
@@ -48,6 +54,7 @@ export function TaskQueueCard({
           <small>
             {done}/{queue.tasks.length} {t("done")}
             {failed > 0 ? ` · ${failed} ${t("failed")}` : ""} · {t(queue.status)}
+            {totalTokens > 0 ? ` · ${tokenLabel(totalTokens)} ${t("tokens")}` : ""}
           </small>
         </span>
         <span className="task-queue-progress" aria-hidden="true">
@@ -75,6 +82,7 @@ export function TaskQueueCard({
                 {t(task.status)} · {t(task.effort)} · {t(task.role)}
                 {task.provider ? ` · ${task.provider}/${task.model ?? ""}` : ""}
                 {task.attempts > 1 ? ` · ${task.attempts} ${t("attempts")}` : ""}
+                {task.tokenUsage?.totalTokens ? ` · ${tokenLabel(task.tokenUsage.totalTokens)} ${t("tokens")}` : ""}
               </small>
               {task.resultSummary ? <p>{task.resultSummary.slice(0, 360)}</p> : null}
               {task.verification?.command ? (

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { shouldRetryWithEditFirst } from "./ai/loop";
 import {
   isFastEditTask,
   preferredVerificationCommand,
@@ -53,4 +54,11 @@ test("remaining-work summaries are detected without flagging clean completions",
   assert.equal(reportsRemainingWork("Next step: run tests"), true);
   assert.equal(reportsRemainingWork("Kalan yok, her şey tamam."), false);
   assert.equal(reportsRemainingWork("All changes are complete; typecheck passed."), false);
+});
+
+test("step-limit failures without edits retry with the edit-first fast profile", () => {
+  assert.equal(shouldRetryWithEditFirst("max_steps", []), true);
+  assert.equal(shouldRetryWithEditFirst("max_steps", ["js/script.js"]), false);
+  assert.equal(shouldRetryWithEditFirst("finished", []), false);
+  assert.equal(shouldRetryWithEditFirst("error", []), false);
 });

@@ -10785,6 +10785,64 @@ button.canvas-stat {
   text-decoration: underline;
 }
 
+.studio-clarify {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 9px 10px;
+  border: 1px solid rgba(245, 184, 75, 0.28);
+  border-radius: 8px;
+  background: rgba(245, 184, 75, 0.055);
+}
+
+.studio-clarify-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #f3d79c;
+  font-size: 9px;
+}
+
+.studio-clarify-head svg {
+  color: #f5b84b;
+}
+
+.studio-clarify-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.studio-clarify-options button {
+  padding: 4px 9px;
+  border: 1px solid rgba(245, 184, 75, 0.24);
+  border-radius: 999px;
+  background: rgba(245, 184, 75, 0.08);
+  color: #f5dfb0;
+  font-size: 8.5px;
+  cursor: pointer;
+}
+
+.studio-clarify-options button:hover {
+  border-color: rgba(245, 184, 75, 0.5);
+  background: rgba(245, 184, 75, 0.15);
+}
+
+.studio-clarify-foot {
+  display: flex;
+  gap: 10px;
+}
+
+.studio-clarify-foot button {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #8fa9c9;
+  font-size: 7.5px;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
 .studio-composer-row {
   display: flex;
   align-items: flex-end;

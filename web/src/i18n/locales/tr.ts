@@ -318,6 +318,13 @@ export const tr: Dictionary = {
   "Each project keeps its own analysis. Switch instantly without rescanning; local project icons are discovered automatically.":
     "Her proje kendi analizini saklar. Yeniden taramadan anında geçiş yapın; yerel proje ikonları otomatik bulunur.",
   "Saved projects": "Kayıtlı projeler",
+  "Saat özelliği tam olarak ne yapsın?": "Saat özelliği tam olarak ne yapsın?",
+  "Görev oluşturulma saati": "Görev oluşturulma saati",
+  "Bitiş / hatırlatma saati": "Bitiş / hatırlatma saati",
+  "Geçen süre sayacı": "Geçen süre sayacı",
+  "En iyi yorumunla devam et": "En iyi yorumunla devam et",
+  "Neyi eklemek veya değiştirmek istiyorsun? Dosya, ekran ve beklenen davranışı yaz.": "Neyi eklemek veya değiştirmek istiyorsun? Dosya, ekran ve beklenen davranışı yaz.",
+  "Send as written": "Yazdığım gibi gönder",
   "Intelligence + Code Studio": "Zekâ + Kod Stüdyosu",
   "Read-only intelligence + write-enabled Code Studio": "Salt okunur zekâ + yazma destekli Kod Stüdyosu",
   "Understand your code.": "Kodunu anla.",

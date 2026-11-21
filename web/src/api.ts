@@ -636,6 +636,7 @@ export const api = {
         maxMinutes?: number;
         replan?: boolean;
         retryFailed?: boolean;
+        clarified?: boolean;
       },
       onEvent: (event: AiAgentEvent) => void,
       signal?: AbortSignal,
@@ -899,6 +900,7 @@ export const api = {
         maxSteps?: number;
         mode?: "ask" | "coding" | "auto";
         history?: { role: "user" | "assistant"; content: string }[];
+        clarified?: boolean;
       },
       onEvent: (event: AiAgentEvent) => void,
       signal?: AbortSignal,

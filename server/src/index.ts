@@ -41,6 +41,7 @@ import { getProjectTaskQueue, planProjectTasks, runProjectLoop } from "./ai/loop
 import { getPublicSettings, updateAiSettings } from "./ai/settings";
 import { getPrompt, getPromptVersion, listPrompts, renderPrompt, resetPrompt, savePrompt } from "./ai/prompts";
 import { resolvePermission } from "./ai/permissions";
+import { detectClarification } from "../../shared/clarification";
 import { getProjectUsage } from "./ai/usage";
 import { buildChangeReport } from "./changes";
 import { formatProjectFile } from "./formatter";
@@ -1004,6 +1005,16 @@ app.post("/api/projects/:id/ai/agent/stream", async (req, res) => {
     }
   };
 
+  const clarification =
+    req.body?.clarified === true
+      ? null
+      : detectClarification(instruction, { askMode: req.body?.mode === "ask" });
+  if (clarification) {
+    write({ type: "clarify", request: clarification });
+    res.end();
+    return;
+  }
+
   try {
     const provider = typeof req.body?.provider === "string" ? (req.body.provider as AiProviderId) : undefined;
     const result = await runAgentTask(
@@ -1091,6 +1102,14 @@ app.post("/api/projects/:id/ai/loop/stream", async (req, res) => {
       res.write(`${JSON.stringify(event)}\n`);
     }
   };
+
+  const clarification =
+    req.body?.clarified === true ? null : detectClarification(goal);
+  if (clarification) {
+    write({ type: "clarify", request: clarification });
+    res.end();
+    return;
+  }
 
   try {
     await runProjectLoop(

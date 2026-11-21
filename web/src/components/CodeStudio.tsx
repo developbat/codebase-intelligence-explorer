@@ -138,6 +138,10 @@ import { AgentPlanCard } from "./AgentPlanCard";
 import { ShellTerminalView } from "./ShellTerminalView";
 import { TaskQueueCard } from "./TaskQueueCard";
 import type { ProjectTaskQueue } from "../../../shared/tasks";
+import {
+  detectClarification,
+  type ClarificationRequest,
+} from "../../../shared/clarification";
 import type { BrowserCheckResult } from "../../../shared/browserCheck";
 import type { ProjectToolList } from "../../../shared/projectTools";
 import type {
@@ -552,6 +556,10 @@ export function CodeStudio({
   const [chatLiveLogs, setChatLiveLogs] = useState<AiAgentLogEntry[]>([]);
   const [chatLivePlan, setChatLivePlan] = useState<AiAgentPlan | null>(null);
   const [taskQueue, setTaskQueue] = useState<ProjectTaskQueue | null>(null);
+  const [clarification, setClarification] = useState<{
+    request: ClarificationRequest;
+    original: string;
+  } | null>(null);
   const [taskPanelOpen, setTaskPanelOpen] = useState(false);
   const [taskLoopEnabled, setTaskLoopEnabled] = useState(
     () => localStorage.getItem("cie:task-loop") !== "off",
@@ -2098,10 +2106,18 @@ export function CodeStudio({
   async function askProject(
     question = chatInput,
     appendUser = true,
-    runOptions: { retryFailed?: boolean } = {},
+    runOptions: { retryFailed?: boolean; skipClarify?: boolean } = {},
   ) {
     if (!active || !question.trim() || chatBusy) return;
     const text = question.trim();
+    if (!runOptions.skipClarify) {
+      const intent = detectClarification(text);
+      if (intent) {
+        setClarification({ request: intent, original: text });
+        setChatInput(text);
+        return;
+      }
+    }
     const userMessage = { role: "user" as const, content: text };
     let history = chatMessages.map((message) => ({ role: message.role, content: message.content }));
     if (appendUser) {
@@ -2113,6 +2129,7 @@ export function CodeStudio({
         history = chatMessages.slice(0, -1).map((message) => ({ role: message.role, content: message.content }));
       }
     }
+    setClarification(null);
     setChatBusy(true);
     setChatError(null);
     setChatRetryQuestion(null);
@@ -2142,6 +2159,8 @@ export function CodeStudio({
       } else if (event.type === "permission") {
         setPermissionQueue((queue) => [...queue, event.request]);
         setPermissionBusy(false);
+      } else if (event.type === "clarify") {
+        setClarification({ request: event.request, original: text });
       } else if (event.type === "task") {
         setTaskQueue(event.queue);
       } else if (event.type === "done") {
@@ -2167,6 +2186,7 @@ export function CodeStudio({
             maxTasks: 12,
             maxMinutes: 45,
             retryFailed: runOptions.retryFailed === true,
+            clarified: runOptions.skipClarify === true,
           },
           handleEvent,
           controller.signal,
@@ -2184,6 +2204,7 @@ export function CodeStudio({
             allowWrite: agentAllowWrite,
             allowCommands: agentAllowCommands,
             language: locale,
+            clarified: runOptions.skipClarify === true,
           },
           handleEvent,
           controller.signal,
@@ -2990,7 +3011,7 @@ export function CodeStudio({
                   {hasError && previousUser && !modelUnavailable ? (
                     <button
                       className="studio-chat-retry"
-                      onClick={() => void askProject(previousUser.content, false)}
+                      onClick={() => void askProject(previousUser.content, false, { skipClarify: true })}
                       disabled={chatBusy}
                     >
                       <RefreshCw size={9} /> {t("Retry")}
@@ -3127,7 +3148,7 @@ export function CodeStudio({
                   onOpenFile={(path) => void openFile(path)}
                   onRetryFailed={() => {
                     if (chatBusy || !taskQueue) return;
-                    void askProject(taskQueue.goal, false, { retryFailed: true });
+                    void askProject(taskQueue.goal, false, { retryFailed: true, skipClarify: true });
                   }}
                 />
               ) : null}
@@ -3168,7 +3189,7 @@ export function CodeStudio({
               {chatRetryQuestion ? (
                 <button
                   className="studio-chat-retry"
-                  onClick={() => void askProject(chatRetryQuestion, false)}
+                  onClick={() => void askProject(chatRetryQuestion, false, { skipClarify: true })}
                   disabled={chatBusy}
                 >
                   <RefreshCw size={10} /> {t("Retry last message")}
@@ -3195,7 +3216,7 @@ export function CodeStudio({
                   onRetryFailed={() => {
                     if (!taskQueue) return;
                     setTaskPanelOpen(false);
-                    void askProject(taskQueue.goal, false, { retryFailed: true });
+                    void askProject(taskQueue.goal, false, { retryFailed: true, skipClarify: true });
                   }}
                 />
               </div>
@@ -3237,10 +3258,52 @@ export function CodeStudio({
               </button>
             ) : null}
           </div>
+          {clarification ? (
+            <div className="studio-clarify">
+              <div className="studio-clarify-head">
+                <MessageSquare size={11} />
+                <strong>{t(clarification.request.question)}</strong>
+              </div>
+              <div className="studio-clarify-options">
+                {clarification.request.options.map((option) => (
+                  <button
+                    key={option.id}
+                    onClick={() => {
+                      const original = clarification.original;
+                      setClarification(null);
+                      setChatInput("");
+                      void askProject(`${original}\n\n${option.instructionSuffix}`, true, {
+                        skipClarify: true,
+                      });
+                    }}
+                  >
+                    {t(option.label)}
+                  </button>
+                ))}
+              </div>
+              <div className="studio-clarify-foot">
+                <button
+                  onClick={() => {
+                    const original = clarification.original;
+                    setClarification(null);
+                    void askProject(original, true, { skipClarify: true });
+                  }}
+                >
+                  {t("Send as written")}
+                </button>
+                <button onClick={() => setClarification(null)}>{t("Cancel")}</button>
+              </div>
+            </div>
+          ) : null}
           <div className="studio-composer-row">
             <textarea
               value={chatInput}
-              onChange={(event) => setChatInput(event.target.value)}
+              onChange={(event) => {
+                setChatInput(event.target.value);
+                if (clarification && event.target.value !== clarification.original) {
+                  setClarification(null);
+                }
+              }}
               onKeyDown={(event) => {
                 if (event.key === "Enter" && !event.shiftKey) {
                   event.preventDefault();
@@ -3660,7 +3723,7 @@ export function CodeStudio({
                           {testResult.summary.failed > 0 ? (
                             <button
                               className="studio-test-fix"
-                              onClick={() => void askProject(testFailuresPrompt(), true)}
+                              onClick={() => void askProject(testFailuresPrompt(), true, { skipClarify: true })}
                               disabled={chatBusy}
                             >
                               <WandSparkles size={11} /> {t("Fix failures with agent")}

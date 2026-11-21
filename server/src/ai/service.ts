@@ -2902,6 +2902,14 @@ export async function runAgentTask(
   });
   activePlan = plan;
   const seed = await agentSeedContext(analysis, instruction, options.activeFile);
+  const seedLimit = fastTask ? 6_000 : 12_000;
+  const seedText =
+    seed.length > seedLimit
+      ? `${seed.slice(0, seedLimit)}\n… seed context truncated to keep the prompt small …`
+      : seed;
+  if (seed.length > seedLimit) {
+    log("info", "Seed context truncated", `${seed.length} → ${seedLimit} chars`);
+  }
   const context = [
     projectBrief(analysis),
     "",
@@ -2911,7 +2919,7 @@ export async function runAgentTask(
       : `Permissions: write=${writeApproved ? "pre-approved" : "ask the user before writing"}; commands=${
           commandsApproved ? "pre-approved" : "ask the user before running commands"
         }; delete and rename always need confirmation.`,
-    seed,
+    seedText,
     options.history && options.history.length > 0
       ? `Conversation so far:\n${options.history
           .slice(-6)
@@ -2935,7 +2943,7 @@ export async function runAgentTask(
     log(
       "info",
       "Skills loaded",
-      `${enabledSkills.length} enabled · ${enabledSkills.map((skill) => skill.record.name).join(", ")}`,
+      `${enabledSkills.length} enabled · ${skillsPrompt.length} chars ≈ ${Math.round(skillsPrompt.length / 4)} tokens · ${enabledSkills.map((skill) => skill.record.name).join(", ")}`,
     );
   }
   const systemContent =
@@ -2991,6 +2999,7 @@ export async function runAgentTask(
     findCounts.clear();
   };
   let modelTurns = 0;
+  let writeNudges = 0;
   let remainingWorkRejected = false;
 
   for (let index = 1; ; index += 1) {
@@ -3020,6 +3029,25 @@ export async function runAgentTask(
         `${next.action}${agentActionTarget(next.args) ? ` · ${agentActionTarget(next.args)}` : ""}`,
       );
     } else {
+    if (!askMode && plan.needsWrite && changedFiles.length === 0) {
+      const turnsLeft = maxSteps - modelTurns;
+      if (modelTurns >= 4 && writeNudges === 0) {
+        writeNudges = 1;
+        transcript.push({
+          role: "system",
+          content:
+            "Step budget notice: no file has been changed yet. You have enough context. Perform the requested edit now with replace_in_file or write_file. Do not read more files unless a single exact line is essential; read only that range.",
+        });
+        log("warn", "Write reminder", "No files changed yet; asking the model to edit now.");
+      } else if (turnsLeft <= 3 && writeNudges === 1) {
+        writeNudges = 2;
+        transcript.push({
+          role: "system",
+          content: `Only ${Math.max(1, turnsLeft)} model turn(s) remain and no file has changed. Make the edit now. If it is truly impossible, finish with the exact blocker instead of reading more files.`,
+        });
+        log("warn", "Final write reminder", `${Math.max(1, turnsLeft)} turn(s) left · no edits yet`);
+      }
+    }
     log("model", "Model is thinking…", "Planning the next tool call");
     try {
       inputChars += transcript.reduce((total, message) => total + message.content.length, 0);

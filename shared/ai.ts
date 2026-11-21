@@ -1,3 +1,4 @@
+import type { ClarificationRequest } from "./clarification";
 import type { ProjectTaskQueue } from "./tasks";
 
 export type BuiltInAiProviderId =
@@ -633,5 +634,6 @@ export type AiAgentEvent =
   | { type: "plan"; plan: AiAgentPlan }
   | { type: "task"; queue: ProjectTaskQueue; task?: ProjectTaskQueue["tasks"][number] }
   | { type: "permission"; request: AiAgentPermissionRequest }
+  | { type: "clarify"; request: ClarificationRequest }
   | { type: "done"; result: AiAgentResult }
   | { type: "error"; message: string };

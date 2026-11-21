@@ -298,6 +298,7 @@ function taskInstruction(
     `Task: ${task.title}`,
     task.detail,
     task.acceptance ? `Acceptance: ${task.acceptance}` : "",
+    task.notes ? `Retry note: ${task.notes}` : "",
     prior ? `Previous task summaries (use this before reading context.md):\n${prior}` : "",
     "Read .cie/agent/context-digest.md first for compact prior context. Read .cie/agent/context.md only when the digest and summaries are insufficient; if it is large, search it with find_in_file or read only the relevant tail. Append useful durable context if you learn something new.",
     "Do not re-read files already fully read by a previous task unless the current task needs exact content after a change.",
@@ -307,6 +308,13 @@ function taskInstruction(
   ]
     .filter(Boolean)
     .join("\n");
+}
+
+export function shouldRetryWithEditFirst(
+  stoppedReason: string,
+  changedFiles: string[],
+): boolean {
+  return stoppedReason === "max_steps" && changedFiles.length === 0;
 }
 
 function aggregateResult(
@@ -607,6 +615,7 @@ export async function runProjectLoop(
       resultSummary: result.summary,
       changedFiles: result.changedFiles,
       commands: result.ranCommands,
+      tokenUsage: addUsage(task.tokenUsage ?? emptyUsage(), result.tokenUsage),
       verification: taskVerification ?? (verification ? { command: verification } : undefined),
     });
     queue = await saveQueue(analysis.rootPath, queue);
@@ -626,20 +635,43 @@ export async function runProjectLoop(
     emit({ type: "task", queue, task: queue.tasks.find((item) => item.id === task.id) });
 
     if (status !== "done" && result.stoppedReason !== "aborted" && task.attempts === 0) {
-      const alternate = await pickAlternateAgentModel({
-        provider: taskConfig.id,
-        model: taskConfig.model,
-      }).catch(() => null);
-      queue = markTask(queue, task.id, {
-        status: "pending",
-        effort: task.effort === "simple" ? "standard" : task.effort,
-        role: "main",
-        modelOverride: alternate
-          ? { provider: alternate.provider, model: alternate.model }
-          : undefined,
-        provider: alternate?.provider ?? task.provider,
-        model: alternate?.model ?? task.model,
-      });
+      const burnedStepsWithoutEdit = shouldRetryWithEditFirst(
+        result.stoppedReason,
+        result.changedFiles,
+      );
+      if (burnedStepsWithoutEdit) {
+        // The failure was exploration, not the model. Retry the same model with
+        // the fast profile and an explicit edit-first note instead of paying for
+        // an alternate (often more expensive) model.
+        queue = markTask(queue, task.id, {
+          status: "pending",
+          effort: "simple",
+          role: "fast",
+          modelOverride: undefined,
+          notes:
+            "Previous attempt used its whole step budget without editing. Start with the edit now; read at most 2 files or exact ranges, then make the change.",
+        });
+        await appendTaskContext(
+          analysis.rootPath,
+          `Retry · ${task.id}`,
+          "Previous attempt hit the step limit with no file changes. Retrying with the fast profile and an edit-first instruction.",
+        );
+      } else {
+        const alternate = await pickAlternateAgentModel({
+          provider: taskConfig.id,
+          model: taskConfig.model,
+        }).catch(() => null);
+        queue = markTask(queue, task.id, {
+          status: "pending",
+          effort: task.effort === "simple" ? "standard" : task.effort,
+          role: "main",
+          modelOverride: alternate
+            ? { provider: alternate.provider, model: alternate.model }
+            : undefined,
+          provider: alternate?.provider ?? task.provider,
+          model: alternate?.model ?? task.model,
+        });
+      }
       queue = await saveQueue(analysis.rootPath, queue);
       emit({ type: "task", queue, task: queue.tasks.find((item) => item.id === task.id) });
     }

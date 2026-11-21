@@ -24,6 +24,11 @@ export interface ProjectTask {
   resultSummary?: string;
   changedFiles: string[];
   commands: string[];
+  tokenUsage?: {
+    inputTokens: number;
+    outputTokens: number;
+    totalTokens: number;
+  };
   verification?: {
     command?: string;
     ok?: boolean;
