@@ -67,6 +67,36 @@ function openAiHeaders(config: ResolvedProvider): Record<string, string> {
   return headers;
 }
 
+export function toolCallsToJson(
+  calls: { name?: string; arguments?: string }[],
+): string | null {
+  if (calls.length === 0) return null;
+  const actions = calls.map((call) => {
+    let args: Record<string, unknown> = {};
+    if (typeof call.arguments === "string" && call.arguments.trim()) {
+      try {
+        const parsed = JSON.parse(call.arguments) as unknown;
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+          args = parsed as Record<string, unknown>;
+        }
+      } catch {
+        args = {};
+      }
+    }
+    return { action: call.name ?? "invalid", args };
+  });
+  return JSON.stringify(
+    actions.length === 1
+      ? actions[0]
+      : {
+          action: actions[0].action,
+          args: actions[0].args,
+          __actionCount: actions.length,
+          __actions: actions,
+        },
+  );
+}
+
 function extractOpenAiText(payload: unknown): string {
   const data = payload as {
     choices?: {
@@ -89,30 +119,13 @@ function extractOpenAiText(payload: unknown): string {
   }
   const toolCalls = choice?.message?.tool_calls;
   if (Array.isArray(toolCalls) && toolCalls.length > 0) {
-    const calls = toolCalls.map((call) => {
-      let args: Record<string, unknown> = {};
-      if (typeof call.function?.arguments === "string" && call.function.arguments.trim()) {
-        try {
-          const parsed = JSON.parse(call.function.arguments) as unknown;
-          if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-            args = parsed as Record<string, unknown>;
-          }
-        } catch {
-          args = {};
-        }
-      }
-      return { action: call.function?.name ?? "invalid", args };
-    });
-    return JSON.stringify(
-      calls.length === 1
-        ? calls[0]
-        : {
-            action: calls[0].action,
-            args: calls[0].args,
-            __actionCount: calls.length,
-            __actions: calls,
-          },
+    const converted = toolCallsToJson(
+      toolCalls.map((call) => ({
+        name: call.function?.name,
+        arguments: call.function?.arguments,
+      })),
     );
+    if (converted) return converted;
   }
   // Some reasoning models put the answer in a separate field and leave content empty.
   const reasoning = choice?.message?.reasoning_content ?? choice?.message?.reasoning;
@@ -135,6 +148,7 @@ async function readOpenAiStream(
   let reasoning = "";
   let finishReason: string | undefined;
   let usage: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number } | undefined;
+  const toolCalls = new Map<number, { name: string; arguments: string }>();
 
   try {
     for (;;) {
@@ -156,6 +170,10 @@ async function readOpenAiStream(
               content?: string | { type?: string; text?: string }[];
               reasoning?: string;
               reasoning_content?: string;
+              tool_calls?: {
+                index?: number;
+                function?: { name?: string; arguments?: string };
+              }[];
             };
             finish_reason?: string;
           }[];
@@ -185,6 +203,13 @@ async function readOpenAiStream(
         }
         const thinking = delta.reasoning_content ?? delta.reasoning;
         if (typeof thinking === "string" && thinking) reasoning += thinking;
+        for (const call of delta.tool_calls ?? []) {
+          const index = call.index ?? 0;
+          const current = toolCalls.get(index) ?? { name: "", arguments: "" };
+          if (call.function?.name) current.name = call.function.name;
+          if (call.function?.arguments) current.arguments += call.function.arguments;
+          toolCalls.set(index, current);
+        }
       }
     }
   } finally {
@@ -201,6 +226,10 @@ async function readOpenAiStream(
     });
   }
   if (text.trim()) return text;
+  if (toolCalls.size > 0) {
+    const converted = toolCallsToJson([...toolCalls.entries()].sort(([a], [b]) => a - b).map(([, call]) => call));
+    if (converted) return converted;
+  }
   if (reasoning.trim()) return reasoning;
   throw new Error(
     `The provider returned an empty response${finishReason ? ` (finish_reason: ${finishReason})` : ""}.`,

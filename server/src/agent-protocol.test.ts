@@ -7,6 +7,7 @@ import {
   parseMultipleJsonActions,
   stripToolCallMarkup,
 } from "./ai/service";
+import { toolCallsToJson } from "./ai/providers";
 
 const DSML = `<｜｜DSML｜｜ calls> <｜｜DSML｜｜ invoke name="read_file"> <｜｜DSML｜｜ parameter name="args" string="false">{"path": "src/services/order.service.ts", "startLine": 1, "endLine": 120}</｜｜DSML｜｜ parameter> </｜｜DSML｜｜ invoke> <｜｜DSML｜｜ invoke name="read_file"> <｜｜DSML｜｜ parameter name="args" string="false">{"path": "src/controllers/order.controller.ts", "startLine": 1, "endLine": 120}</｜｜DSML｜｜ parameter> </｜｜DSML｜｜ invoke> </｜｜DSML｜｜ calls>`;
 
@@ -83,4 +84,23 @@ test("actions arrays and stringified args are normalized", () => {
 
   const stringArgs = parseAgentReply('{"action":"read_file","args":"{\\"path\\":\\"src/b.ts\\"}"}');
   assert.deepEqual(stringArgs.args, { path: "src/b.ts" });
+});
+
+test("streaming provider tool calls are converted to the JSON action protocol", () => {
+  const single = toolCallsToJson([
+    { name: "replace_in_file", arguments: '{"path":"index.html","find":"old","replace":"new"}' },
+  ]);
+  assert.deepEqual(JSON.parse(single ?? "{}"), {
+    action: "replace_in_file",
+    args: { path: "index.html", find: "old", replace: "new" },
+  });
+
+  const multiple = toolCallsToJson([
+    { name: "read_file", arguments: '{"path":"a.ts"}' },
+    { name: "read_file", arguments: '{"path":"b.ts"}' },
+  ]);
+  const parsed = JSON.parse(multiple ?? "{}") as { __actionCount?: number; __actions?: unknown[] };
+  assert.equal(parsed.__actionCount, 2);
+  assert.equal(parsed.__actions?.length, 2);
+  assert.equal(toolCallsToJson([]), null);
 });
