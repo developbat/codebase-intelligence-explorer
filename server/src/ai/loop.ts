@@ -342,7 +342,7 @@ function taskInstruction(
     "Do not re-read files already fully read by a previous task unless the current task needs exact content after a change.",
     "Stay scoped to this task. Do not do later tasks. Do not revert earlier work.",
     verification ? `Verification command: ${verification}` : "",
-    "Run tests/typecheck/build when relevant. Finish only when this task is complete, or report the exact blocker.",
+    "Run tests/typecheck/build when relevant. If the task includes validation, permissions, errors or limits, verify both the accepted and rejected path. Finish only when this task is complete, or report the exact blocker.",
   ]
     .filter(Boolean)
     .join("\n");
