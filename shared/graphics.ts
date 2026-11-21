@@ -24,3 +24,23 @@ export interface GraphicResult {
   mime: "image/svg+xml" | "image/png";
   kind: GraphicKind;
 }
+
+export interface GraphicCheckResult {
+  path: string;
+  format: "svg" | "png";
+  ok: boolean;
+  width?: number;
+  height?: number;
+  texts: string[];
+  colors: string[];
+  shapes: {
+    rects: number;
+    circles: number;
+    paths: number;
+    texts: number;
+  };
+  sampledPixels?: number;
+  transparentPixels?: number;
+  warnings: string[];
+  summary: string;
+}

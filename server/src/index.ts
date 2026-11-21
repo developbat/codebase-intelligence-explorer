@@ -36,6 +36,7 @@ import { createPlaceholderAsset } from "./placeholderAssets";
 import { checkToolchains, installToolchain } from "./toolchains";
 import { runGameCheck } from "./gameCheck";
 import { createGraphic } from "./graphics";
+import { checkGraphic } from "./graphicCheck";
 import { getProjectTaskQueue, planProjectTasks, runProjectLoop } from "./ai/loop";
 import { getPublicSettings, updateAiSettings } from "./ai/settings";
 import { getPrompt, getPromptVersion, listPrompts, renderPrompt, resetPrompt, savePrompt } from "./ai/prompts";
@@ -526,6 +527,21 @@ app.get("/api/projects/:id/tools", async (req, res) => {
 
 app.get("/api/browser-check/status", async (_req, res) => {
   res.json({ available: await isBrowserCheckAvailable() });
+});
+
+app.post("/api/projects/:id/graphics/check", async (req, res) => {
+  try {
+    const analysis = await loadAnalysis(req.params.id);
+    res.json(
+      await checkGraphic(
+        analysis.rootPath,
+        typeof req.body?.path === "string" ? req.body.path : "",
+        typeof req.body?.expectText === "string" ? req.body.expectText : undefined,
+      ),
+    );
+  } catch (error) {
+    handleError(res, error, 400);
+  }
 });
 
 app.post("/api/projects/:id/graphics", async (req, res) => {

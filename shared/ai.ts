@@ -531,6 +531,7 @@ export type AiAgentAction =
   | "install_toolchain"
   | "game_check"
   | "create_graphic"
+  | "graphic_check"
   | "delegate_research"
   | "placeholder_asset"
   | "write_file"

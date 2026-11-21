@@ -58,7 +58,11 @@ import type {
   BrowserCheckResult,
 } from "../../shared/browserCheck";
 import type { GameCheckOptions, GameCheckResult } from "../../shared/gameCheck";
-import type { GraphicRequest, GraphicResult } from "../../shared/graphics";
+import type {
+  GraphicCheckResult,
+  GraphicRequest,
+  GraphicResult,
+} from "../../shared/graphics";
 import type { ModelHealth } from "../../shared/modelHealth";
 import type {
   MobileBootResult,
@@ -552,6 +556,12 @@ export const api = {
 
   projectTools: (projectId: string) =>
     request<ProjectToolList>(`/api/projects/${projectId}/tools`),
+
+  checkGraphic: (projectId: string, pathValue: string, expectText?: string) =>
+    request<GraphicCheckResult>(`/api/projects/${projectId}/graphics/check`, {
+      method: "POST",
+      body: JSON.stringify({ path: pathValue, expectText }),
+    }),
 
   createGraphic: (projectId: string, input: GraphicRequest) =>
     request<GraphicResult>(`/api/projects/${projectId}/graphics`, {

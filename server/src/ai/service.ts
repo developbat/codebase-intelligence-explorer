@@ -61,6 +61,7 @@ import { createPlaceholderAsset } from "../placeholderAssets";
 import { checkToolchains, installToolchain } from "../toolchains";
 import { runGameCheck } from "../gameCheck";
 import { createGraphic } from "../graphics";
+import { checkGraphic } from "../graphicCheck";
 import {
   deleteProjectPath,
   readSourceFile,
@@ -1555,6 +1556,7 @@ const READ_ONLY_ACTIONS = new Set([
   "list_project_tools",
   "browser_check",
   "game_check",
+  "graphic_check",
   "list_mobile_devices",
 ]);
 const AGENT_MAX_WRITES = 10;
@@ -2426,6 +2428,7 @@ export function agentToolCatalog(
     '{"action":"check_toolchains","args":{}}',
     '{"action":"game_check","args":{"path":"index.html","steps":[{"action":"expectVisible","selector":"canvas"}]}}',
     '{"action":"create_graphic","args":{"path":"assets/report.svg","kind":"bar","title":"Weekly progress","data":[{"label":"Mon","value":4},{"label":"Tue","value":7},{"label":"Wed","value":5}]}}',
+    '{"action":"graphic_check","args":{"path":"assets/report.svg","expectText":"Weekly progress"}}',
   ];
   if (!readOnly) {
     const approval = writeApproved ? "" : "  // requires user approval";
@@ -3209,6 +3212,7 @@ export async function runAgentTask(
       "install_toolchain",
       "game_check",
       "create_graphic",
+      "graphic_check",
       "write_file",
       "replace_in_file",
       "replace_many",
@@ -3256,6 +3260,7 @@ export async function runAgentTask(
         check_toolchains: "Checking toolchains…",
         game_check: "Checking the game scene…",
         create_graphic: "Creating a graphic…",
+        graphic_check: "Checking a graphic…",
         install_toolchain: "Installing a toolchain…",
         run_project_tool: "Running saved project tool…",
         delegate_research: "Delegating read-only research…",
@@ -4021,6 +4026,17 @@ export async function runAgentTask(
         observation = `Created ${created.kind} SVG placeholder: ${created.path} (${created.bytes} bytes).`;
         log("success", "Placeholder asset created", created.path);
         ok = true;
+      } else if (action === "graphic_check") {
+        const graphicPath = normalizeAgentPath(analysis.rootPath, args.path);
+        if (!graphicPath) throw new Error("A graphic path is required.");
+        const result = await checkGraphic(
+          analysis.rootPath,
+          graphicPath,
+          typeof args.expectText === "string" ? args.expectText : undefined,
+        );
+        observation = result.summary;
+        ok = result.ok;
+        log(result.ok ? "success" : "warn", "Graphic check", `${result.format} · ${result.width ?? "?"}×${result.height ?? "?"}`);
       } else if (action === "create_graphic") {
         const graphicPath = normalizeAgentPath(analysis.rootPath, args.path);
         if (!graphicPath) throw new Error("A graphic path is required.");

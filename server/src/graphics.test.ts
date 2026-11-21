@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { createGraphic } from "./graphics";
+import { checkGraphic } from "./graphicCheck";
 
 test("creates bar, flow and illustration graphics", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "cie-graphics-"));
@@ -47,6 +48,12 @@ test("creates bar, flow and illustration graphics", async () => {
       () => createGraphic(root, { path: "assets/empty.svg", kind: "pie", data: [] }),
       /non-empty data/i,
     );
+
+    const checked = await checkGraphic(root, "assets/report.svg", "Weekly progress");
+    assert.equal(checked.ok, true);
+    assert.equal(checked.width, 900);
+    assert.ok(checked.texts.includes("Weekly progress"));
+    assert.ok(checked.shapes.rects > 0);
   } finally {
     await fs.rm(root, { recursive: true, force: true });
   }
