@@ -1598,6 +1598,7 @@ const READ_ONLY_ACTIONS = new Set([
   "list_files",
   "search_code",
   "read_file",
+  "read_symbol",
   "find_in_file",
   "list_items",
   "count_matches",
@@ -1625,6 +1626,7 @@ const READ_ONLY_ACTIONS = new Set([
 const AGENT_MAX_WRITES = 10;
 const AGENT_MAX_COMMANDS = 5;
 const AGENT_READ_CHARS = 18_000;
+const NARROW_EDIT_MAX_READ_LINES = 160;
 const AGENT_OBSERVATION_CHARS = 3_000;
 
 const AGENT_BLOCKED_COMMANDS: RegExp[] = [
@@ -2491,6 +2493,8 @@ export function agentToolCatalog(
     '{"action":"list_files","args":{"path":"src","limit":80}}',
     '{"action":"search_code","args":{"query":"login handler","limit":15}}',
     '{"action":"read_file","args":{"path":"src/app.ts","startLine":1,"endLine":200}}',
+    '{"action":"read_symbol","args":{"path":"src/app.ts","line":142}}',
+    '{"action":"read_symbol","args":{"name":"UserService"}}',
     '{"action":"find_in_file","args":{"path":"src/app.ts","query":"login","contextLines":2,"limit":10}}',
     '{"action":"list_items","args":{"path":"data/items.html","limit":100}}',
     '{"action":"count_matches","args":{"path":"src","query":"TODO","limit":20}}',
@@ -3102,6 +3106,14 @@ export async function runAgentTask(
   const fastSuffix = fastTask
     ? "\n\nFast task profile: this is a small, focused change. Read at most 3 files (for a CSS-only change, read only the stylesheet), make the edit, run at most one verification, and finish. Complete every edit-map item before finishing. Do not read unrelated modules, repeat reads, or keep exploring after the edit."
     : "";
+  const narrowEdit =
+    !askMode &&
+    plan.needsWrite &&
+    options.intent?.kind === "edit" &&
+    (options.intent.scope === "trivial" || options.intent.scope === "small");
+  const narrowEditSuffix = narrowEdit
+    ? "\n\nNarrow edit profile: use project_search or find_in_file first and locate the exact selector, property, symbol or snippet. Read at most 3 focused ranges (about 60 lines each). Never read a whole file above 160 lines; if a whole-file read is rejected, read only the matching range. Then use replace_in_file with the exact existing snippet."
+    : "";
   const readOnlySuffix =
     !askMode && !plan.needsWrite
       ? "\n\nInspection profile: this task is read-only. Read at most 6 files, never re-read the same range, and finish with a compact report. Do not propose a large next-step list."
@@ -3122,6 +3134,7 @@ export async function runAgentTask(
     }) +
     (skillsPrompt ? `\n\n${skillsPrompt}` : "") +
     fastSuffix +
+    narrowEditSuffix +
     readOnlySuffix;
   log(
     "info",
@@ -3396,6 +3409,7 @@ export async function runAgentTask(
       "list_files",
       "search_code",
       "read_file",
+      "read_symbol",
       "find_in_file",
       "list_items",
       "count_matches",
@@ -3453,6 +3467,7 @@ export async function runAgentTask(
         list_files: "Scanning file tree…",
         search_code: "Searching the project…",
         read_file: "Reading file…",
+        read_symbol: "Reading the enclosing symbol…",
         find_in_file: "Searching inside file…",
         list_items: "Extracting list items…",
         count_matches: "Counting matches…",
@@ -3733,6 +3748,117 @@ export async function runAgentTask(
         evidence.push({ path: filePath, label: "CSV query" });
         log("info", "CSV query executed", filePath);
         ok = true;
+      } else if (action === "read_symbol") {
+        const rawName = String(args.name ?? args.query ?? "").trim();
+        const rawPath = typeof args.path === "string" ? args.path : "";
+        const targetLine = Math.max(0, Number(args.line ?? args.startLine ?? 0) || 0);
+        if (!rawName && !rawPath) {
+          throw new Error("Provide a symbol name, or a path plus line.");
+        }
+        const normalizedPath = rawPath
+          ? normalizeAgentPath(analysis.rootPath, rawPath)
+          : undefined;
+        if (normalizedPath && isSecretAgentPath(normalizedPath)) {
+          throw new Error("Reading environment, key or Git internals files is denied.");
+        }
+        let candidates = analysis.symbols.filter((symbol) => {
+          if (normalizedPath && symbol.filePath !== normalizedPath) return false;
+          if (!rawName) return true;
+          const needle = rawName.toLowerCase();
+          return (
+            symbol.name.toLowerCase().includes(needle) ||
+            symbol.qualifiedName.toLowerCase().includes(needle)
+          );
+        });
+        if (targetLine > 0) {
+          const enclosing = candidates
+            .filter((symbol) => symbol.startLine <= targetLine && symbol.endLine >= targetLine)
+            .sort(
+              (a, b) =>
+                (a.endLine - a.startLine) - (b.endLine - b.startLine),
+            );
+          if (enclosing.length > 0) candidates = [enclosing[0]];
+        }
+        candidates = candidates
+          .sort((a, b) => (a.endLine - a.startLine) - (b.endLine - b.startLine))
+          .slice(0, 12);
+
+        if (candidates.length === 0) {
+          if (normalizedPath && targetLine > 0) {
+            const file = await readSourceFile(analysis.rootPath, normalizedPath);
+            const lines = file.content.split("\n");
+            const startLine = Math.max(1, targetLine - 20);
+            const endLine = Math.min(lines.length, targetLine + 60);
+            const window = lines.slice(startLine - 1, endLine).join("\n");
+            observation = `No indexed symbol at ${normalizedPath}:${targetLine}. Showing ${startLine}-${endLine} instead.\n${numberedContent(
+              window.length > 6_000 ? `${window.slice(0, 6_000)}\n… truncated …` : window,
+              startLine,
+            )}`;
+            evidence.push({ path: normalizedPath, label: "Focused range", startLine, endLine });
+            log("info", "Symbol not indexed; read focused range", `${normalizedPath}:${targetLine}`);
+            ok = true;
+          } else {
+            observation = `No indexed symbol matched "${rawName}"${
+              normalizedPath ? ` in ${normalizedPath}` : ""
+            }. Try find_symbols or project_search.`;
+            ok = true;
+          }
+        } else if (candidates.length > 1) {
+          const seen = new Set<string>();
+          observation = [
+            `Multiple symbols match. Choose one and call read_symbol again with its name and path.`,
+            ...candidates
+              .filter((symbol) => {
+                const key = `${symbol.filePath}:${symbol.startLine}`;
+                if (seen.has(key)) return false;
+                seen.add(key);
+                return true;
+              })
+              .map(
+                (symbol) =>
+                  `- ${symbol.kind} ${symbol.qualifiedName} — ${symbol.filePath}:${symbol.startLine}-${symbol.endLine}`,
+              ),
+          ].join("\n");
+          ok = true;
+        } else {
+          const symbol = candidates[0];
+          const file = await readSourceFile(analysis.rootPath, symbol.filePath);
+          const lines = file.content.split("\n");
+          const startLine = Math.max(1, symbol.startLine);
+          const endLine = Math.min(lines.length, Math.max(startLine, symbol.endLine));
+          const window = lines.slice(startLine - 1, endLine).join("\n");
+          observation = [
+            `Symbol: ${symbol.kind} ${symbol.qualifiedName} — ${symbol.filePath}:${startLine}-${endLine}`,
+            symbol.signature ? `Signature: ${symbol.signature}` : "",
+            "",
+            numberedContent(
+              window.length > 8_000 ? `${window.slice(0, 8_000)}\n… symbol truncated …` : window,
+              startLine,
+            ),
+          ]
+            .filter(Boolean)
+            .join("\n");
+          evidence.push({
+            path: symbol.filePath,
+            label: symbol.qualifiedName,
+            startLine,
+            endLine,
+          });
+          const ranges = readCoverage.get(symbol.filePath) ?? [];
+          ranges.push({
+            start: startLine,
+            end: endLine,
+            wholeFile: startLine === 1 && endLine >= lines.length,
+            step: index,
+          });
+          readCoverage.set(symbol.filePath, ranges);
+          log(
+            "info",
+            "Symbol read",
+            `${symbol.qualifiedName} · ${symbol.filePath}:${startLine}-${endLine}`,
+          );
+          ok = true;
+        }
       } else if (action === "find_symbols") {
         const query = String(args.query ?? "").trim();
         const kind = String(args.kind ?? "").trim() || undefined;
@@ -3761,39 +3887,62 @@ export async function runAgentTask(
         if (!filePath) throw new Error("A file path is required.");
         if (isSecretAgentPath(filePath)) throw new Error("Reading environment, key or Git internals files is denied.");
         const requestedStart = Math.max(1, Number(args.startLine ?? 1) || 1);
-        const requestedWhole = args.endLine === undefined;
-        const requestedEnd = requestedWhole
+        const openEnd = args.endLine === undefined;
+        const wholeFile = openEnd && requestedStart === 1;
+        const requestedEnd = openEnd
           ? Number.POSITIVE_INFINITY
           : Math.max(requestedStart, Number(args.endLine) || requestedStart);
         const ranges = readCoverage.get(filePath) ?? [];
         const coveredEntry = ranges.find(
           (entry) =>
             entry.start <= requestedStart &&
-            (requestedWhole ? entry.wholeFile : entry.end >= requestedEnd),
+            (wholeFile ? entry.wholeFile : entry.end >= requestedEnd),
         );
-        const covered = readRangeCovered(ranges, requestedStart, requestedWhole, requestedEnd);
+        const covered = readRangeCovered(ranges, requestedStart, wholeFile, requestedEnd);
         if (covered && coveredEntry) {
           observation = `Already read ${filePath}${
-            requestedWhole ? " (whole file)" : `:${requestedStart}-${requestedEnd}`
+            wholeFile ? " (whole file)" : `:${requestedStart}-${requestedEnd}`
           } in step ${coveredEntry.step}. Reuse that observation; do not read it again.`;
           log("info", "Read skipped (already in context)", `${filePath} · step ${coveredEntry.step}`);
           ok = true;
         } else {
           const file = await readSourceFile(analysis.rootPath, filePath);
           const lines = file.content.split("\n");
+          const narrowEditActive =
+            !askMode &&
+            plan.needsWrite &&
+            options.intent?.kind === "edit" &&
+            (options.intent.scope === "trivial" || options.intent.scope === "small");
+          const requestedSpan = openEnd
+            ? Number.POSITIVE_INFINITY
+            : requestedEnd - requestedStart + 1;
+          if (
+            narrowEditActive &&
+            lines.length > NARROW_EDIT_MAX_READ_LINES &&
+            requestedSpan > NARROW_EDIT_MAX_READ_LINES
+          ) {
+            throw new Error(
+              `Narrow edit: ${file.filePath} has ${lines.length} lines and the requested range is ${requestedSpan === Number.POSITIVE_INFINITY ? "open-ended" : `${requestedSpan} lines`}. Read at most ${NARROW_EDIT_MAX_READ_LINES} lines. Use project_search or find_in_file to locate the selector/property/symbol, call read_symbol for a function/class, then read_file with startLine/endLine around the match.`,
+            );
+          }
           const startLine = requestedStart;
           const endLine = Math.max(
             startLine,
             Math.min(
               lines.length,
-              requestedWhole ? startLine + 260 : requestedEnd,
+              openEnd ? startLine + 260 : requestedEnd,
             ),
           );
           const window = lines.slice(startLine - 1, endLine).join("\n");
           const clipped = window.length > AGENT_READ_CHARS ? `${window.slice(0, AGENT_READ_CHARS)}\n… file window truncated; continue with startLine=${endLine + 1} …` : window;
           observation = `File: ${file.filePath} (${lines.length} lines, showing ${startLine}-${Math.min(endLine, lines.length)})\n${numberedContent(clipped, startLine)}`;
           evidence.push({ path: file.filePath, label: "Read by agent", startLine });
-          ranges.push({ start: startLine, end: endLine, wholeFile: endLine >= lines.length, step: index });
+          ranges.push({
+            start: startLine,
+            end: endLine,
+            wholeFile: startLine === 1 && endLine >= lines.length,
+            step: index,
+          });
           readCoverage.set(filePath, ranges);
           log("info", `${lines.length} lines read`, `${file.filePath} (${startLine}-${Math.min(endLine, lines.length)})`);
           ok = true;
@@ -4838,7 +4987,8 @@ export async function runAgentTask(
           lines.push("", "Best file hits:");
           lines.push(
             ...found.results.map(
-              (result) => `- ${result.path}:${result.line} — ${result.text.slice(0, 400)}`,
+              (result) =>
+                `- ${result.path}:${result.line} — ${result.text.slice(0, 400)}\n  next: read_file path="${result.path}" startLine=${Math.max(1, result.line - 8)} endLine=${result.line + 24}`,
             ),
           );
           lines.push(
@@ -5095,6 +5245,8 @@ export async function runAgentTask(
     const observationLimit =
       step.action === "read_file" || step.action === "find_in_file"
         ? 3_200
+        : step.action === "read_symbol"
+          ? 6_000
         : step.action === "web_fetch"
           ? 8_000
           : step.action === "read_note"

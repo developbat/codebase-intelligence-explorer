@@ -519,6 +519,7 @@ export type AiAgentAction =
   | "list_files"
   | "search_code"
   | "read_file"
+  | "read_symbol"
   | "find_in_file"
   | "list_items"
   | "count_matches"
