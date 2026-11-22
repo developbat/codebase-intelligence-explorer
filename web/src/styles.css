@@ -18185,3 +18185,10 @@ button.canvas-stat {
     calc(100% - 15px) 12px,
     calc(100% - 10px) 12px;
 }
+
+.task-queue-note {
+  margin: 2px 0 0;
+  color: #fcd34d;
+  font-size: 9.5px;
+  line-height: 1.45;
+}

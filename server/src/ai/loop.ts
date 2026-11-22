@@ -361,7 +361,8 @@ export function blockDependentsOf(
 
 export function taskLooksLikeInspection(task: ProjectTask): boolean {
   const title = task.title;
-  const inspection = /\b(inspect|read|review|analy[sz]e|research|understand|explore|audit)\b|incele|oku|gözden geçir|araştır|analiz et/i;
+  const inspection =
+    /\b(inspect|read|review|analy[sz]e|research|understand|explore|audit|list|enumerate|count)\b|incele|oku|gözden geçir|araştır|analiz et|listele|listeler|listeleme|liste|kaç/i;
   const write = /\b(fix|update|add|create|write|implement|change|remove|delete|rename|move|refactor)\b|düzelt|ekle|oluştur|yaz|güncelle|değiştir|sil|taşı/i;
   return inspection.test(title) && !write.test(title);
 }
@@ -423,6 +424,15 @@ export function shouldRetryWithEditFirst(
   changedFiles: string[],
 ): boolean {
   return stoppedReason === "max_steps" && changedFiles.length === 0;
+}
+
+export function isInspectionAnswer(summary: string): boolean {
+  return (
+    summary.trim().length >= 120 &&
+    !/reached the step limit|invalid tool protocol|empty response|no readable text/i.test(
+      summary,
+    )
+  );
 }
 
 function aggregateResult(
@@ -797,6 +807,8 @@ export async function runProjectLoop(
       options.intent?.kind === "question" ||
       options.intent?.kind === "analyze" ||
       options.intent?.kind === "run";
+    const inspectionAnswer =
+      inspectionTask && isInspectionAnswer(result.summary);
     const writeWithoutChange =
       !inspectionTask &&
       taskLooksLikeWrite(task) &&
@@ -812,7 +824,9 @@ export async function runProjectLoop(
     const status =
       result.stoppedReason === "aborted"
         ? "blocked"
-        : result.stoppedReason !== "finished" ||
+        : inspectionAnswer
+          ? "done"
+          : result.stoppedReason !== "finished" ||
             malformedToolReply ||
             writeWithoutChange ||
             verificationBlocker ||
@@ -840,10 +854,15 @@ export async function runProjectLoop(
       attemptCost === undefined
         ? task.costUsd
         : Number(((task.costUsd ?? 0) + attemptCost).toFixed(6));
+    const answerNote =
+      inspectionAnswer && result.stoppedReason !== "finished"
+        ? "Stopped at the step limit; the answer above is the best evidence collected."
+        : undefined;
     queue = markTask(queue, task.id, {
       status,
       completedAt: nowIso(),
       resultSummary: result.summary,
+      notes: answerNote,
       changedFiles: result.changedFiles,
       commands: result.ranCommands,
       tokenUsage: addUsage(task.tokenUsage ?? emptyUsage(), result.tokenUsage),
@@ -867,11 +886,21 @@ export async function runProjectLoop(
     emit({ type: "task", queue, task: queue.tasks.find((item) => item.id === task.id) });
 
     if (status !== "done" && result.stoppedReason !== "aborted" && task.attempts === 0) {
-      const burnedStepsWithoutEdit = shouldRetryWithEditFirst(
-        result.stoppedReason,
-        result.changedFiles,
-      );
-      if (burnedStepsWithoutEdit) {
+      const burnedStepsWithoutEdit =
+        !inspectionTask &&
+        shouldRetryWithEditFirst(result.stoppedReason, result.changedFiles);
+      if (inspectionTask) {
+        // A read-only inspection task already produced its best evidence. Retrying
+        // it with another model usually repeats the same work and can leave the UI
+        // in a long "pending" state after a complete answer. Fail once, keep the
+        // answer/notes, and let the user rerun with a different model if needed.
+        queue = markTask(queue, task.id, {
+          status: "failed",
+          resultSummary: result.summary,
+          notes:
+            "Read-only inspection did not finish cleanly. The evidence above is preserved; rerun with another model if it is incomplete.",
+        });
+      } else if (burnedStepsWithoutEdit) {
         // The failure was exploration, not the model. Retry the same model with
         // the fast profile and an explicit edit-first note instead of paying for
         // an alternate (often more expensive) model.
@@ -880,6 +909,10 @@ export async function runProjectLoop(
           effort: "simple",
           role: "fast",
           modelOverride: undefined,
+          resultSummary: undefined,
+          verification: undefined,
+          changedFiles: [],
+          commands: [],
           notes:
             "Previous attempt used its whole step budget without editing. Start with the edit now; read at most 2 files or exact ranges, then make the change.",
         });
@@ -919,6 +952,13 @@ export async function runProjectLoop(
             : undefined,
           provider: alternate?.provider ?? task.provider,
           model: alternate?.model ?? task.model,
+          resultSummary: undefined,
+          verification: undefined,
+          changedFiles: [],
+          commands: [],
+          notes: alternate
+            ? `Retrying with ${alternate.provider}/${alternate.model} after the previous attempt failed.`
+            : "Retrying after the previous attempt failed.",
         });
       }
       queue = await saveQueue(analysis.rootPath, queue);

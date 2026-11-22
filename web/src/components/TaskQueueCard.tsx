@@ -88,6 +88,7 @@ export function TaskQueueCard({
                 {task.tokenUsage?.totalTokens ? ` · ${tokenLabel(task.tokenUsage.totalTokens)} ${t("tokens")}` : ""}
                 {task.costUsd ? ` · ${formatUsd(task.costUsd)}` : ""}
               </small>
+              {task.notes ? <p className="task-queue-note">{task.notes}</p> : null}
               {task.resultSummary ? <p>{task.resultSummary}</p> : null}
               {task.verification?.command ? (
                 <span className={`task-queue-verify ${task.verification.ok ? "is-ok" : "is-failed"}`}>

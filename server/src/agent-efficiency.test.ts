@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { blockDependentsOf, shouldRetryWithEditFirst, taskLooksLikeInspection } from "./ai/loop";
+import {
+  blockDependentsOf,
+  isInspectionAnswer,
+  shouldRetryWithEditFirst,
+  taskLooksLikeInspection,
+} from "./ai/loop";
 import {
   preferredVerificationCommand,
   readRangeCovered,
@@ -56,6 +61,23 @@ test("inspection tasks are recognized and may finish without edits", () => {
       title: "Inspect existing project files and structure",
       detail: "Read the files and report the structure.",
       status: "in_progress",
+      effort: "standard",
+      role: "main",
+      dependsOn: [],
+      attempts: 0,
+      changedFiles: [],
+      commands: [],
+      createdAt: "",
+      updatedAt: "",
+    }),
+    true,
+  );
+  assert.equal(
+    taskLooksLikeInspection({
+      id: "task-list",
+      title: "dosyada eksik işleri başlıkları ve iş açıklamaları ile getirip listeler misin?",
+      detail: "List the unchecked items.",
+      status: "pending",
       effort: "standard",
       role: "main",
       dependsOn: [],
@@ -127,4 +149,20 @@ test("a failed task blocks its pending dependents instead of leaving the queue s
   assert.equal(blocked.tasks.find((item) => item.id === "b")?.status, "blocked");
   assert.equal(blocked.tasks.find((item) => item.id === "c")?.status, "blocked");
   assert.equal(blocked.tasks.find((item) => item.id === "d")?.status, "pending");
+});
+
+test("inspection answers are accepted only when substantive", () => {
+  assert.equal(
+    isInspectionAnswer(
+      "Here is the complete list of 19 items with headings and descriptions: " +
+        "1) Terminal history, 2) verification, 3) streaming, 4) prompt test, " +
+        "5) impact context, 6) clarification, 7) LSP, 8) rescan.",
+    ),
+    true,
+  );
+  assert.equal(
+    isInspectionAnswer("The agent reached the step limit before finishing. Review the steps."),
+    false,
+  );
+  assert.equal(isInspectionAnswer("Too short"), false);
 });

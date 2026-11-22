@@ -4001,12 +4001,26 @@ export async function runAgentTask(
           (item) =>
             item.index > lastTruncated &&
             item.ok &&
-            ["read_document", "read_file", "search_document", "count_matches"].includes(item.action) &&
+            [
+              "read_document",
+              "read_file",
+              "read_symbol",
+              "search_document",
+              "search_code",
+              "find_in_file",
+              "count_matches",
+            ].includes(item.action) &&
             !/truncated|cut off|only part/i.test(item.observation),
         );
         const admitsIncomplete =
           /truncated|cut off|only part|not all|kalan.*görüntülenemedi|kesildi/i.test(rawSummary);
-        if ((lastTruncated >= 0 && !completeAfter) || admitsIncomplete) {
+        const summaryHasDeliverable =
+          rawSummary.split("\n").filter((line) => line.trim()).length >= 6 &&
+          /(?:^|\n)\s*(?:\||\d+\.|[-*])\s/.test(rawSummary);
+        if (
+          !summaryHasDeliverable &&
+          ((lastTruncated >= 0 && !completeAfter) || admitsIncomplete)
+        ) {
           evidenceNudges += 1;
           const observation =
             "The answer is not exhaustive. Do not finish with a partial list or a truncated read. Use search_document/count_matches or continue read_document with the returned startChar (or read_file with startLine) until every item is collected, verify the total, then finish with the complete result.";
