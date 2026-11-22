@@ -69,6 +69,7 @@ export interface ProjectTaskLoopOptions {
   replan?: boolean;
   retryFailed?: boolean;
   intent?: IntentAnalysis;
+  history?: { role: "user" | "assistant"; content: string }[];
 }
 
 export interface ProjectTaskLoopResult {

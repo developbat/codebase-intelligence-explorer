@@ -2215,6 +2215,7 @@ export function CodeStudio({
             maxMinutes: 45,
             retryFailed: runOptions.retryFailed === true,
             clarified: runOptions.skipClarify === true,
+            history: history.slice(-8),
           },
           handleEvent,
           controller.signal,

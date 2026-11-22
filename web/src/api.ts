@@ -651,6 +651,7 @@ export const api = {
         replan?: boolean;
         retryFailed?: boolean;
         clarified?: boolean;
+        history?: { role: "user" | "assistant"; content: string }[];
       },
       onEvent: (event: AiAgentEvent) => void,
       signal?: AbortSignal,

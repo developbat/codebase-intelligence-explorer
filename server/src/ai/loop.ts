@@ -199,6 +199,7 @@ export async function planProjectTasks(
     signal?: AbortSignal;
     replan?: boolean;
     intent?: IntentAnalysis;
+    history?: { role: "user" | "assistant"; content: string }[];
   } = {},
 ): Promise<ProjectTaskQueue> {
   const analysis = await loadAnalysis(projectId);
@@ -225,6 +226,12 @@ export async function planProjectTasks(
             ]
               .filter(Boolean)
               .join("\n")
+          : "",
+        options.history && options.history.length > 0
+          ? `Recent conversation:\n${options.history
+              .slice(-8)
+              .map((message) => `${message.role}: ${message.content.slice(0, 1_000)}`)
+              .join("\n")}`
           : "",
         `User goal:\n${goal.trim()}`,
       ]
@@ -588,6 +595,7 @@ export async function runProjectLoop(
         language: options.language,
         signal,
         intent,
+        history: options.history,
       });
     }
   }
@@ -700,6 +708,7 @@ export async function runProjectLoop(
           interactive: true,
           forceFast: current.effort === "simple",
           intent: options.intent,
+          history: options.history?.slice(-8),
         },
         (event) => {
           if (event.type === "done") {

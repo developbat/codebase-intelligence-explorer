@@ -32,6 +32,7 @@ interface IntentOptions {
   activeFile?: string;
   /** The user already answered a clarification question; do not ask again. */
   clarified?: boolean;
+  history?: { role: "user" | "assistant"; content: string }[];
   signal?: AbortSignal;
 }
 
@@ -97,6 +98,7 @@ Rules:
 - Never ask which files to read or where the code lives; the executor inspects automatically and "areas" is your best guess.
 - If the request names a product concept (detail, priority, reminder, status, tag), clarify its product behavior. Example: "task detail" -> ask "How should task detail work?" with options "multiline detail input shown under the task", "separate detail panel", "both". Never ask "which files should I inspect?".
 - If the request is already clear, set needsClarification=false, question="", options=[].
+- "kind": use "run" only when the user explicitly asks to execute a command, test, build or server. Checking, counting, searching, reading and summarizing are "analyze", not "run".
 - "scope": trivial = one property/line; small = one component or file; medium = a few files/behaviors; large = architecture, many modules, or a new app.
 - "mode": "single" for one focused change; "loop" only when the work has multiple independent parts that need separate verification.
 - "areas": likely existing files from the sample; put new files only when the request clearly creates them. Do not invent unrelated files.
@@ -122,6 +124,12 @@ async function userPrompt(
     await projectFacts(analysis, options.activeFile),
     `Interface language (use for understanding, question and option labels): ${options.language ?? "unknown"}`,
     options.clarified ? "The user already clarified the request. Do not ask again." : "",
+    options.history && options.history.length > 0
+      ? `Recent conversation (use it to resolve references like "again", "the same", "that file"):\n${options.history
+          .slice(-8)
+          .map((message) => `${message.role}: ${message.content.slice(0, 1_200)}`)
+          .join("\n")}`
+      : "",
     `User request:\n${instruction.trim()}`,
   ]
     .filter(Boolean)

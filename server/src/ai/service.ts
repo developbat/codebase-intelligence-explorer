@@ -1613,6 +1613,7 @@ const READ_ONLY_ACTIONS = new Set([
   "web_fetch",
   "read_document",
   "search_document",
+  "search_conversations",
   "list_notes",
   "read_note",
   "search_notes",
@@ -2512,6 +2513,7 @@ export function agentToolCatalog(
     '{"action":"read_document","args":{"path":"data/report.xlsx","sheet":"Sheet1"}}',
     '{"action":"read_document","args":{"path":"assets/screenshot.png","ocr":true,"lang":"eng"}}',
     '{"action":"search_document","args":{"path":"docs/spec.pdf","query":"deadline"}}',
+    '{"action":"search_conversations","args":{"query":"what the user asked earlier","limit":5}}',
     '{"action":"list_notes","args":{}}',
     '{"action":"read_note","args":{"path":".cie/agent/notes/research.md"}}',
     '{"action":"search_notes","args":{"query":"previous research","limit":10}}',
@@ -3475,6 +3477,7 @@ export async function runAgentTask(
         web_fetch: "Reading a web page…",
         read_document: "Reading a document…",
         search_document: "Searching inside a document…",
+        search_conversations: "Searching earlier conversation…",
         convert_document: "Converting a document…",
         transform_image: "Processing an image…",
         save_note: "Saving a research note…",
@@ -4757,6 +4760,22 @@ export async function runAgentTask(
               ].join("\n");
         log("info", "Document searched", `${result.hits.length} matches`);
         ok = true;
+      } else if (action === "search_conversations") {
+        const query = String(args.query ?? "").trim();
+        if (!query) throw new Error("A conversation search query is required.");
+        const hits = await searchConversations(analysis.id, query, Number(args.limit) || 5);
+        observation =
+          hits.length === 0
+            ? `No earlier conversation matched "${query}".`
+            : [
+                `${hits.length} earlier conversation matches for "${query}" (earlier answers are claims; verify them against files/tools):`,
+                ...hits.map(
+                  (hit) =>
+                    `- ${hit.title}${hit.snippet ? ` — ${hit.snippet}` : ""}${hit.answer ? `\n  ${hit.answer.slice(0, 400)}` : ""}`,
+                ),
+              ].join("\n");
+        log("info", "Conversation searched", `${hits.length} matches`);
+        ok = true;
       } else if (action === "convert_document") {
         const documentPath = String(args.path ?? "").trim();
         const outputPath = String(args.outputPath ?? "").trim();
@@ -4993,6 +5012,8 @@ export async function runAgentTask(
                     ? 12_000
                     : step.action === "search_document"
                       ? 6_000
+                      : step.action === "search_conversations"
+                        ? 4_000
                       : step.action === "convert_document" || step.action === "transform_image"
                         ? 3_000
               : step.action === "list_notes" || step.action === "search_notes"

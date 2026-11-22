@@ -1076,6 +1076,18 @@ app.post("/api/projects/:id/ai/agent/stream", async (req, res) => {
   };
 
   let intent: IntentAnalysis | undefined;
+  const history = Array.isArray(req.body?.history)
+    ? (req.body.history as unknown[])
+        .filter(
+          (message): message is { role: "user" | "assistant"; content: string } =>
+            typeof message === "object" &&
+            message !== null &&
+            ((message as { role?: unknown }).role === "user" ||
+              (message as { role?: unknown }).role === "assistant") &&
+            typeof (message as { content?: unknown }).content === "string",
+        )
+        .slice(-8)
+    : undefined;
   if (req.body?.mode !== "ask") {
     try {
       const analyzed = await analyzeIntent(req.params.id, instruction, {
@@ -1084,6 +1096,7 @@ app.post("/api/projects/:id/ai/agent/stream", async (req, res) => {
         language: typeof req.body?.language === "string" ? req.body.language : undefined,
         activeFile: typeof req.body?.activeFile === "string" ? req.body.activeFile : undefined,
         clarified: req.body?.clarified === true,
+        history,
         signal: controller.signal,
       });
       intent = analyzed.intent;
@@ -1134,18 +1147,7 @@ app.post("/api/projects/:id/ai/agent/stream", async (req, res) => {
         intent,
         mode:
           req.body?.mode === "ask" ? "ask" : req.body?.mode === "auto" ? "auto" : "coding",
-        history: Array.isArray(req.body?.history)
-          ? req.body.history
-              .filter(
-                (message: unknown): message is { role: "user" | "assistant"; content: string } =>
-                  typeof message === "object" &&
-                  message !== null &&
-                  ((message as { role?: unknown }).role === "user" ||
-                    (message as { role?: unknown }).role === "assistant") &&
-                  typeof (message as { content?: unknown }).content === "string",
-              )
-              .slice(-6)
-          : undefined,
+        history,
       },
       write,
       controller.signal,
@@ -1210,6 +1212,18 @@ app.post("/api/projects/:id/ai/loop/stream", async (req, res) => {
   let intent = undefined as Awaited<ReturnType<typeof analyzeIntent>>["intent"] | undefined;
   let intentProvider: string | undefined;
   let intentModel: string | undefined;
+  const history = Array.isArray(req.body?.history)
+    ? (req.body.history as unknown[])
+        .filter(
+          (message): message is { role: "user" | "assistant"; content: string } =>
+            typeof message === "object" &&
+            message !== null &&
+            ((message as { role?: unknown }).role === "user" ||
+              (message as { role?: unknown }).role === "assistant") &&
+            typeof (message as { content?: unknown }).content === "string",
+        )
+        .slice(-8)
+    : undefined;
   const existing = await getProjectTaskQueue(req.params.id).catch(() => null);
   const resuming =
     Boolean(existing) &&
@@ -1224,6 +1238,7 @@ app.post("/api/projects/:id/ai/loop/stream", async (req, res) => {
         language: typeof req.body?.language === "string" ? req.body.language : undefined,
         activeFile: typeof req.body?.activeFile === "string" ? req.body.activeFile : undefined,
         clarified: req.body?.clarified === true,
+        history,
       });
       intent = analyzed.intent;
       intentProvider = analyzed.provider;
@@ -1306,6 +1321,7 @@ app.post("/api/projects/:id/ai/loop/stream", async (req, res) => {
         replan: req.body?.replan === true,
         retryFailed: req.body?.retryFailed === true,
         intent,
+        history,
       },
       write,
       controller.signal,
