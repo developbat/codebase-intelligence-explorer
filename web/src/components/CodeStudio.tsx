@@ -97,6 +97,7 @@ import {
   Minimize2,
   PanelLeftClose,
   PanelLeftOpen,
+  Paperclip,
   Pencil,
   Play,
   Plus,
@@ -569,9 +570,6 @@ export function CodeStudio({
     totalTokens: number;
   } | null>(null);
   const [taskPanelOpen, setTaskPanelOpen] = useState(false);
-  const [taskLoopEnabled, setTaskLoopEnabled] = useState(
-    () => localStorage.getItem("cie:task-loop") !== "off",
-  );
   const [waitSeconds, setWaitSeconds] = useState(0);
   const chatLiveLogsRef = useRef<AiAgentLogEntry[]>([]);
   const lastIndexedChatRef = useRef<Record<string, string>>({});
@@ -636,6 +634,8 @@ export function CodeStudio({
   const [newFileBusy, setNewFileBusy] = useState(false);
   const [assetBusy, setAssetBusy] = useState(false);
   const assetInputRef = useRef<HTMLInputElement | null>(null);
+  const taskFileInputRef = useRef<HTMLInputElement | null>(null);
+  const [attachment, setAttachment] = useState<{ path: string; name: string; bytes: number } | null>(null);
   const [formatting, setFormatting] = useState(false);
   const workflowScrollRef = useRef<HTMLDivElement>(null);
   const [resizing, setResizing] = useState<"left" | "right" | null>(null);
@@ -788,10 +788,6 @@ export function CodeStudio({
   useEffect(() => {
     localStorage.setItem("cie:auto-format", autoFormat ? "on" : "off");
   }, [autoFormat]);
-
-  useEffect(() => {
-    localStorage.setItem("cie:task-loop", taskLoopEnabled ? "on" : "off");
-  }, [taskLoopEnabled]);
 
   useEffect(() => {
     let cancelled = false;
@@ -2133,13 +2129,17 @@ export function CodeStudio({
     appendUser = true,
     runOptions: { retryFailed?: boolean; skipClarify?: boolean } = {},
   ) {
-    if (!active || !question.trim() || chatBusy) return;
-    const text = question.trim();
+    if (!active || (!question.trim() && !attachment) || chatBusy) return;
+    const baseText = question.trim();
+    const text = attachment
+      ? `${baseText}${baseText ? "\n\n" : ""}Ek dosya: ${attachment.path}`
+      : baseText;
     const userMessage = { role: "user" as const, content: text };
     let history = chatMessages.map((message) => ({ role: message.role, content: message.content }));
     if (appendUser) {
       setChatMessages((current) => [...current, userMessage]);
       setChatInput("");
+      setAttachment(null);
     } else {
       const last = chatMessages[chatMessages.length - 1];
       if (last?.role === "user" && last.content === text) {
@@ -2164,7 +2164,7 @@ export function CodeStudio({
     agentAbortRef.current = controller;
     const liveSteps: AiAgentStep[] = [];
     const holder: { result: AiAgentResult | null } = { result: null };
-    const useTaskLoop = taskLoopEnabled;
+    const useTaskLoop = true;
     if (useTaskLoop) setTaskQueue(null);
 
     const handleEvent = (event: AiAgentEvent) => {
@@ -2330,6 +2330,35 @@ export function CodeStudio({
     } finally {
       setAssetBusy(false);
       if (assetInputRef.current) assetInputRef.current.value = "";
+    }
+  }
+
+  async function attachTaskFile(file: File) {
+    if (assetBusy) return;
+    if (file.size > 15_000_000) {
+      setError(t("File is too large (maximum 15 MB)."));
+      return;
+    }
+    setAssetBusy(true);
+    setError(null);
+    try {
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result ?? ""));
+        reader.onerror = () => reject(reader.error ?? new Error("Could not read the file."));
+        reader.readAsDataURL(file);
+      });
+      const dataBase64 = dataUrl.split(",")[1] ?? "";
+      const safeName = file.name.replace(/[^\w.\-]+/g, "-") || "attachment.bin";
+      const uploaded = await api.uploadAsset(analysis.id, `assets/${safeName}`, dataBase64);
+      setAttachment({ path: uploaded.filePath, name: file.name, bytes: uploaded.bytes });
+    } catch (requestError) {
+      setError(
+        requestError instanceof Error ? requestError.message : t("Could not attach the file."),
+      );
+    } finally {
+      setAssetBusy(false);
+      if (taskFileInputRef.current) taskFileInputRef.current.value = "";
     }
   }
 
@@ -2803,14 +2832,7 @@ export function CodeStudio({
               </button>
             ) : null}
             <button onClick={() => setIndexSearchOpen(true)} title={t("Search the project index")}>
-              <Search size={12} /> {t("Search")}
-            </button>
-            <button
-              className={consoleOpen ? "is-active" : ""}
-              onClick={() => setConsoleOpen((value) => !value)}
-              title={t("Console")}
-            >
-              <Terminal size={12} /> {t("Console")}
+              <Search size={12} /> {t("Search project")}
             </button>
             {active ? (
               <div className="studio-model-wrap">
@@ -3267,7 +3289,7 @@ export function CodeStudio({
               onClick={() => setTaskPanelOpen((value) => !value)}
               title={t("Open task queue")}
             >
-              <ListChecks size={12} />
+              <ListChecks size={14} />
               {taskQueue.tasks.filter((task) => task.status === "done").length}/{taskQueue.tasks.length}
             </button>
           </div>
@@ -3334,14 +3356,11 @@ export function CodeStudio({
               {sessionTokens > 0 ? `${t("Session")} ${formatTokens(sessionTokens)} ${t("tokens")}` : ""}
             </span>
             <button
-              className={`studio-loop-toggle ${taskLoopEnabled ? "is-on" : ""}`}
-              onClick={() => setTaskLoopEnabled((value) => !value)}
-              disabled={chatBusy}
-              title={t(
-                "Plan tasks, run them one by one, and continue until the queue is done. Questions still use one answer.",
-              )}
+              className={`studio-loop-toggle ${consoleOpen ? "is-on" : ""}`}
+              onClick={() => setConsoleOpen((value) => !value)}
+              title={t("Console")}
             >
-              <ListChecks size={10} /> {t("Task loop")}
+              <Terminal size={10} /> {t("Console")}
             </button>
             <span
               className="studio-composer-model"
@@ -3396,7 +3415,36 @@ export function CodeStudio({
               </div>
             </div>
           ) : null}
+          {attachment ? (
+            <div className="studio-attachment-chip">
+              <Paperclip size={11} />
+              <span>{attachment.name}</span>
+              <code>{attachment.path}</code>
+              <button onClick={() => setAttachment(null)} aria-label={t("Remove attachment")}>
+                <X size={10} />
+              </button>
+            </div>
+          ) : null}
           <div className="studio-composer-row">
+            <button
+              className="studio-attach-button"
+              onClick={() => taskFileInputRef.current?.click()}
+              disabled={assetBusy || chatBusy}
+              title={t("Attach a file (PDF, Word, Excel, JSON, text, image)")}
+              aria-label={t("Attach a file (PDF, Word, Excel, JSON, text, image)")}
+            >
+              {assetBusy ? <Loader2 size={14} className="spin" /> : <Paperclip size={14} />}
+            </button>
+            <input
+              ref={taskFileInputRef}
+              type="file"
+              hidden
+              accept=".pdf,.doc,.docx,.rtf,.xls,.xlsx,.csv,.json,.txt,.md,.html,.htm,image/*"
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                if (file) void attachTaskFile(file);
+              }}
+            />
             <textarea
               value={chatInput}
               onChange={(event) => {
@@ -3412,7 +3460,7 @@ export function CodeStudio({
                 }
               }}
               placeholder={t("Ask, edit, run, or build something in this project…")}
-              rows={2}
+              rows={3}
             />
             {chatBusy ? (
               <button
@@ -3430,7 +3478,7 @@ export function CodeStudio({
               <button
                 className="studio-send-button"
                 onClick={() => void askProject()}
-                disabled={!active || !chatInput.trim()}
+                disabled={!active || (!chatInput.trim() && !attachment)}
                 title={t("Send")}
               >
                 <Send size={14} />
