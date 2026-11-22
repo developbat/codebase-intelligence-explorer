@@ -532,7 +532,8 @@ export const api = {
 
   mobileDevices: () => request<MobileDeviceReport>("/api/mobile/devices"),
 
-  toolchains: () => request<ToolchainReport>("/api/toolchains"),
+  toolchains: (refresh = false) =>
+    request<ToolchainReport>(`/api/toolchains${refresh ? "?refresh=1" : ""}`),
 
   installToolchain: (id: string) =>
     request<ToolchainInstallResult>("/api/toolchains/install", {

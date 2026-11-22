@@ -1,30 +1,25 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Download, Loader2, RefreshCw, Wrench } from "lucide-react";
 import type { ToolchainReport } from "../../../shared/toolchains";
 import { api } from "../api";
 import { useI18n } from "../i18n";
+import { useCachedResource } from "../lib/resourceCache";
 
 export function ToolchainsPanel() {
   const { t } = useI18n();
-  const [report, setReport] = useState<ToolchainReport | null>(null);
-  const [busy, setBusy] = useState(false);
+  const {
+    data: report,
+    loading: busy,
+    error,
+    updatedAt,
+    refresh,
+  } = useCachedResource<ToolchainReport>(
+    "toolchains",
+    (force) => api.toolchains(force),
+    { maxAgeMs: 60_000, errorMessage: t("Could not check toolchains.") },
+  );
   const [installing, setInstalling] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
-
-  async function load() {
-    setBusy(true);
-    try {
-      setReport(await api.toolchains());
-    } catch {
-      setReport(null);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  useEffect(() => {
-    void load();
-  }, []);
 
   async function install(id: string) {
     setInstalling(id);
@@ -32,7 +27,7 @@ export function ToolchainsPanel() {
     try {
       const result = await api.installToolchain(id);
       setMessage(result.output || (result.ok ? t("Installed.") : t("Install failed.")));
-      await load();
+      await refresh(true);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : t("Install failed."));
     } finally {
@@ -49,11 +44,17 @@ export function ToolchainsPanel() {
           </h3>
           <p>{t("Installed compilers, SDKs and mobile toolchains; missing tools can be installed here.")}</p>
         </div>
-        <button className="ghost-button" onClick={() => void load()} disabled={busy || installing !== null}>
+        <button className="ghost-button" onClick={() => void refresh(true)} disabled={busy || installing !== null}>
           {busy ? <Loader2 size={11} className="spin" /> : <RefreshCw size={11} />}
           {t("Refresh")}
         </button>
       </div>
+      {error ? <div className="form-error">{error}</div> : null}
+      {updatedAt ? (
+        <small className="toolchains-updated">
+          {t("Last checked")}: {new Date(updatedAt).toLocaleTimeString()}
+        </small>
+      ) : null}
       {report ? (
         <div className="toolchains-list">
           {report.tools.map((tool) => {

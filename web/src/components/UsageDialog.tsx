@@ -5,6 +5,7 @@ import type { ModelPricing, PricingReport } from "../../../shared/pricing";
 import { formatUsd } from "../../../shared/pricing";
 import { api } from "../api";
 import { useI18n } from "../i18n";
+import { readCache, writeCache } from "../lib/resourceCache";
 
 export function formatTokens(value: number): string {
   if (!Number.isFinite(value) || value <= 0) return "0";
@@ -48,8 +49,12 @@ export function UsageDialog({
   onClose: () => void;
 }) {
   const { t } = useI18n();
-  const [report, setReport] = useState<AiUsageReport | null>(null);
-  const [pricing, setPricing] = useState<PricingReport | null>(null);
+  const [report, setReport] = useState<AiUsageReport | null>(
+    () => readCache<AiUsageReport>(`usage:${projectId}`, 15_000)?.value ?? null,
+  );
+  const [pricing, setPricing] = useState<PricingReport | null>(
+    () => readCache<PricingReport>("model-pricing", 300_000)?.value ?? null,
+  );
   const [showAllPrices, setShowAllPrices] = useState(false);
   const [pricingBusy, setPricingBusy] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -58,7 +63,15 @@ export function UsageDialog({
   useEffect(() => {
     if (!open) return;
     let cancelled = false;
-    setBusy(true);
+    const cachedUsage = readCache<AiUsageReport>(`usage:${projectId}`, 15_000);
+    const cachedPricing = readCache<PricingReport>("model-pricing", 300_000);
+    if (cachedUsage?.value && !cachedUsage.stale && cachedPricing?.value && !cachedPricing.stale) {
+      setReport(cachedUsage.value);
+      setPricing(cachedPricing.value);
+      setBusy(false);
+      return;
+    }
+    setBusy(!cachedUsage?.value);
     setError(null);
     Promise.all([
       api.usage(projectId),
@@ -67,7 +80,11 @@ export function UsageDialog({
       .then(([value, priceValue]) => {
         if (!cancelled) {
           setReport(value);
-          setPricing(priceValue);
+          writeCache(`usage:${projectId}`, value);
+          if (priceValue) {
+            setPricing(priceValue);
+            writeCache("model-pricing", priceValue);
+          }
         }
       })
       .catch((requestError) => {
@@ -147,7 +164,10 @@ export function UsageDialog({
                     setPricingBusy(true);
                     void api.ai
                       .refreshPricing()
-                      .then(setPricing)
+                      .then((value) => {
+                        setPricing(value);
+                        writeCache("model-pricing", value);
+                      })
                       .catch(() => undefined)
                       .finally(() => setPricingBusy(false));
                   }}

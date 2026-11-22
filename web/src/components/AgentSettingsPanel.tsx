@@ -19,6 +19,7 @@ import type {
 } from "../../../shared/ai";
 import { api } from "../api";
 import { useI18n } from "../i18n";
+import { readCache, writeCache } from "../lib/resourceCache";
 
 interface AgentSettingsPanelProps {
   settings: AiSettingsPublic | null;
@@ -69,6 +70,7 @@ export function AgentSettingsPanel({ settings, onSaved }: AgentSettingsPanelProp
     try {
       const response = await api.ai.modelHealth();
       setHealth(response.models);
+      writeCache("model-health", response.models);
     } catch {
       setHealth([]);
     } finally {
@@ -77,6 +79,11 @@ export function AgentSettingsPanel({ settings, onSaved }: AgentSettingsPanelProp
   }
 
   useEffect(() => {
+    const cached = readCache<ModelHealth[]>("model-health", 30_000);
+    if (cached?.value && !cached.stale) {
+      setHealth(cached.value);
+      return;
+    }
     void loadHealth();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

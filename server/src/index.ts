@@ -543,9 +543,9 @@ app.post("/api/projects/:id/assets/placeholder", async (req, res) => {
   }
 });
 
-app.get("/api/toolchains", async (_req, res) => {
+app.get("/api/toolchains", async (req, res) => {
   try {
-    res.json(await checkToolchains());
+    res.json(await checkToolchains(req.query.refresh === "1"));
   } catch (error) {
     handleError(res, error);
   }

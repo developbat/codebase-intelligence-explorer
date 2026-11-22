@@ -1,31 +1,26 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Camera, FileText, Loader2, Play, RefreshCw, Smartphone } from "lucide-react";
 import type { MobileDevice } from "../../../shared/mobileDevices";
 import type { MobileDeviceReport } from "../../../shared/mobileDevices";
 import { api } from "../api";
 import { useI18n } from "../i18n";
+import { useCachedResource } from "../lib/resourceCache";
 
 export function MobileDevicesPanel({ projectId }: { projectId?: string }) {
   const { t } = useI18n();
-  const [report, setReport] = useState<MobileDeviceReport | null>(null);
-  const [busy, setBusy] = useState(false);
+  const {
+    data: report,
+    loading: busy,
+    error,
+    updatedAt,
+    refresh,
+  } = useCachedResource<MobileDeviceReport>(
+    "mobile-devices",
+    () => api.mobileDevices(),
+    { maxAgeMs: 15_000, errorMessage: t("Could not list mobile devices.") },
+  );
   const [actionBusy, setActionBusy] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
-
-  async function load() {
-    setBusy(true);
-    try {
-      setReport(await api.mobileDevices());
-    } catch {
-      setReport(null);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  useEffect(() => {
-    void load();
-  }, []);
 
   async function boot(device: MobileDevice) {
     if (!projectId) return;
@@ -34,7 +29,7 @@ export function MobileDevicesPanel({ projectId }: { projectId?: string }) {
     try {
       const result = await api.mobileBoot(projectId, device.platform, device.id);
       setMessage(result.message);
-      await load();
+      await refresh(true);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : t("Could not boot the device."));
     } finally {
@@ -108,7 +103,7 @@ export function MobileDevicesPanel({ projectId }: { projectId?: string }) {
           </h3>
           <p>{t("iOS Simulator and Android emulator/device availability on this machine.")}</p>
         </div>
-        <button className="ghost-button" onClick={() => void load()} disabled={busy}>
+        <button className="ghost-button" onClick={() => void refresh(true)} disabled={busy}>
           {busy ? <Loader2 size={11} className="spin" /> : <RefreshCw size={11} />}
           {t("Refresh")}
         </button>

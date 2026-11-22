@@ -891,7 +891,10 @@ export default function App() {
             onClick={() => {
               if (!analysis) return;
               changeProduct("studio");
-              setSettingsRequest({ tab: "general", nonce: Date.now() });
+              setSettingsRequest({
+                tab: (localStorage.getItem("cie:settings-tab") as SettingsTab | null) ?? "general",
+                nonce: Date.now(),
+              });
             }}
             disabled={!analysis}
             title={t("Settings")}

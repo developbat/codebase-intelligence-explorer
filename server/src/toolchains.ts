@@ -175,13 +175,21 @@ async function checkDefinition(definition: Definition): Promise<ToolchainTool> {
   };
 }
 
-export async function checkToolchains(): Promise<ToolchainReport> {
+let cachedReport: { report: ToolchainReport; at: number } | null = null;
+const CACHE_MS = 45_000;
+
+export async function checkToolchains(force = false): Promise<ToolchainReport> {
+  if (!force && cachedReport && Date.now() - cachedReport.at < CACHE_MS) {
+    return cachedReport.report;
+  }
   const tools = await Promise.all(DEFINITIONS.map((definition) => checkDefinition(definition)));
-  return {
+  const report: ToolchainReport = {
     platform: platform(),
     tools,
     missing: tools.filter((tool) => !tool.installed).map((tool) => tool.id),
   };
+  cachedReport = { report, at: Date.now() };
+  return report;
 }
 
 export async function installToolchain(id: string): Promise<ToolchainInstallResult> {

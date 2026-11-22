@@ -1,42 +1,30 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { ListChecks, Loader2, Play, RefreshCw, Wrench } from "lucide-react";
 import type { ProjectToolList } from "../../../shared/projectTools";
 import { api } from "../api";
 import { useI18n } from "../i18n";
+import { useCachedResource } from "../lib/resourceCache";
 
 export function ToolsPanel({ projectId }: { projectId?: string }) {
   const { t } = useI18n();
-  const [data, setData] = useState<ProjectToolList | null>(null);
-  const [loading, setLoading] = useState(false);
+  const {
+    data,
+    loading,
+    error,
+    updatedAt,
+    refresh,
+  } = useCachedResource<ProjectToolList>(
+    projectId ? `tools:${projectId}` : null,
+    () => api.projectTools(projectId!),
+    { maxAgeMs: 30_000, errorMessage: t("Could not load project tools.") },
+  );
   const [runBusy, setRunBusy] = useState<string | null>(null);
   const [output, setOutput] = useState<{ name: string; text: string; ok: boolean } | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  async function load() {
-    if (!projectId) {
-      setData(null);
-      return;
-    }
-    setLoading(true);
-    try {
-      setData(await api.projectTools(projectId));
-      setError(null);
-    } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : t("Could not load project tools."));
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  useEffect(() => {
-    void load();
-  }, [projectId]);
 
   async function run(name: string) {
     if (!projectId || runBusy) return;
     setRunBusy(name);
     setOutput(null);
-    setError(null);
     try {
       const result = await api.runProjectTool(projectId, name);
       setOutput({
@@ -44,9 +32,13 @@ export function ToolsPanel({ projectId }: { projectId?: string }) {
         ok: result.result.exitCode === 0,
         text: [result.result.stdout, result.result.stderr].filter(Boolean).join("\n").slice(-20_000) || t("No output."),
       });
-      await load();
+      await refresh(true);
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : t("Could not run this tool."));
+      setOutput({
+        name,
+        ok: false,
+        text: requestError instanceof Error ? requestError.message : t("Could not run this tool."),
+      });
     } finally {
       setRunBusy(null);
     }
@@ -65,7 +57,7 @@ export function ToolsPanel({ projectId }: { projectId?: string }) {
             )}
           </p>
         </div>
-        <button className="ghost-button" onClick={() => void load()} disabled={loading}>
+        <button className="ghost-button" onClick={() => void refresh(true)} disabled={loading}>
           <RefreshCw size={11} className={loading ? "spin" : ""} /> {t("Refresh")}
         </button>
       </div>
@@ -74,6 +66,11 @@ export function ToolsPanel({ projectId }: { projectId?: string }) {
         <div className="tools-empty">{t("Open a project to manage its tools.")}</div>
       ) : null}
       {error ? <div className="form-error">{error}</div> : null}
+      {updatedAt ? (
+        <small className="toolchains-updated">
+          {t("Last checked")}: {new Date(updatedAt).toLocaleTimeString()}
+        </small>
+      ) : null}
 
       {projectId && data && data.tools.length === 0 ? (
         <div className="tools-empty">

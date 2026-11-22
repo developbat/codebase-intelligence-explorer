@@ -146,6 +146,10 @@ export function SettingsScreen({
   }, [open, initialTab]);
 
   useEffect(() => {
+    localStorage.setItem("cie:settings-tab", tab);
+  }, [tab]);
+
+  useEffect(() => {
     if (open) screenRef.current?.focus();
   }, [open]);
 

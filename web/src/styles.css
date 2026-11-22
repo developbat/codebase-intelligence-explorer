@@ -17091,3 +17091,10 @@ button.canvas-stat {
   font-size: 7.5px;
   line-height: 1.5;
 }
+
+.toolchains-updated {
+  display: block;
+  margin: -2px 0 6px;
+  color: var(--muted-2);
+  font-size: 7.5px;
+}

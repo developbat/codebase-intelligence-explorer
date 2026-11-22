@@ -20,6 +20,7 @@ import type {
 } from "../../../shared/skills";
 import { api } from "../api";
 import { useI18n } from "../i18n";
+import { readCache, writeCache } from "../lib/resourceCache";
 
 interface SkillsPanelProps {
   projectId: string;
@@ -64,6 +65,7 @@ export function SkillsPanel({ projectId }: SkillsPanelProps) {
     try {
       const result = await api.skills.list(projectId);
       setData(result);
+      writeCache(`skills:${projectId}`, result);
       setReloadToken((value) => value + 1);
       setSelectedKey((current) => {
         if (current && result.skills.some((skill) => skill.key === current)) return current;
@@ -84,6 +86,17 @@ export function SkillsPanel({ projectId }: SkillsPanelProps) {
     setFileContent(null);
     setQuery("");
     setScope("all");
+    const cached = readCache<SkillListResponse>(`skills:${projectId}`, 60_000);
+    if (cached?.value && !cached.stale) {
+      setData(cached.value);
+      setSelectedKey((current) =>
+        current && cached.value.skills.some((skill) => skill.key === current)
+          ? current
+          : cached.value.skills[0]?.key ?? null,
+      );
+      setLoading(false);
+      return;
+    }
     void load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
