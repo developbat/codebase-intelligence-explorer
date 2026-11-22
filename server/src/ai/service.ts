@@ -58,6 +58,12 @@ import {
 } from "../webResearch";
 import { compressVideo } from "../mediaTools";
 import {
+  convertDocument,
+  readDocument,
+  searchDocument,
+  transformImage,
+} from "../documentTools";
+import {
   gitCommit,
   gitCreateBranch,
   gitInfo,
@@ -1604,6 +1610,8 @@ const READ_ONLY_ACTIONS = new Set([
   "game_check",
   "graphic_check",
   "web_fetch",
+  "read_document",
+  "search_document",
   "list_notes",
   "read_note",
   "search_notes",
@@ -2475,6 +2483,10 @@ export function agentToolCatalog(
     '{"action":"create_graphic","args":{"path":"assets/report.svg","kind":"bar","title":"Weekly progress","data":[{"label":"Mon","value":4},{"label":"Tue","value":7},{"label":"Wed","value":5}]}}',
     '{"action":"graphic_check","args":{"path":"assets/report.svg","expectText":"Weekly progress"}}',
     '{"action":"web_fetch","args":{"url":"https://example.com","maxChars":8000}}',
+    '{"action":"read_document","args":{"path":"docs/spec.pdf","pageStart":1,"pageEnd":20}}',
+    '{"action":"read_document","args":{"path":"data/report.xlsx","sheet":"Sheet1"}}',
+    '{"action":"read_document","args":{"path":"assets/screenshot.png","ocr":true,"lang":"eng"}}',
+    '{"action":"search_document","args":{"path":"docs/spec.pdf","query":"deadline"}}',
     '{"action":"list_notes","args":{}}',
     '{"action":"read_note","args":{"path":".cie/agent/notes/research.md"}}',
     '{"action":"search_notes","args":{"query":"previous research","limit":10}}',
@@ -2513,6 +2525,8 @@ export function agentToolCatalog(
     tools.push(`{"action":"git_create_branch","args":{"name":"feature/x","checkout":true}}${approval}`);
     tools.push(`{"action":"git_remote","args":{"name":"origin","url":"git@github.com:owner/repo.git"}}${approval}`);
     tools.push(`{"action":"compress_video","args":{"path":"assets/demo.mp4","maxWidth":1280,"crf":28,"preset":"medium"}}${commandApproval}  // ffmpeg`);
+    tools.push(`{"action":"convert_document","args":{"path":"docs/spec.pdf","outputPath":"notes/spec.md","format":"md"}}${approval}`);
+    tools.push(`{"action":"transform_image","args":{"path":"assets/photo.jpg","outputPath":"assets/photo-small.jpg","maxDimension":1200,"format":"jpeg","quality":82}}${approval}`);
     tools.push(`{"action":"install_skill","args":{"source":"owner/repo","ref":"main","skills":["skill-folder"],"scope":"project","enable":true}}${approval}  // install SKILL.md packs; scripts are never executed`);
     tools.push(`{"action":"set_skill_enabled","args":{"key":"project:project-cie:my-skill","enabled":true}}${approval}`);
     tools.push(`{"action":"remove_skill","args":{"key":"project:project-cie:my-skill"}}  // always requires confirmation`);
@@ -3434,6 +3448,10 @@ export async function runAgentTask(
         create_graphic: "Creating a graphic…",
         graphic_check: "Checking a graphic…",
         web_fetch: "Reading a web page…",
+        read_document: "Reading a document…",
+        search_document: "Searching inside a document…",
+        convert_document: "Converting a document…",
+        transform_image: "Processing an image…",
         save_note: "Saving a research note…",
         list_notes: "Listing research notes…",
         read_note: "Reading a research note…",
@@ -4671,6 +4689,102 @@ export async function runAgentTask(
         evidence.push({ path: result.output.path, label: "Compressed video" });
         log("success", "Video compressed", `${result.savedPercent}% saved`);
         ok = true;
+      } else if (action === "read_document") {
+        const documentPath = String(args.path ?? "").trim();
+        if (!documentPath) throw new Error("A document path is required.");
+        const document = await readDocument(analysis.rootPath, documentPath, {
+          pageStart: Number(args.pageStart) || undefined,
+          pageEnd: Number(args.pageEnd) || undefined,
+          sheet: typeof args.sheet === "string" ? args.sheet : undefined,
+          ocr: args.ocr !== false,
+          lang: typeof args.lang === "string" ? args.lang : undefined,
+          maxChars: Number(args.maxChars) || undefined,
+        });
+        observation = [
+          `Document: ${document.path} · ${document.kind} · ${document.bytes} bytes`,
+          document.pages ? `Pages: ${document.pages}` : "",
+          document.sheets ? `Sheets: ${document.sheets.join(", ")}` : "",
+          document.width && document.height ? `Image: ${document.width}×${document.height}${document.ocr ? " · OCR" : ""}` : "",
+          document.truncated ? "(text truncated)" : "",
+          "",
+          document.text || "(no readable text)",
+        ]
+          .filter(Boolean)
+          .join("\n");
+        log("success", "Document read", `${document.path} · ${document.kind}`);
+        ok = true;
+      } else if (action === "search_document") {
+        const documentPath = String(args.path ?? "").trim();
+        const query = String(args.query ?? "").trim();
+        if (!documentPath || !query) throw new Error("A document path and query are required.");
+        const result = await searchDocument(analysis.rootPath, documentPath, query, {
+          maxResults: Number(args.maxResults) || undefined,
+          maxChars: Number(args.maxChars) || undefined,
+        });
+        observation =
+          result.hits.length === 0
+            ? `No matches for "${query}" in ${result.path}.`
+            : [
+                `${result.hits.length} matches for "${query}" in ${result.path}:`,
+                ...result.hits.map((hit) => `- line ${hit.line}: ${hit.snippet}`),
+              ].join("\n");
+        log("info", "Document searched", `${result.hits.length} matches`);
+        ok = true;
+      } else if (action === "convert_document") {
+        const documentPath = String(args.path ?? "").trim();
+        const outputPath = String(args.outputPath ?? "").trim();
+        if (!documentPath || !outputPath) throw new Error("Document path and output path are required.");
+        const format =
+          args.format === "md" || args.format === "json" || args.format === "csv" || args.format === "txt"
+            ? args.format
+            : undefined;
+        const allowed = await requirePermission(
+          "write",
+          "convert_document",
+          outputPath,
+          "Extract a document and write the converted copy into the project.",
+          { preview: `${documentPath} → ${outputPath}` },
+        );
+        if (!allowed) throw new Error("The user denied permission to convert this document.");
+        const result = await convertDocument(analysis.rootPath, documentPath, outputPath, {
+          sheet: typeof args.sheet === "string" ? args.sheet : undefined,
+          format,
+        });
+        observation = `Converted to ${result.path} (${result.bytes} bytes, ${result.format}).`;
+        changedFiles.push(result.path);
+        evidence.push({ path: result.path, label: "Converted document" });
+        log("success", "Document converted", result.path);
+        ok = true;
+      } else if (action === "transform_image") {
+        const imagePath = String(args.path ?? "").trim();
+        if (!imagePath) throw new Error("An image path is required.");
+        const allowed = await requirePermission(
+          "write",
+          "transform_image",
+          imagePath,
+          "Resize or convert an image. This writes a new image file.",
+          { preview: `${args.width ?? "?"}×${args.height ?? "?"} · ${args.format ?? "same format"}` },
+        );
+        if (!allowed) throw new Error("The user denied permission to transform this image.");
+        const result = await transformImage(analysis.rootPath, imagePath, {
+          outputPath: typeof args.outputPath === "string" ? args.outputPath : undefined,
+          width: Number(args.width) || undefined,
+          height: Number(args.height) || undefined,
+          maxDimension: Number(args.maxDimension) || undefined,
+          format:
+            args.format === "png" ||
+            args.format === "jpeg" ||
+            args.format === "tiff" ||
+            args.format === "gif"
+              ? args.format
+              : undefined,
+          quality: Number(args.quality) || undefined,
+        });
+        observation = `Image written: ${result.path}\n${result.width ?? "?"}×${result.height ?? "?"} · ${result.bytes} bytes · ${result.format ?? "image"}`;
+        changedFiles.push(result.path);
+        evidence.push({ path: result.path, label: "Transformed image" });
+        log("success", "Image transformed", result.path);
+        ok = true;
       } else if (action === "write_file") {
         if (changedFiles.length >= AGENT_MAX_WRITES) throw new Error(`Write limit reached (${AGENT_MAX_WRITES} files).`);
         const filePath = normalizeAgentPath(analysis.rootPath, args.path);
@@ -4848,6 +4962,12 @@ export async function runAgentTask(
                 ? 8_000
                 : step.action === "git_push"
                   ? 4_000
+                  : step.action === "read_document"
+                    ? 12_000
+                    : step.action === "search_document"
+                      ? 6_000
+                      : step.action === "convert_document" || step.action === "transform_image"
+                        ? 3_000
               : step.action === "list_notes" || step.action === "search_notes"
                 ? 4_000
                 : step.action === "compress_video"

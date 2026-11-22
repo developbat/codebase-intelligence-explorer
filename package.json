@@ -57,7 +57,8 @@
     "react-markdown": "^10.1.0",
     "remark-gfm": "^4.0.1",
     "three": "^0.170.0",
-    "typescript": "^5.7.2"
+    "typescript": "^5.7.2",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@types/diff": "^5.2.3",

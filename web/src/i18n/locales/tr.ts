@@ -1257,6 +1257,8 @@ export const tr: Dictionary = {
   "Uploaded {path} ({size} KB). Reference it from HTML or CSS.": "{path} yüklendi ({size} KB). HTML veya CSS'ten referans verebilirsin.",
   "Asset is too large (maximum 15 MB).": "Asset çok büyük (en fazla 15 MB).",
   "Upload asset": "Asset yükle",
+  "Uploaded {path} ({size} KB). Ask the agent to read, search or summarize it.": "{path} yüklendi ({size} KB). Ajanın dosyayı okumasını, içinde arama yapmasını veya özetlemesini isteyin.",
+  "Add file (PDF, Word, Excel, JSON, text, image)": "Dosya ekle (PDF, Word, Excel, JSON, metin, resim)",
   "Create the project skeleton, wire dependencies, and verify the build.": "Proje iskeletini oluştur, bağımlılıkları bağla ve build'i doğrula.",
   "Inspect the project, run the requested command with permission, and report the output.": "Projeyi incele, istenen komutu izinle çalıştır ve çıktıyı bildir.",
   "Inspect {count} likely files, apply scoped edits, and verify the result.": "{count} olası dosyayı incele, kapsamlı düzenlemeleri uygula ve sonucu doğrula.",

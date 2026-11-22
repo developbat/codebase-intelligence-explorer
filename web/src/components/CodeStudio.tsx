@@ -2318,7 +2318,7 @@ export function CodeStudio({
       const safeName = file.name.replace(/[^\w.\-]+/g, "-") || "asset.bin";
       const uploaded = await api.uploadAsset(analysis.id, `assets/${safeName}`, dataBase64);
       setMessage(
-        t("Uploaded {path} ({size} KB). Reference it from HTML or CSS.", {
+        t("Uploaded {path} ({size} KB). Ask the agent to read, search or summarize it.", {
           path: uploaded.filePath,
           size: Math.max(1, Math.round(uploaded.bytes / 1024)),
         }),
@@ -2533,8 +2533,8 @@ export function CodeStudio({
                 className="studio-tree-icon"
                 onClick={() => assetInputRef.current?.click()}
                 disabled={assetBusy}
-                title={t("Upload asset")}
-                aria-label={t("Upload asset")}
+                title={t("Add file (PDF, Word, Excel, JSON, text, image)")}
+                aria-label={t("Add file (PDF, Word, Excel, JSON, text, image)")}
               >
                 {assetBusy ? <Loader2 size={11} className="spin" /> : <Upload size={11} />}
               </button>

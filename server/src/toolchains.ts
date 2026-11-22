@@ -74,6 +74,28 @@ const DEFINITIONS: Definition[] = [
     },
   },
   {
+    id: "pdftotext",
+    name: "Poppler PDF tools",
+    commands: ["pdftotext"],
+    args: ["-v"],
+    install: {
+      darwin: "brew install poppler",
+      linux: "sudo apt-get install -y poppler-utils",
+      win32: "choco install poppler -y",
+    },
+  },
+  {
+    id: "tesseract",
+    name: "Tesseract OCR",
+    commands: ["tesseract"],
+    args: ["--version"],
+    install: {
+      darwin: "brew install tesseract",
+      linux: "sudo apt-get install -y tesseract-ocr",
+      win32: "choco install tesseract -y",
+    },
+  },
+  {
     id: "ffmpeg",
     name: "FFmpeg",
     commands: ["ffmpeg"],
