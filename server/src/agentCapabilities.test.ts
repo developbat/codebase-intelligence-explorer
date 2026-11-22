@@ -23,6 +23,15 @@ test("agent-created project tools are registered and discoverable", async () => 
     assert.ok(listed.tools.some((item) => item.name === "check-links"));
     const found = await findProjectTool(root, "check-links");
     assert.equal(found?.description, "Validate markdown links");
+
+    await fs.mkdir(path.join(root, ".cie", "agent", "tools"), { recursive: true });
+    await fs.writeFile(
+      path.join(root, ".cie", "agent", "tools", "link-audit.sh"),
+      "#!/bin/bash\n# link-audit: Find markdown links recursively.\n# Usage: bash link-audit.sh\necho ok\n",
+    );
+    const synced = await listProjectTools(root);
+    const audit = synced.tools.find((item) => item.name === "link-audit");
+    assert.equal(audit?.description, "Find markdown links recursively.");
   } finally {
     await fs.rm(root, { recursive: true, force: true });
   }

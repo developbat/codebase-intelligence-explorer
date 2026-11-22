@@ -25,12 +25,28 @@ function UsageCard({
 }) {
   return (
     <div className="usage-card">
-      <span>{label}</span>
-      <strong>{formatTokens(usage.totalTokens)}</strong>
-      <small>
-        in {formatTokens(usage.inputTokens)} · out {formatTokens(usage.outputTokens)}
-      </small>
-      <em>{formatUsd(costUsd)}</em>
+      <span className="usage-card-label">{label}</span>
+      <div className="usage-card-totals">
+        <div>
+          <strong>{formatTokens(usage.totalTokens)}</strong>
+          <small>tokens</small>
+        </div>
+        <em>{formatUsd(costUsd)}</em>
+      </div>
+      <div className="usage-card-breakdown">
+        <div>
+          <small>Input</small>
+          <b>{formatTokens(usage.inputTokens)}</b>
+        </div>
+        <div>
+          <small>Output</small>
+          <b>{formatTokens(usage.outputTokens)}</b>
+        </div>
+        <div>
+          <small>Cost</small>
+          <b>{formatUsd(costUsd)}</b>
+        </div>
+      </div>
     </div>
   );
 }

@@ -74,6 +74,36 @@ async function writeRegistry(rootPath: string, registry: RegistryFile): Promise<
   await fs.rename(temp, file);
 }
 
+async function scriptDescription(
+  rootPath: string,
+  relative: string,
+  name: string,
+): Promise<string | undefined> {
+  try {
+    const content = await fs.readFile(path.join(rootPath, relative), "utf8");
+    const lines = content.split("\n").slice(0, 24);
+    for (const line of lines) {
+      const tagged = /^\s*(?:\/\/|#)\s*(?:@description|description)\s*[:\-]\s*(.+)$/i.exec(line);
+      if (tagged?.[1]?.trim()) return tagged[1].trim().slice(0, 300);
+    }
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith("#!")) continue;
+      if (!trimmed.startsWith("#") && !trimmed.startsWith("//")) continue;
+      const text = trimmed.replace(/^[#/]+\s*/, "").trim();
+      if (!text || /^usage\b/i.test(text)) continue;
+      const lower = text.toLowerCase();
+      if (lower.startsWith(`${name.toLowerCase()}:`)) {
+        return text.slice(name.length + 1).trim().slice(0, 300);
+      }
+      if (text.length >= 12) return text.slice(0, 300);
+    }
+  } catch {
+    // description is optional
+  }
+  return undefined;
+}
+
 export async function syncProjectTools(rootPath: string): Promise<ProjectToolList> {
   const registry = await readRegistry(rootPath);
   const manual = registry.tools.filter((tool) => tool.source === "manual");
@@ -105,9 +135,11 @@ export async function syncProjectTools(rootPath: string): Promise<ProjectToolLis
       } catch {
         // keep now
       }
+      const parsedDescription = await scriptDescription(rootPath, relative, name);
       auto.push({
         name,
         description:
+          parsedDescription ??
           previous?.description ??
           `Auto-registered project script. Run this instead of rewriting the same check.`,
         command: previous?.command === command && previous.source === "auto" ? previous.command : command,

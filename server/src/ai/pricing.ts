@@ -1,7 +1,12 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import type { AiProviderId, AiTokenUsage } from "../../../shared/ai";
-import type { ModelPricing, PricingReport, PricingSource } from "../../../shared/pricing";
+import {
+  findModelPrice,
+  type ModelPricing,
+  type PricingReport,
+  type PricingSource,
+} from "../../../shared/pricing";
 import { getDataDir } from "../store";
 import { getPublicSettings } from "./settings";
 
@@ -204,32 +209,9 @@ export function findPrice(
   provider: string,
   model: string,
 ): ModelPricing | undefined {
-  const wantedProvider = normalizeModel(provider);
-  const wantedModel = normalizeModel(model);
-  return (
-    prices.find(
-      (price) =>
-        normalizeModel(price.provider) === wantedProvider &&
-        normalizeModel(price.model) === wantedModel,
-    ) ??
-    prices.find(
-      (price) =>
-        normalizeModel(price.provider) === wantedProvider &&
-        (normalizeModel(price.matchedModel ?? "") === wantedModel ||
-          normalizeModel(price.matchedModel ?? "").endsWith(`/${wantedModel}`)),
-    ) ??
-    prices.find((price) => {
-      if (normalizeModel(price.provider) !== "openrouter") return false;
-      const prefix = PROVIDER_PREFIX[wantedProvider] ?? wantedProvider;
-      const candidate = normalizeModel(`${prefix}/${model}`);
-      return (
-        normalizeModel(price.model) === candidate ||
-        normalizeModel(price.matchedModel ?? "") === candidate ||
-        normalizeModel(price.model).endsWith(`/${wantedModel}`)
-      );
-    })
-  );
+  return findModelPrice(prices, provider, model);
 }
+
 
 export async function priceFor(
   provider: string,

@@ -17098,3 +17098,238 @@ button.canvas-stat {
   color: var(--muted-2);
   font-size: 7.5px;
 }
+
+.model-picker-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.model-picker-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.model-picker-head h3 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 4px;
+  color: var(--text);
+  font-size: 12px;
+}
+
+.model-picker-head p {
+  margin: 0;
+  max-width: 720px;
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1.5;
+}
+
+.model-picker-count {
+  flex: none;
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 8px;
+}
+
+.model-picker-toolbar {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.model-picker-toolbar .search-box {
+  flex: 1;
+}
+
+.model-picker-message {
+  padding: 6px 9px;
+  border: 1px solid rgba(94, 234, 212, 0.2);
+  border-radius: 7px;
+  background: rgba(94, 234, 212, 0.06);
+  color: #9fe8d8;
+  font-size: 8px;
+}
+
+.model-picker-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 560px;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.model-picker-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 9px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: rgba(148, 163, 184, 0.03);
+}
+
+.model-picker-row.is-active {
+  border-color: rgba(110, 168, 254, 0.35);
+  background: rgba(59, 130, 246, 0.08);
+}
+
+.model-picker-main {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  flex: 1;
+}
+
+.model-picker-main > div {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.model-picker-main strong {
+  overflow: hidden;
+  color: #e6effa;
+  font-family: var(--mono);
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-picker-main small {
+  color: var(--muted-2);
+  font-size: 7.5px;
+}
+
+.model-picker-default {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 5px;
+  border-radius: 999px;
+  background: rgba(245, 184, 75, 0.12);
+  color: #f5d28a;
+  font-size: 7px;
+  white-space: nowrap;
+}
+
+.model-picker-price {
+  display: flex;
+  gap: 12px;
+  flex: none;
+  color: #bcd8ff;
+  font-family: var(--mono);
+  font-size: 8px;
+}
+
+.model-picker-price span {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  text-align: right;
+}
+
+.model-picker-price em {
+  color: var(--muted-2);
+  font-family: var(--font);
+  font-size: 6.5px;
+  font-style: normal;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+@media (max-width: 760px) {
+  .model-picker-row {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .model-picker-price {
+    margin-left: 0;
+  }
+}
+
+.usage-card {
+  gap: 8px;
+  padding: 14px 16px;
+}
+
+.usage-card-label {
+  color: #9fb6d1;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.usage-card-totals {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.usage-card-totals > div {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.usage-card-totals strong {
+  color: #f1f7ff;
+  font-family: var(--mono);
+  font-size: 28px;
+  font-weight: 650;
+  line-height: 1;
+}
+
+.usage-card-totals small {
+  color: #7f9bbd;
+  font-size: 9px;
+}
+
+.usage-card-totals em {
+  color: #5eead4;
+  font-family: var(--mono);
+  font-size: 18px;
+  font-style: normal;
+  font-weight: 600;
+}
+
+.usage-card-breakdown {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+
+.usage-card-breakdown > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.usage-card-breakdown small {
+  color: #6f89a7;
+  font-size: 7.5px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.usage-card-breakdown b {
+  color: #cfe1ff;
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 550;
+}
