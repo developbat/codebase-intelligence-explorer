@@ -11,6 +11,16 @@ const MAX_FILE_BYTES = 100 * 1024 * 1024;
 const MAX_TEXT_CHARS = 80_000;
 const EXEC_TIMEOUT = 120_000;
 
+export interface DocumentStats {
+  lines: number;
+  chars: number;
+  words: number;
+  checkedBoxes: number;
+  uncheckedBoxes: number;
+  headings: number;
+  links: number;
+}
+
 export interface DocumentResult {
   path: string;
   kind: string;
@@ -23,6 +33,7 @@ export interface DocumentResult {
   height?: number;
   imageFormat?: string;
   ocr?: boolean;
+  stats?: DocumentStats;
   metadata?: Record<string, string | number>;
 }
 
@@ -42,6 +53,32 @@ async function resolveFile(rootPath: string, inputPath: string): Promise<{ absol
   if (!stat.isFile()) throw new Error("Document path is not a file.");
   if (stat.size > MAX_FILE_BYTES) throw new Error("Document is larger than the 100 MB limit.");
   return { absolute: realFile, relative };
+}
+
+export function documentStats(text: string): DocumentStats {
+  const lines = text.split("\n");
+  let checkedBoxes = 0;
+  let uncheckedBoxes = 0;
+  let headings = 0;
+  let links = 0;
+  for (const line of lines) {
+    if (/^\s*#{1,6}\s/.test(line)) headings += 1;
+    const box = /^\s*(?:[-*+]|\d+\.)\s+\[([ xX])\]/.exec(line);
+    if (box) {
+      if (box[1].toLowerCase() === "x") checkedBoxes += 1;
+      else uncheckedBoxes += 1;
+    }
+    links += (line.match(/\[[^\]]+\]\([^)]+\)/g) ?? []).length;
+  }
+  return {
+    lines: lines.length,
+    chars: text.length,
+    words: (text.match(/\S+/g) ?? []).length,
+    checkedBoxes,
+    uncheckedBoxes,
+    headings,
+    links,
+  };
 }
 
 function limitText(text: string, maxChars: number): { text: string; truncated: boolean } {
@@ -128,6 +165,7 @@ async function extractPdf(
       await fs.rm(tmp, { recursive: true, force: true }).catch(() => undefined);
     }
   }
+  const stats = documentStats(text);
   const limited = limitText(text, options.maxChars);
   return {
     path: absolute,
@@ -137,6 +175,7 @@ async function extractPdf(
     truncated: limited.truncated,
     pages: text.split(/\f|\[\[PAGE\]\]|--- page ---/).length > 1 ? undefined : start,
     ocr,
+    stats,
   };
 }
 
@@ -155,7 +194,9 @@ async function extractSpreadsheet(
     const csv = XLSX.utils.sheet_to_csv(sheet, { blankrows: false });
     return `## ${name}\n${csv}`;
   });
-  const limited = limitText(blocks.join("\n\n"), options.maxChars);
+  const fullText = blocks.join("\n\n");
+  const stats = documentStats(fullText);
+  const limited = limitText(fullText, options.maxChars);
   return {
     path: absolute,
     kind: "spreadsheet",
@@ -163,6 +204,7 @@ async function extractSpreadsheet(
     text: limited.text,
     truncated: limited.truncated,
     sheets: names,
+    stats,
   };
 }
 
@@ -218,13 +260,16 @@ export async function readDocument(
     return { ...(await extractSpreadsheet(file.absolute, { ...options, maxChars })), path: file.relative };
   }
   if (extension === ".doc" || extension === ".docx" || extension === ".rtf") {
-    const limited = limitText(await extractLegacyDocument(file.absolute), maxChars);
+    const fullText = await extractLegacyDocument(file.absolute);
+    const stats = documentStats(fullText);
+    const limited = limitText(fullText, maxChars);
     return {
       path: file.relative,
       kind: "word",
       bytes: stat.size,
       text: limited.text,
       truncated: limited.truncated,
+      stats,
     };
   }
   if ([".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tif", ".tiff", ".heic"].includes(extension)) {
@@ -239,6 +284,7 @@ export async function readDocument(
         text = "";
       }
     }
+    const stats = documentStats(text);
     const limited = limitText(text, maxChars);
     return {
       path: file.relative,
@@ -250,6 +296,7 @@ export async function readDocument(
       height: info.height,
       imageFormat: info.format,
       ocr,
+      stats,
     };
   }
   const raw = await fs.readFile(file.absolute, "utf8").catch(() => {
@@ -264,6 +311,7 @@ export async function readDocument(
       display = text;
     }
   }
+  const stats = documentStats(display);
   const limited = limitText(display, maxChars);
   return {
     path: file.relative,
@@ -271,6 +319,7 @@ export async function readDocument(
     bytes: stat.size,
     text: limited.text,
     truncated: limited.truncated,
+    stats,
   };
 }
 

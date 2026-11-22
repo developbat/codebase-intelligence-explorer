@@ -59,6 +59,7 @@ import {
 import { compressVideo } from "../mediaTools";
 import {
   convertDocument,
+  documentStats,
   readDocument,
   searchDocument,
   transformImage,
@@ -1955,6 +1956,29 @@ export async function agentSeedContext(
   activeFile?: string,
 ): Promise<string> {
   const tokens = [...new Set(instruction.toLowerCase().match(/[a-z0-9_]{3,}/g) ?? [])];
+  const attachmentPaths = [...instruction.matchAll(/(?:Ek dosya|Attached file|Ekli dosya):\s*([^\s]+)/gi)]
+    .map((match) => match[1])
+    .slice(0, 3);
+  const attachmentContext: string[] = [];
+  for (const attachmentPath of attachmentPaths) {
+    try {
+      // eslint-disable-next-line no-await-in-loop
+      const document = await readDocument(analysis.rootPath, attachmentPath, {
+        maxChars: 80_000,
+        ocr: false,
+      });
+      const stats = document.stats ?? documentStats(document.text);
+      attachmentContext.push(
+        [
+          `Attached document: ${document.path} · ${document.kind} · ${document.bytes} bytes`,
+          `Structure: ${stats.lines} lines · ${stats.words} words · ${stats.headings} headings · ${stats.links} links · ${stats.checkedBoxes} checked / ${stats.uncheckedBoxes} unchecked checkboxes`,
+          document.text.slice(0, 2_000),
+        ].join("\n"),
+      );
+    } catch {
+      attachmentContext.push(`Attached document could not be read: ${attachmentPath}`);
+    }
+  }
   const git = await getGitStatus(analysis.rootPath, analysis).catch(() => null);
   const changedFiles = new Set((git?.files ?? []).map((file) => file.path));
   const indexed = await searchProjectIndex(analysis.id, instruction, 6, analysis.rootPath);
@@ -2233,6 +2257,7 @@ export async function agentSeedContext(
       : "";
 
   return [
+    attachmentContext.length > 0 ? `Attached document context:\n${attachmentContext.join("\n\n")}` : "",
     listHint,
     toolLines,
     indexLines.length > 0 ? `Index hits (best local matches):\n${indexLines.join("\n")}` : "",
@@ -4700,8 +4725,10 @@ export async function runAgentTask(
           lang: typeof args.lang === "string" ? args.lang : undefined,
           maxChars: Number(args.maxChars) || undefined,
         });
+        const stats = document.stats ?? documentStats(document.text);
         observation = [
           `Document: ${document.path} · ${document.kind} · ${document.bytes} bytes`,
+          `Structure: ${stats.lines} lines · ${stats.words} words · ${stats.headings} headings · ${stats.links} links · ${stats.checkedBoxes} checked / ${stats.uncheckedBoxes} unchecked checkboxes`,
           document.pages ? `Pages: ${document.pages}` : "",
           document.sheets ? `Sheets: ${document.sheets.join(", ")}` : "",
           document.width && document.height ? `Image: ${document.width}×${document.height}${document.ocr ? " · OCR" : ""}` : "",

@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import XLSX from "xlsx";
-import { convertDocument, readDocument, searchDocument, transformImage } from "./documentTools";
+import { convertDocument, documentStats, readDocument, searchDocument, transformImage } from "./documentTools";
 
 test("text, JSON and spreadsheet documents are readable and searchable", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "cie-docs-"));
@@ -69,4 +69,11 @@ test("images can be resized without an AI call", async (t) => {
   } finally {
     await fs.rm(root, { recursive: true, force: true });
   }
+});
+
+test("document stats count checked and unchecked markdown boxes", () => {
+  const stats = documentStats("# Tasks\n- [x] done\n- [ ] open\n  - [ ] nested\n* [X] done too\n");
+  assert.equal(stats.checkedBoxes, 2);
+  assert.equal(stats.uncheckedBoxes, 2);
+  assert.equal(stats.headings, 1);
 });
