@@ -18168,3 +18168,20 @@ button.canvas-stat {
   margin-left: 0;
   text-align: right;
 }
+
+/* Inline mode control in the action row */
+.studio-composer-actions .studio-mode-select {
+  gap: 6px;
+  font-size: 10px;
+}
+
+.studio-composer-actions .studio-mode-select select {
+  height: 30px;
+  min-width: 132px;
+  padding: 0 30px 0 10px;
+  border-radius: 8px;
+  font-size: 11px;
+  background-position:
+    calc(100% - 15px) 12px,
+    calc(100% - 10px) 12px;
+}

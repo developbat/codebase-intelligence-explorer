@@ -800,14 +800,6 @@ export function CodeStudio({
   const readOnlyMode = studioMode !== "build";
   const effectiveAllowWrite = readOnlyMode ? false : agentAllowWrite;
   const effectiveAllowCommands = readOnlyMode ? false : agentAllowCommands;
-  const modeHint =
-    studioMode === "ask"
-      ? t("Read-only answer from the project.")
-      : studioMode === "plan"
-        ? t("Read-only: AI adds your criteria to the project plan in .cie/agent/PLAN.md.")
-        : studioMode === "research"
-          ? t("Read-only research with web, documents and notes.")
-          : t("Edits files and runs verification with your permission.");
   const modePlaceholder =
     studioMode === "ask"
       ? t("Ask a question about this project…")
@@ -3556,7 +3548,7 @@ export function CodeStudio({
           </div>
 
           <div className="studio-composer-footer">
-            <div className="studio-mode-group">
+            <div className="studio-composer-actions">
               <label className="studio-mode-select">
                 <span>{t("Mode")}</span>
                 <select
@@ -3569,15 +3561,13 @@ export function CodeStudio({
                   disabled={chatBusy}
                   aria-label={t("Mode")}
                 >
-                  <option value="ask">{t("Ask — read-only answer")}</option>
-                  <option value="plan">{t("Plan — add criteria to the project plan")}</option>
-                  <option value="build">{t("Build — edit files and verify")}</option>
-                  <option value="research">{t("Research — web, documents and notes")}</option>
+                  <option value="ask">{t("Ask")}</option>
+                  <option value="plan">{t("Plan")}</option>
+                  <option value="build">{t("Build")}</option>
+                  <option value="research">{t("Research")}</option>
                 </select>
               </label>
-              <span className="studio-mode-hint">{modeHint}</span>
-            </div>
-            <div className="studio-composer-actions">
+
               {studioMode === "plan" ? (
                 <button
                   className="studio-footer-link"
