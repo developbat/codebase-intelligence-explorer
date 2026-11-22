@@ -9,7 +9,10 @@ import { healthKey, modelHealthByProviderModel } from "./modelStats";
 import { estimateUsageCost } from "./pricing";
 import type { AnalysisResult } from "../../../shared/types";
 import type {
+  AgentToolGroup,
   IntentAnalysis,
+  IntentContext,
+  IntentHistory,
   IntentKind,
   IntentMode,
   IntentOption,
@@ -17,6 +20,9 @@ import type {
   IntentVerification,
 } from "../../../shared/intent";
 import {
+  AGENT_TOOL_GROUPS,
+  INTENT_CONTEXTS,
+  INTENT_HISTORIES,
   INTENT_KINDS,
   INTENT_MODES,
   INTENT_SCOPES,
@@ -24,7 +30,7 @@ import {
 } from "../../../shared/intent";
 import { documentStats, readDocument } from "../documentTools";
 
-const MAX_OUTPUT_TOKENS = 700;
+const MAX_OUTPUT_TOKENS = 900;
 const TIMEOUT_MS = 35_000;
 
 interface IntentOptions {
@@ -65,7 +71,7 @@ async function projectFacts(analysis: AnalysisResult, activeFile?: string): Prom
     .map(([name, count]) => `${name}(${count})`)
     .join(", ");
   const files = analysis.files
-    .slice(0, 40)
+    .slice(0, 16)
     .map((file) => file.path)
     .join(", ");
   const tooling = analysis.tooling;
@@ -91,7 +97,7 @@ function systemPrompt(): string {
   return `You are the intent analyst for a coding agent. Read the user request in any language (typos are possible) and the project facts. Return JSON only. Never write code.
 
 Schema:
-{"kind":"edit|question|run|scaffold|analyze","understanding":"one sentence in the user's language","language":"tr|en|zh|...","needsClarification":true|false,"question":"question in the user's language","options":[{"label":"short option in the user's language","suffix":"text appended to the user's original instruction when this option is chosen"}],"scope":"trivial|small|medium|large","mode":"single|loop","areas":["exact project-relative file paths"],"verification":"none|browser|test|build","approach":"one-sentence strategy using tools and how to verify completeness","needsExhaustiveEvidence":true|false,"assumptions":["short assumptions"]}
+{"kind":"edit|question|run|scaffold|analyze","understanding":"one sentence in the user's language","language":"tr|en|zh|...","needsClarification":true|false,"question":"question in the user's language","options":[{"label":"short option in the user's language","suffix":"text appended to the user's original instruction when this option is chosen"}],"scope":"trivial|small|medium|large","mode":"single|loop","areas":["exact project-relative file paths"],"verification":"none|browser|test|build","context":"none|focused|project","history":"none|recent|extended","toolGroups":["core","edit","command","document","web","git","browser","skills","media","mobile","notes","tools"],"approach":"one-sentence strategy using tools and how to verify completeness","needsExhaustiveEvidence":true|false,"assumptions":["short assumptions"]}
 
 Rules:
 - Restate the user's goal accurately in "understanding". Paraphrase it, do not copy it. Describe what the user wants, not an investigation plan. Do not invent features or fields.
@@ -101,11 +107,15 @@ Rules:
 - If the request names a product concept (detail, priority, reminder, status, tag), clarify its product behavior. Example: "task detail" -> ask "How should task detail work?" with options "multiline detail input shown under the task", "separate detail panel", "both". Never ask "which files should I inspect?".
 - If the request is already clear, set needsClarification=false, question="", options=[].
 - "kind": use "run" only when the user explicitly asks to execute a command, test, build or server. Checking, counting, searching, reading and summarizing are "analyze", not "run".
+- For a greeting, thanks, or general chat that needs no project work ("hi", "naber", "thanks", "what is a closure?"), use kind="question", context="none", history="none", toolGroups=[], scope="trivial", areas=[], verification="none". Do not turn it into an edit.
 - "scope": trivial = one property/line; small = one component or file; medium = a few files/behaviors; large = architecture, many modules, or a new app.
 - "mode": "single" for one focused change; "loop" only when the work has multiple independent parts that need separate verification.
 - "areas": likely existing files from the sample; put new files only when the request clearly creates them. Do not invent unrelated files.
 - Prefer the smallest area that can satisfy the request. A CSS-only change must point at the stylesheet, not every file.
 - "verification": browser for UI/static pages, test when tests exist and behavior is testable, build when compilation is the main risk, none when nothing meaningful applies.
+- "context": none only for greetings, thanks, or general knowledge that does not depend on this project; focused when the request targets specific files, a small edit or a document; project for broader project questions or changes. If unsure, use project.
+- "history": none for a standalone request; recent when the request refers to the last turns ("again", "same", "on it", "bunu", "tekrar"); extended when it refers to older discussion. If unsure, use recent.
+- "toolGroups": choose the minimum tool families the executor needs. Core read/search tools are always available, so omit "core". Use edit for writing, command for running/verifying, document for attachments/PDF/Office/CSV/images, web for HTTP/web research, git for Git operations, browser for browser verification, skills for saved tools/skills, media for graphics/video, mobile for simulators, notes for saved research, tools for toolchain installation. If a capability is genuinely needed, include its group; when unsure, include it rather than omitting a required tool. For a greeting or general chat return [].
 - "approach": choose the most efficient evidence strategy for this request. For complete lists/counts/audits, propose searching for the relevant markers and collecting all matches with count/offset; do not rely on a partial read.
 - "needsExhaustiveEvidence": true when the user asks for a complete list, count, audit or "all" items; otherwise false.
 - Never make the user choose a model or restate the whole request.
@@ -154,8 +164,8 @@ async function userPrompt(
     options.clarified ? "The user already clarified the request. Do not ask again." : "",
     options.history && options.history.length > 0
       ? `Recent conversation (use it to resolve references like "again", "the same", "that file"):\n${options.history
-          .slice(-8)
-          .map((message) => `${message.role}: ${message.content.slice(0, 1_200)}`)
+          .slice(-6)
+          .map((message) => `${message.role}: ${message.content.slice(0, 1_000)}`)
           .join("\n")}`
       : "",
     await attachmentFacts(analysis, instruction),
@@ -201,6 +211,21 @@ export function parseIntentResponse(
   const scope = pickEnum(parsed.scope, INTENT_SCOPES, "small") as IntentScope;
   const mode = pickEnum(parsed.mode, INTENT_MODES, scope === "large" || scope === "medium" ? "loop" : "single") as IntentMode;
   const verification = pickEnum(parsed.verification, INTENT_VERIFICATIONS, "none") as IntentVerification;
+  const context = pickEnum(parsed.context, INTENT_CONTEXTS, "project") as IntentContext;
+  const history = pickEnum(parsed.history, INTENT_HISTORIES, "recent") as IntentHistory;
+  const toolGroups = Array.isArray(parsed.toolGroups)
+    ? [
+        ...new Set(
+          parsed.toolGroups
+            .filter((item): item is string => typeof item === "string")
+            .filter((item): item is AgentToolGroup =>
+              (AGENT_TOOL_GROUPS as readonly string[]).includes(item),
+            )
+            .filter((item) => item !== "core")
+            .slice(0, 10),
+        ),
+      ]
+    : [];
   const approach =
     typeof parsed.approach === "string" && parsed.approach.trim()
       ? parsed.approach.trim().slice(0, 800)
@@ -273,6 +298,9 @@ export function parseIntentResponse(
     mode,
     areas,
     verification,
+    context,
+    history,
+    toolGroups,
     approach,
     needsExhaustiveEvidence,
     assumptions,
@@ -377,6 +405,9 @@ export async function analyzeIntent(
         mode: "single",
         areas: [],
         verification: "none",
+        context: "project",
+        history: "recent",
+        toolGroups: [],
         approach: "",
         needsExhaustiveEvidence: false,
         assumptions: ["Intent analyst could not parse its reply; proceeding with one focused task."],

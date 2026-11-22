@@ -99,7 +99,12 @@ import { resolveProvider } from "./settings";
 import { recordUsage } from "./usage";
 import { recordModelOutcome } from "./modelStats";
 import { estimateUsageCost } from "./pricing";
-import type { IntentAnalysis } from "../../../shared/intent";
+import type {
+  AgentToolGroup,
+  IntentAnalysis,
+  IntentHistory,
+} from "../../../shared/intent";
+import { AGENT_TOOL_GROUPS } from "../../../shared/intent";
 import { pickAlternateAgentModel } from "./agents";
 import { getPrompt, renderPrompt } from "./prompts";
 import { listSkills, loadEnabledSkills, renderSkillsForPrompt, setSkillEnabled } from "../skills";
@@ -303,6 +308,28 @@ function projectBrief(analysis: AnalysisResult): string {
     `Stylesheets: ${cssFiles.slice(0, 24).map((file) => file.path).join(", ") || "none"}`,
     `HTML pages sample: ${htmlFiles.slice(0, 24).map((file) => file.path).join(", ") || "none"}`,
   ].join("\n");
+}
+
+function compactProjectBrief(analysis: AnalysisResult): string {
+  const stylesheets = analysis.files
+    .filter((file) => /\.(?:css|scss|sass|less)$/i.test(file.path))
+    .slice(0, 8)
+    .map((file) => file.path);
+  return [
+    `Project: ${analysis.projectName} · ${(analysis.frameworks ?? []).join(", ") || "no framework"}`,
+    `Languages: ${Object.entries(analysis.languages)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5)
+      .map(([language, count]) => `${language}(${count})`)
+      .join(", ") || "unknown"}`,
+    `Files: ${analysis.stats.files} · symbols: ${analysis.stats.symbols}`,
+    `Test: ${analysis.tooling?.testCommands.join(" | ") || "none"} · typecheck: ${
+      analysis.tooling?.typecheckCommands?.join(" | ") || "none"
+    } · build: ${analysis.tooling?.buildCommands.join(" | ") || "none"}`,
+    stylesheets.length > 0 ? `Stylesheets: ${stylesheets.join(", ")}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
 export async function analyzeSymbol(
@@ -1582,6 +1609,66 @@ export async function askProject(
   };
 }
 
+/**
+ * Lightweight path for greetings, thanks and general knowledge. It deliberately
+ * sends no tool catalog, project brief or file list, so "hi" does not become a
+ * coding task.
+ */
+export async function answerGeneralChat(
+  projectId: string,
+  instruction: string,
+  options: {
+    provider?: Parameters<typeof resolveProvider>[0];
+    model?: string;
+    language?: string;
+    history?: { role: "user" | "assistant"; content: string }[];
+  } = {},
+): Promise<AiAgentResult> {
+  const config = await resolveProvider(options.provider, options.model);
+  const messages: ChatMessage[] = [
+    {
+      role: "system",
+      content: [
+        "You are a concise, friendly assistant inside a code editor.",
+        "This message does not need project inspection, so answer directly without tools.",
+        "If the user asks about their own code or project, say you need to inspect it and ask them to send it as a project request; never guess project details.",
+        aiLanguageInstruction(options.language ?? "en"),
+      ].join("\n"),
+    },
+    ...selectHistory(options.history, "recent"),
+    { role: "user", content: instruction.trim() },
+  ];
+  const completion = await chatCompleteTracked(
+    projectId,
+    config,
+    messages,
+    { maxTokens: 900, temperature: 0.4 },
+    "chat",
+  );
+  const costUsd = await estimateUsageCost(config.id, config.model, completion.tokenUsage).catch(
+    () => undefined,
+  );
+  const inputChars = messages.reduce((total, message) => total + message.content.length, 0);
+  return {
+    instruction,
+    summary: completion.text.trim(),
+    steps: [],
+    changedFiles: [],
+    ranCommands: [],
+    stoppedReason: "finished",
+    provider: config.id,
+    model: config.model,
+    createdAt: new Date().toISOString(),
+    usage: {
+      inputChars,
+      estimatedTokens: Math.ceil(inputChars / 4),
+      contextFiles: [],
+    },
+    tokenUsage: completion.tokenUsage,
+    costUsd,
+  };
+}
+
 /* ------------------------------------------------------------------ */
 /* Agent mode: read, search, write and run commands in a controlled loop */
 /* ------------------------------------------------------------------ */
@@ -2484,10 +2571,101 @@ async function agentSearch(
   return { results, source: "disk" };
 }
 
+const ACTION_TOOL_GROUPS: Partial<Record<string, AgentToolGroup[]>> = {
+  write_file: ["edit"],
+  replace_in_file: ["edit"],
+  replace_many: ["edit"],
+  rename_path: ["edit"],
+  delete_file: ["edit"],
+  format_file: ["edit"],
+  run_command: ["command"],
+  run_project_tool: ["command", "skills"],
+  read_document: ["document"],
+  search_document: ["document"],
+  convert_document: ["document"],
+  transform_image: ["document"],
+  web_fetch: ["web"],
+  http_request: ["web"],
+  delegate_research: ["web"],
+  git_blame: ["git"],
+  git_info: ["git"],
+  git_commit: ["git"],
+  git_create_branch: ["git"],
+  git_remote: ["git"],
+  git_push: ["git"],
+  browser_check: ["browser"],
+  game_check: ["browser"],
+  graphic_check: ["browser"],
+  list_project_tools: ["skills"],
+  create_project_tool: ["skills"],
+  list_skills: ["skills"],
+  preview_skill_source: ["skills"],
+  install_skill: ["skills"],
+  set_skill_enabled: ["skills"],
+  remove_skill: ["skills"],
+  create_skill: ["skills"],
+  create_graphic: ["media"],
+  placeholder_asset: ["media"],
+  compress_video: ["media"],
+  list_mobile_devices: ["mobile"],
+  boot_mobile_device: ["mobile"],
+  mobile_screenshot: ["mobile"],
+  open_mobile_url: ["mobile"],
+  mobile_logs: ["mobile"],
+  install_mobile_app: ["mobile"],
+  launch_mobile_app: ["mobile"],
+  mobile_check: ["mobile"],
+  save_note: ["notes"],
+  list_notes: ["notes"],
+  read_note: ["notes"],
+  search_notes: ["notes"],
+  check_toolchains: ["tools"],
+  install_toolchain: ["tools"],
+};
+
+function actionToolGroups(action: string): AgentToolGroup[] {
+  return ACTION_TOOL_GROUPS[action] ?? ["core"];
+}
+
+export function resolveToolGroups(
+  intent: IntentAnalysis | undefined,
+  instruction: string,
+): AgentToolGroup[] {
+  if (!intent) return [...AGENT_TOOL_GROUPS];
+  const groups = new Set<AgentToolGroup>(intent.toolGroups);
+  if (intent.kind === "edit" || intent.kind === "scaffold") groups.add("edit");
+  if (intent.kind === "question" || intent.kind === "analyze") {
+    groups.delete("edit");
+    if (
+      intent.verification !== "test" &&
+      intent.verification !== "build"
+    ) {
+      groups.delete("command");
+    }
+  }
+  if (
+    intent.kind === "run" ||
+    intent.verification === "test" ||
+    intent.verification === "build"
+  ) {
+    groups.add("command");
+  }
+  if (intent.verification === "browser") groups.add("browser");
+  if (
+    /(?:Ek dosya|Attached file|Ekli dosya):|\.(?:pdf|docx?|xlsx?|csv|pptx?|png|jpe?g|webp|gif|bmp|tiff?)\b/i.test(
+      instruction,
+    )
+  ) {
+    groups.add("document");
+  }
+  return [...groups];
+}
+
 export function agentToolCatalog(
   readOnly: boolean,
   writeApproved: boolean,
   commandsApproved: boolean,
+  groups?: readonly AgentToolGroup[],
 ): string {
   const tools = [
     '{"action":"list_files","args":{"path":"src","limit":80}}',
@@ -2565,7 +2743,18 @@ export function agentToolCatalog(
     tools.push(`{"action":"mobile_check","args":{"platform":"android","id":"emulator-5554","boot":true,"screenshot":true,"logs":true,"openUrl":"http://localhost:8081"}}${commandApproval}`);
   }
   tools.push('{"action":"finish","args":{"summary":"what changed and how it was verified"}}');
-  return tools.map((tool) => `- ${tool}`).join("\n");
+  const allowed = groups ? new Set(groups) : null;
+  return tools
+    .filter((tool) => {
+      if (!allowed) return true;
+      const action = tool.match(/"action":"([^"]+)"/)?.[1] ?? "";
+      if (action === "finish") return true;
+      return actionToolGroups(action).some(
+        (group) => group === "core" || allowed.has(group),
+      );
+    })
+    .map((tool) => `- ${tool}`)
+    .join("\n");
 }
 
 function clampObservation(text: string, limit = AGENT_OBSERVATION_CHARS): string {
@@ -2805,6 +2994,19 @@ function buildPlanFromIntent(
     verification: needsWrite ? verificationCommand : undefined,
     steps,
   };
+}
+
+export function selectHistory(
+  history: { role: "user" | "assistant"; content: string }[] | undefined,
+  mode: IntentHistory | "none",
+): { role: "user" | "assistant"; content: string }[] {
+  if (!history || history.length === 0 || mode === "none") return [];
+  const limit = mode === "extended" ? 8 : mode === "recent" ? 4 : 6;
+  const chars = mode === "extended" ? 1_200 : mode === "recent" ? 800 : 1_000;
+  return history.slice(-limit).map((message) => ({
+    role: message.role,
+    content: message.content.slice(0, chars),
+  }));
 }
 
 export async function runAgentTask(
@@ -3066,8 +3268,20 @@ export async function runAgentTask(
         verificationCommand,
       });
   activePlan = plan;
-  const seed = await agentSeedContext(analysis, instruction, options.activeFile);
-  const seedLimit = fastTask ? 6_000 : 12_000;
+  const narrowEdit =
+    !askMode &&
+    plan.needsWrite &&
+    options.intent?.kind === "edit" &&
+    (options.intent.scope === "trivial" || options.intent.scope === "small");
+  const contextMode = options.intent?.context ?? "project";
+  const historyMode = options.intent?.history ?? "recent";
+  const toolGroups = resolveToolGroups(options.intent, instruction);
+  const seed =
+    contextMode === "none"
+      ? ""
+      : await agentSeedContext(analysis, instruction, options.activeFile);
+  const seedLimit =
+    contextMode === "focused" ? 2_500 : fastTask ? 4_000 : 10_000;
   const seedText =
     seed.length > seedLimit
       ? `${seed.slice(0, seedLimit)}\n… seed context truncated to keep the prompt small …`
@@ -3075,8 +3289,30 @@ export async function runAgentTask(
   if (seed.length > seedLimit) {
     log("info", "Seed context truncated", `${seed.length} → ${seedLimit} chars`);
   }
+  const focusedFiles = [
+    ...new Set(
+      [options.activeFile, ...(options.intent?.areas ?? [])].filter(
+        (value): value is string => Boolean(value),
+      ),
+    ),
+  ].slice(0, 8);
+  const projectContext =
+    contextMode === "none"
+      ? ""
+      : contextMode === "focused"
+        ? compactProjectBrief(analysis)
+        : projectBrief(analysis);
+  const projectFiles =
+    contextMode === "none"
+      ? ""
+      : contextMode === "focused"
+        ? focusedFiles.length > 0
+          ? `Focused files:\n${focusedFiles.join("\n")}`
+          : ""
+        : `Project files (sample):\n${analysis.files.slice(0, 15).map((file) => file.path).join("\n")}`;
+  const conversation = selectHistory(options.history, historyMode);
   const context = [
-    projectBrief(analysis),
+    projectContext,
     "",
     options.intent?.approach ? `Intent approach: ${options.intent.approach}` : "",
     options.intent?.needsExhaustiveEvidence
@@ -3089,47 +3325,63 @@ export async function runAgentTask(
           commandsApproved ? "pre-approved" : "ask the user before running commands"
         }; delete and rename always need confirmation.`,
     seedText,
-    options.history && options.history.length > 0
-      ? `Conversation so far:\n${options.history
-          .slice(-6)
+    conversation.length > 0
+      ? `Conversation so far:\n${conversation
           .map((message) => `${message.role}: ${message.content}`)
           .join("\n\n")}`
       : "",
-    `Project files (sample):\n${analysis.files.slice(0, 15).map((file) => file.path).join("\n")}`,
+    projectFiles,
   ]
     .filter(Boolean)
     .join("\n");
 
-  const promptId = askMode ? "agent.ask" : autoMode ? "agent.auto" : "agent.coding";
+  const focusedRead = !askMode && contextMode === "focused" && !plan.needsWrite;
+  const basePromptId = askMode ? "agent.ask" : autoMode ? "agent.auto" : "agent.coding";
+  const promptId = narrowEdit
+    ? "agent.focused"
+    : focusedRead
+      ? "agent.inspect"
+      : basePromptId;
   const prompt = await getPrompt(promptId, projectId);
   const languageInstruction = aiLanguageInstruction(options.language ?? "en");
-  const fastSuffix = fastTask
-    ? "\n\nFast task profile: this is a small, focused change. Read at most 3 files (for a CSS-only change, read only the stylesheet), make the edit, run at most one verification, and finish. Complete every edit-map item before finishing. Do not read unrelated modules, repeat reads, or keep exploring after the edit."
-    : "";
-  const narrowEdit =
-    !askMode &&
-    plan.needsWrite &&
-    options.intent?.kind === "edit" &&
-    (options.intent.scope === "trivial" || options.intent.scope === "small");
-  const narrowEditSuffix = narrowEdit
-    ? "\n\nNarrow edit profile: use project_search or find_in_file first and locate the exact selector, property, symbol or snippet. Read at most 3 focused ranges (about 60 lines each). Never read a whole file above 160 lines; if a whole-file read is rejected, read only the matching range. Then use replace_in_file with the exact existing snippet."
-    : "";
+  const fastSuffix =
+    fastTask && !["agent.focused", "agent.inspect"].includes(prompt.id)
+      ? "\n\nFast task profile: this is a small, focused change. Read at most 3 files (for a CSS-only change, read only the stylesheet), make the edit, run at most one verification, and finish. Complete every edit-map item before finishing. Do not read unrelated modules, repeat reads, or keep exploring after the edit."
+      : "";
+  const narrowEditSuffix =
+    narrowEdit && prompt.id !== "agent.focused" && prompt.id !== "agent.inspect"
+      ? "\n\nNarrow edit profile: use project_search or find_in_file first and locate the exact selector, property, symbol or snippet. Read at most 3 focused ranges (about 60 lines each). Never read a whole file above 160 lines; if a whole-file read is rejected, read only the matching range. Then use replace_in_file with the exact existing snippet."
+      : "";
   const readOnlySuffix =
     !askMode && !plan.needsWrite
       ? "\n\nInspection profile: this task is read-only. Read at most 6 files, never re-read the same range, and finish with a compact report. Do not propose a large next-step list."
       : "";
   const enabledSkills = await loadEnabledSkills(analysis.rootPath, projectId).catch(() => []);
-  const skillsPrompt = renderSkillsForPrompt(enabledSkills);
+  const mentionedSkill = enabledSkills.some((skill) => {
+    const name = skill.record.name.toLowerCase();
+    return (
+      instruction.toLowerCase().includes(name) ||
+      instruction.toLowerCase().includes(`@${name}`)
+    );
+  });
+  const includeSkills =
+    !options.intent ||
+    contextMode === "project" ||
+    toolGroups.includes("skills") ||
+    mentionedSkill;
+  const skillsPrompt = includeSkills ? renderSkillsForPrompt(enabledSkills) : "";
   if (enabledSkills.length > 0) {
     log(
       "info",
-      "Skills loaded",
-      `${enabledSkills.length} enabled · ${skillsPrompt.length} chars ≈ ${Math.round(skillsPrompt.length / 4)} tokens · ${enabledSkills.map((skill) => skill.record.name).join(", ")}`,
+      includeSkills ? "Skills loaded" : "Skills skipped",
+      includeSkills
+        ? `${enabledSkills.length} enabled · ${skillsPrompt.length} chars ≈ ${Math.round(skillsPrompt.length / 4)} tokens · ${enabledSkills.map((skill) => skill.record.name).join(", ")}`
+        : `${enabledSkills.length} enabled · focused task does not request skills`,
     );
   }
   const systemContent =
     renderPrompt(prompt.system, {
-      tools: agentToolCatalog(askMode, writeApproved, commandsApproved),
+      tools: agentToolCatalog(askMode, writeApproved, commandsApproved, toolGroups),
       language: languageInstruction,
     }) +
     (skillsPrompt ? `\n\n${skillsPrompt}` : "") +
@@ -3141,8 +3393,19 @@ export async function runAgentTask(
     "Prompt selected",
     `${prompt.id} v${prompt.version}${prompt.source !== "default" ? ` · ${prompt.source}` : ""}`,
   );
+  log(
+    "info",
+    "Context profile",
+    `context=${contextMode} · history=${historyMode} · tools=${
+      toolGroups.length > 0 ? toolGroups.join("+") : "core"
+    } · prompt=${systemContent.length}c · task=${context.length}c`,
+  );
   if (fastTask) {
-    log("info", "Fast task profile selected", "small edit · focused reads · automatic verification");
+    log(
+      "info",
+      "Fast task profile selected",
+      narrowEdit ? "compact focused-edit prompt · focused reads" : "small task · focused reads",
+    );
   }
   const system: ChatMessage = {
     role: "system",

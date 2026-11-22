@@ -12,6 +12,7 @@ import {
   investigateUnresolved,
   runAgentTask,
   runCodingTask,
+  answerGeneralChat,
   reviewChanges,
   summarizeProject,
   summarizeScope,
@@ -1022,6 +1023,27 @@ app.post("/api/projects/:id/ai/agent", async (req, res) => {
       }
       intent = analyzed.intent;
     }
+    if (intent?.kind === "question" && intent.context === "none") {
+      const result = await answerGeneralChat(req.params.id, instruction, {
+        provider,
+        model: typeof req.body?.model === "string" ? req.body.model : undefined,
+        language: typeof req.body?.language === "string" ? req.body.language : undefined,
+        history: Array.isArray(req.body?.history)
+          ? req.body.history
+              .filter(
+                (message: unknown): message is { role: "user" | "assistant"; content: string } =>
+                  typeof message === "object" &&
+                  message !== null &&
+                  ((message as { role?: unknown }).role === "user" ||
+                    (message as { role?: unknown }).role === "assistant") &&
+                  typeof (message as { content?: unknown }).content === "string",
+              )
+              .slice(-6)
+          : undefined,
+      });
+      res.json(result);
+      return;
+    }
     const result = await runAgentTask(req.params.id, instruction, {
       activeFile: typeof req.body?.activeFile === "string" ? req.body.activeFile : undefined,
       provider,
@@ -1133,6 +1155,35 @@ app.post("/api/projects/:id/ai/agent/stream", async (req, res) => {
       res.end();
       return;
     }
+  }
+
+  if (intent?.kind === "question" && intent.context === "none") {
+    try {
+      write({
+        type: "start",
+        provider:
+          typeof req.body?.provider === "string" ? req.body.provider : intentProvider ?? "intent",
+        model:
+          typeof req.body?.model === "string" ? req.body.model : intentModel ?? "intent",
+      });
+      const result = await answerGeneralChat(req.params.id, instruction, {
+        provider:
+          typeof req.body?.provider === "string" ? (req.body.provider as AiProviderId) : undefined,
+        model: typeof req.body?.model === "string" ? req.body.model : undefined,
+        language: typeof req.body?.language === "string" ? req.body.language : undefined,
+        history,
+      });
+      write({ type: "done", result });
+    } catch (error) {
+      write({
+        type: "error",
+        message: error instanceof Error ? error.message : "Direct chat failed.",
+      });
+    } finally {
+      unregisterAgentRun(req.params.id, controller);
+      res.end();
+    }
+    return;
   }
 
   try {
@@ -1280,6 +1331,35 @@ app.post("/api/projects/:id/ai/loop/stream", async (req, res) => {
       res.end();
       return;
     }
+  }
+
+  if (intent?.kind === "question" && intent.context === "none") {
+    try {
+      write({
+        type: "start",
+        provider:
+          typeof req.body?.provider === "string" ? req.body.provider : intentProvider ?? "intent",
+        model:
+          typeof req.body?.model === "string" ? req.body.model : intentModel ?? "intent",
+      });
+      const result = await answerGeneralChat(req.params.id, goal, {
+        provider:
+          typeof req.body?.provider === "string" ? (req.body.provider as AiProviderId) : undefined,
+        model: typeof req.body?.model === "string" ? req.body.model : undefined,
+        language: typeof req.body?.language === "string" ? req.body.language : undefined,
+        history,
+      });
+      write({ type: "done", result });
+    } catch (error) {
+      write({
+        type: "error",
+        message: error instanceof Error ? error.message : "Direct chat failed.",
+      });
+    } finally {
+      unregisterAgentRun(req.params.id, controller);
+      res.end();
+    }
+    return;
   }
 
   try {

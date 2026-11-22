@@ -113,3 +113,44 @@ test("document checkbox operations are preserved", () => {
   assert.match(intent.approach, /unchecked markers/);
   assert.equal(intent.needsExhaustiveEvidence, true);
 });
+
+test("context, history and tool groups are parsed", () => {
+  const intent = parseIntentResponse(
+    JSON.stringify({
+      kind: "edit",
+      understanding: "change a color",
+      needsClarification: false,
+      scope: "small",
+      mode: "single",
+      areas: [],
+      verification: "browser",
+      context: "focused",
+      history: "extended",
+      toolGroups: ["edit", "browser", "unknown-group"],
+    }),
+    analysis,
+    "change color",
+  );
+  assert.equal(intent.context, "focused");
+  assert.equal(intent.history, "extended");
+  assert.deepEqual(intent.toolGroups, ["edit", "browser"]);
+});
+
+test("missing context fields fall back to project and recent", () => {
+  const intent = parseIntentResponse(
+    JSON.stringify({
+      kind: "question",
+      understanding: "explain the project",
+      needsClarification: false,
+      scope: "small",
+      mode: "single",
+      areas: [],
+      verification: "none",
+    }),
+    analysis,
+    "explain",
+  );
+  assert.equal(intent.context, "project");
+  assert.equal(intent.history, "recent");
+  assert.deepEqual(intent.toolGroups, []);
+});

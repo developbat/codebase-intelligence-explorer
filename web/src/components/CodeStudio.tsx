@@ -3309,6 +3309,10 @@ export function CodeStudio({
                   ? ` · ${intentNotice.intent.areas.slice(0, 4).join(", ")}`
                   : ""}
               </small>
+              <small>
+                {t("Context")}: {intentNotice.intent.context} · {t("Tools")}:{" "}
+                {["core", ...intentNotice.intent.toolGroups].join(" + ")}
+              </small>
               {intentNotice.intent.approach ? (
                 <small className="studio-intent-approach">
                   {t("Approach")}: {intentNotice.intent.approach}
