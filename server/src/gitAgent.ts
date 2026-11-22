@@ -106,3 +106,24 @@ export async function gitSetRemote(
   const output = await git(rootPath, ["remote", has ? "set-url" : "add", remote, target]);
   return output.slice(0, 2_000) || `${remote} → ${target}`;
 }
+
+export async function gitPush(
+  rootPath: string,
+  options: { remote?: string; branch?: string; setUpstream?: boolean } = {},
+): Promise<{ output: string; remote: string; branch: string }> {
+  const remotes = (await git(rootPath, ["remote"]).catch(() => ""))
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+  if (remotes.length === 0) throw new Error("No Git remote is configured. Use git_remote first.");
+  const remote = options.remote?.trim() || (remotes.includes("origin") ? "origin" : remotes[0]);
+  if (!remotes.includes(remote)) throw new Error(`Unknown remote: ${remote}`);
+  const current = await git(rootPath, ["branch", "--show-current"]).catch(() => "");
+  const branch = options.branch?.trim() || current.trim();
+  if (!branch) throw new Error("Detached HEAD; provide a branch name to push.");
+  const args = ["push"];
+  if (options.setUpstream !== false) args.push("-u");
+  args.push(remote, branch);
+  const output = await git(rootPath, args, 180_000);
+  return { output: output.slice(0, 8_000), remote, branch };
+}

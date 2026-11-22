@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { promisify } from "node:util";
-import { gitCommit, gitCreateBranch, gitInfo, gitSetRemote } from "./gitAgent";
+import { gitCommit, gitCreateBranch, gitInfo, gitPush, gitSetRemote } from "./gitAgent";
 
 const run = promisify(execFile);
 
@@ -27,8 +27,18 @@ test("agent git tools read, commit, branch and set remotes", async () => {
     const branch = await gitCreateBranch(root, "feature/test");
     assert.equal(branch.branch, "feature/test");
     assert.match(await gitInfo(root, "branches"), /feature\/test/);
-    await gitSetRemote(root, "origin", "https://example.com/owner/repo.git");
-    assert.match(await gitInfo(root, "remotes"), /origin/);
+    const bare = path.join(root, "..", `${path.basename(root)}-remote.git`);
+    await run("git", ["init", "--bare", "-q", bare]);
+    try {
+      await gitSetRemote(root, "origin", "https://example.com/owner/repo.git");
+      await run("git", ["-C", root, "remote", "set-url", "origin", bare]);
+      assert.match(await gitInfo(root, "remotes"), /origin/);
+      const pushed = await gitPush(root);
+      assert.equal(pushed.remote, "origin");
+      assert.equal(pushed.branch, "feature/test");
+    } finally {
+      await fs.rm(bare, { recursive: true, force: true });
+    }
     await fs.writeFile(path.join(root, "a.txt"), "two\n");
     const second = await gitCommit(root, "fix: second", { files: ["a.txt"] });
     assert.ok(second.commit);

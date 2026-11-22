@@ -576,7 +576,7 @@ export function CodeStudio({
   const chatHydratedRef = useRef(false);
   const skipChatSaveRef = useRef(false);
   const [summaryBusy, setSummaryBusy] = useState(false);
-  const [sidebarTab, setSidebarTab] = useState<"files" | "chat" | "project">("files");
+  const [sidebarTab, setSidebarTab] = useState<"files" | "chat" | "tools" | "project">("files");
   const [leftWidth, setLeftWidth] = useState(() => {
     const stored = Number(localStorage.getItem("cie:studio-left-width"));
     return Number.isFinite(stored) && stored >= 140 ? stored : 252;
@@ -2505,6 +2505,9 @@ export function CodeStudio({
           <button className={sidebarTab === "chat" ? "is-active" : ""} onClick={() => setSidebarTab("chat")}>
             <MessageSquare size={12} /> {t("Chats")}
           </button>
+          <button className={sidebarTab === "tools" ? "is-active" : ""} onClick={() => setSidebarTab("tools")}>
+            <ListChecks size={12} /> {t("Tools")}
+          </button>
           <button className={sidebarTab === "project" ? "is-active" : ""} onClick={() => setSidebarTab("project")}>
             <Info size={12} /> {t("Details")}
           </button>
@@ -2609,6 +2612,47 @@ export function CodeStudio({
                 ))
               )}
             </div>
+          </div>
+        ) : sidebarTab === "tools" ? (
+          <div className="studio-side-tools">
+            <div className="studio-side-chat-head">
+              <strong>{t("Project tools")}</strong>
+              <button
+                onClick={() => {
+                  setProjectToolsBusy(true);
+                  void api
+                    .projectTools(analysis.id)
+                    .then(setProjectTools)
+                    .catch(() => undefined)
+                    .finally(() => setProjectToolsBusy(false));
+                }}
+                disabled={projectToolsBusy}
+                title={t("Refresh")}
+              >
+                {projectToolsBusy ? <Loader2 size={10} className="spin" /> : <RefreshCw size={10} />}
+              </button>
+            </div>
+            {projectTools && projectTools.tools.length > 0 ? (
+              <div className="studio-side-tool-list">
+                {projectTools.tools.map((tool) => (
+                  <div key={tool.name} className="studio-side-tool">
+                    <strong>{tool.name}</strong>
+                    <p>{tool.description}</p>
+                    <code>{tool.command}</code>
+                    <small>
+                      {tool.tags.join(" · ")}
+                      {tool.lastRunAt ? ` · ${new Date(tool.lastRunAt).toLocaleString()}` : ""}
+                    </small>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="studio-side-tool-empty">
+                {t(
+                  "No tools yet. Ask the agent to create one; it will be saved under .cie/agent/tools and can be run with run_project_tool.",
+                )}
+              </p>
+            )}
           </div>
         ) : (
           <div className="studio-project-panel">
@@ -4021,9 +4065,10 @@ export function CodeStudio({
                           {projectTools.tools.map((tool) => (
                             <div key={tool.name}>
                               <strong>{tool.name}</strong>
+                              <p>{tool.description}</p>
                               <code>{tool.command}</code>
                               <small>
-                                {tool.successCount}✓ / {tool.failureCount}✕
+                                {tool.tags.join(" · ")} · {tool.successCount}✓ / {tool.failureCount}✕
                               </small>
                             </div>
                           ))}

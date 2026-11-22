@@ -52,6 +52,7 @@ import {
   listResearchNotes,
   readResearchNote,
   saveResearchNote,
+  httpRequest,
   searchResearchNotes,
   webFetch,
 } from "../webResearch";
@@ -60,6 +61,7 @@ import {
   gitCommit,
   gitCreateBranch,
   gitInfo,
+  gitPush,
   gitSetRemote,
 } from "../gitAgent";
 import {
@@ -2505,6 +2507,8 @@ export function agentToolCatalog(
     tools.push(`{"action":"create_project_tool","args":{"name":"check-links","language":"js","description":"Validate links","code":"// reusable script"}}${approval}  // saves under .cie/agent/tools`);
     tools.push(`{"action":"create_skill","args":{"name":"my-workflow","description":"When to use it","body":"instructions","enable":true}}${approval}  // creates .cie/skills/<name>/SKILL.md`);
     tools.push(`{"action":"git_commit","args":{"message":"feat: change","stageAll":true}}${approval}  // stages and commits; never pushes`);
+    tools.push(`{"action":"http_request","args":{"method":"POST","url":"https://api.example.com/items","headers":{"Content-Type":"application/json"},"body":"{\"name\":\"demo\"}"}}${commandApproval}  // explicit network request; requires approval`);
+    tools.push(`{"action":"git_push","args":{"remote":"origin","branch":"main","setUpstream":true}}  // always requires confirmation`);
     tools.push(`{"action":"git_create_branch","args":{"name":"feature/x","checkout":true}}${approval}`);
     tools.push(`{"action":"git_remote","args":{"name":"origin","url":"git@github.com:owner/repo.git"}}${approval}`);
     tools.push(`{"action":"compress_video","args":{"path":"assets/demo.mp4","maxWidth":1280,"crf":28,"preset":"medium"}}${commandApproval}  // ffmpeg`);
@@ -3439,6 +3443,8 @@ export async function runAgentTask(
         git_commit: "Creating a Git commit…",
         git_create_branch: "Creating a Git branch…",
         git_remote: "Updating a Git remote…",
+        git_push: "Pushing commits…",
+        http_request: "Sending an HTTP request…",
         compress_video: "Compressing a video…",
         install_toolchain: "Installing a toolchain…",
         run_project_tool: "Running saved project tool…",
@@ -4388,6 +4394,54 @@ export async function runAgentTask(
           .join("\n");
         log("success", "Web page fetched", `${fetched.status} · ${fetched.bytes} bytes`);
         ok = true;
+      } else if (action === "http_request") {
+        const url = String(args.url ?? "").trim();
+        const method = String(args.method ?? "GET").toUpperCase();
+        if (!url) throw new Error("A request URL is required.");
+        const bodyValue =
+          typeof args.body === "string"
+            ? args.body
+            : args.body && typeof args.body === "object"
+              ? JSON.stringify(args.body)
+              : undefined;
+        const allowed = await requirePermission(
+          "command",
+          "http_request",
+          url,
+          `Send an HTTP ${method} request.`,
+          { preview: bodyValue ? bodyValue.slice(0, 800) : `${method} ${url}` },
+        );
+        if (!allowed) throw new Error("The user denied permission to send this HTTP request.");
+        const response = await httpRequest({
+          method,
+          url,
+          headers:
+            args.headers && typeof args.headers === "object" && !Array.isArray(args.headers)
+              ? Object.fromEntries(
+                  Object.entries(args.headers as Record<string, unknown>)
+                    .filter((entry): entry is [string, string] => typeof entry[1] === "string")
+                    .slice(0, 40),
+                )
+              : undefined,
+          body: bodyValue,
+          timeoutMs: Number(args.timeoutMs) || undefined,
+          maxChars: Number(args.maxChars) || undefined,
+          allowLocalhost: args.allowLocalhost === true,
+        });
+        observation = [
+          `${response.method} ${response.finalUrl}`,
+          `Status: ${response.status} · ${response.contentType} · ${response.bytes} bytes`,
+          Object.entries(response.headers).length > 0
+            ? `Headers: ${Object.entries(response.headers).map(([key, value]) => `${key}: ${value}`).join(" | ")}`
+            : "",
+          "",
+          response.body || "(empty body)",
+          response.truncated ? "\n(response body truncated)" : "",
+        ]
+          .filter(Boolean)
+          .join("\n");
+        log("success", "HTTP request completed", `${response.status} ${response.method}`);
+        ok = response.status >= 200 && response.status < 400;
       } else if (action === "save_note") {
         const title = String(args.title ?? "").trim();
         const content = String(args.content ?? "").trim();
@@ -4560,6 +4614,25 @@ export async function runAgentTask(
         const output = await gitSetRemote(analysis.rootPath, name, url, args.remove === true);
         observation = output || `Remote ${name} updated.`;
         log("success", "Git remote updated", name);
+        ok = true;
+      } else if (action === "git_push") {
+        const remote = typeof args.remote === "string" ? args.remote.trim() : "origin";
+        const branch = typeof args.branch === "string" ? args.branch.trim() : undefined;
+        const allowed = await requirePermission(
+          "command",
+          "git_push",
+          `${remote}${branch ? `/${branch}` : ""}`,
+          "Push local commits to a remote. This cannot be undone on the remote.",
+          { destructive: true },
+        );
+        if (!allowed) throw new Error("The user denied permission to push.");
+        const result = await gitPush(analysis.rootPath, {
+          remote,
+          branch,
+          setUpstream: args.setUpstream !== false,
+        });
+        observation = `Pushed ${result.branch} → ${result.remote}.\n${result.output}`;
+        log("success", "Git push completed", `${result.remote}/${result.branch}`);
         ok = true;
       } else if (action === "compress_video") {
         const videoPath = String(args.path ?? "").trim();
@@ -4770,6 +4843,10 @@ export async function runAgentTask(
             ? 12_000
             : step.action === "git_info"
               ? 8_000
+              : step.action === "http_request"
+                ? 8_000
+                : step.action === "git_push"
+                  ? 4_000
               : step.action === "list_notes" || step.action === "search_notes"
                 ? 4_000
                 : step.action === "compress_video"

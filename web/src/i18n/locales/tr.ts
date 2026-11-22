@@ -984,6 +984,8 @@ export const tr: Dictionary = {
   "No saved tools yet. Scripts added under .cie/agent/tools are auto-registered and can be reused by run_project_tool.": "Henüz kayıtlı araç yok. .cie/agent/tools altına eklenen script'ler otomatik kaydedilir ve run_project_tool ile tekrar kullanılabilir.",
   "saved": "kayıtlı",
   "Project tools": "Proje araçları",
+  "Tools": "Araçlar",
+  "No tools yet. Ask the agent to create one; it will be saved under .cie/agent/tools and can be run with run_project_tool.": "Henüz araç yok. Ajandan bir tane oluşturmasını isteyin; .cie/agent/tools altına kaydedilir ve run_project_tool ile çalıştırılabilir.",
   "No HTML preview found": "HTML önizlemesi bulunamadı",
   "Horizontal overflow detected at this viewport.": "Bu görünümde yatay taşma var.",
   "inputs": "girdi",

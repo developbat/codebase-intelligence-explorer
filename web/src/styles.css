@@ -16811,3 +16811,68 @@ button.canvas-stat {
   background: rgba(59, 130, 246, 0.08);
   color: #d6e7ff;
 }
+
+.studio-side-tools {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  padding: 8px;
+  overflow-y: auto;
+}
+
+.studio-side-tool-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.studio-side-tool {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: rgba(148, 163, 184, 0.035);
+}
+
+.studio-side-tool strong {
+  color: #e6effa;
+  font-size: 9px;
+}
+
+.studio-side-tool p {
+  margin: 0;
+  color: #8ba8ce;
+  font-size: 7.5px;
+  line-height: 1.45;
+}
+
+.studio-side-tool code {
+  overflow: hidden;
+  color: #9fc6ff;
+  font-family: var(--mono);
+  font-size: 7px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.studio-side-tool small {
+  color: #617994;
+  font-size: 7px;
+}
+
+.studio-side-tool-empty {
+  margin: 0;
+  color: #6f89a7;
+  font-size: 8px;
+  line-height: 1.5;
+}
+
+.studio-project-tools-list > div > p {
+  margin: 1px 0 2px;
+  color: #8ba8ce;
+  font-size: 7.5px;
+  line-height: 1.4;
+}

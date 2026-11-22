@@ -59,7 +59,14 @@ function isPrivateAddress(address: string): boolean {
   return false;
 }
 
-async function assertPublicUrl(raw: string): Promise<URL> {
+function isLocalHost(host: string): boolean {
+  return host === "localhost" || host === "127.0.0.1" || host === "::1" || host === "[::1]";
+}
+
+async function assertPublicUrl(
+  raw: string,
+  options: { allowLocalhost?: boolean } = {},
+): Promise<URL> {
   let url: URL;
   try {
     url = new URL(raw);
@@ -73,6 +80,9 @@ async function assertPublicUrl(raw: string): Promise<URL> {
     throw new Error("URLs with embedded credentials are not allowed.");
   }
   const host = url.hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  if (options.allowLocalhost && isLocalHost(host)) {
+    return url;
+  }
   if (
     host === "localhost" ||
     host.endsWith(".localhost") ||
@@ -172,6 +182,92 @@ export async function webFetch(rawUrl: string, maxChars = 12_000): Promise<WebFe
     bytes: buffer.length,
     text,
     truncated: extracted.text.length > text.length,
+  };
+}
+
+export interface HttpRequestResult {
+  method: string;
+  url: string;
+  finalUrl: string;
+  status: number;
+  contentType: string;
+  headers: Record<string, string>;
+  bytes: number;
+  body: string;
+  truncated: boolean;
+}
+
+export async function httpRequest(input: {
+  method?: string;
+  url: string;
+  headers?: Record<string, string>;
+  body?: string;
+  timeoutMs?: number;
+  maxChars?: number;
+  allowLocalhost?: boolean;
+}): Promise<HttpRequestResult> {
+  const method = (input.method ?? "GET").toUpperCase();
+  if (!["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"].includes(method)) {
+    throw new Error("Unsupported HTTP method.");
+  }
+  const headers: Record<string, string> = { "User-Agent": "codebase-intelligence-explorer/0.2 http-request" };
+  for (const [key, value] of Object.entries(input.headers ?? {}).slice(0, 40)) {
+    if (!/^[A-Za-z0-9-]{1,80}$/.test(key) || /[\r\n]/.test(value)) {
+      throw new Error("Invalid HTTP header.");
+    }
+    headers[key] = value.slice(0, 4_000);
+  }
+  const body = input.body?.slice(0, 500_000);
+  const timeoutMs = Math.max(1_000, Math.min(120_000, input.timeoutMs ?? 30_000));
+  let current = input.url.trim();
+  let response: Response | null = null;
+  let currentMethod = method;
+  let currentBody = body;
+  for (let redirect = 0; redirect <= 4; redirect += 1) {
+    const url = await assertPublicUrl(current, { allowLocalhost: input.allowLocalhost === true });
+    response = await fetch(url, {
+      method: currentMethod,
+      redirect: "manual",
+      signal: AbortSignal.timeout(timeoutMs),
+      headers,
+      body: currentMethod === "GET" || currentMethod === "HEAD" ? undefined : currentBody,
+    });
+    if ([301, 302, 303, 307, 308].includes(response.status)) {
+      const location = response.headers.get("location");
+      if (!location) break;
+      current = new URL(location, url).toString();
+      if (response.status === 303 || ((response.status === 301 || response.status === 302) && currentMethod === "POST")) {
+        currentMethod = "GET";
+        currentBody = undefined;
+      }
+      continue;
+    }
+    break;
+  }
+  if (!response) throw new Error("HTTP request failed.");
+  const declared = Number(response.headers.get("content-length")) || 0;
+  if (declared > MAX_FETCH_BYTES) throw new Error("Response is larger than the 2 MB limit.");
+  const buffer = Buffer.from(await response.arrayBuffer());
+  if (buffer.length > MAX_FETCH_BYTES) throw new Error("Response is larger than the 2 MB limit.");
+  const contentType = (response.headers.get("content-type") ?? "").toLowerCase();
+  const text = buffer.toString("utf8");
+  const limit = Math.max(500, Math.min(MAX_TEXT_CHARS, Math.floor(input.maxChars ?? 12_000)));
+  const responseHeaders: Record<string, string> = {};
+  for (const [key, value] of response.headers.entries()) {
+    if (["content-type", "content-length", "location", "server", "date", "etag", "cache-control"].includes(key.toLowerCase())) {
+      responseHeaders[key] = value.slice(0, 1_000);
+    }
+  }
+  return {
+    method,
+    url: input.url,
+    finalUrl: response.url || current,
+    status: response.status,
+    contentType: contentType.split(";")[0] || "unknown",
+    headers: responseHeaders,
+    bytes: buffer.length,
+    body: text.slice(0, limit),
+    truncated: text.length > limit,
   };
 }
 
