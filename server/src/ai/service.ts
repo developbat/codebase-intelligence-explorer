@@ -43,10 +43,25 @@ import { queryCsvFile, querySqliteFile } from "../dataQuery";
 import { runBrowserCheck } from "../browserCheck";
 import type { BrowserCheckStep } from "../../../shared/browserCheck";
 import {
+  createProjectTool,
   findProjectTool,
   listProjectTools,
   recordProjectToolRun,
 } from "../projectTools";
+import {
+  listResearchNotes,
+  readResearchNote,
+  saveResearchNote,
+  searchResearchNotes,
+  webFetch,
+} from "../webResearch";
+import { compressVideo } from "../mediaTools";
+import {
+  gitCommit,
+  gitCreateBranch,
+  gitInfo,
+  gitSetRemote,
+} from "../gitAgent";
 import {
   bootMobileDevice,
   captureMobileScreenshot,
@@ -78,7 +93,12 @@ import type { IntentAnalysis } from "../../../shared/intent";
 import { pickAlternateAgentModel } from "./agents";
 import { getPrompt, renderPrompt } from "./prompts";
 import { listSkills, loadEnabledSkills, renderSkillsForPrompt, setSkillEnabled } from "../skills";
-import { installSkills, previewSkillSource, removeInstalledSkill } from "../skillInstall";
+import {
+  createSkill,
+  installSkills,
+  previewSkillSource,
+  removeInstalledSkill,
+} from "../skillInstall";
 import { requestPermission } from "./permissions";
 import {
   recordConversation,
@@ -1580,6 +1600,11 @@ const READ_ONLY_ACTIONS = new Set([
   "browser_check",
   "game_check",
   "graphic_check",
+  "web_fetch",
+  "list_notes",
+  "read_note",
+  "search_notes",
+  "git_info",
   "list_skills",
   "preview_skill_source",
   "list_mobile_devices",
@@ -2446,6 +2471,11 @@ export function agentToolCatalog(
     '{"action":"game_check","args":{"path":"index.html","steps":[{"action":"expectVisible","selector":"canvas"}]}}',
     '{"action":"create_graphic","args":{"path":"assets/report.svg","kind":"bar","title":"Weekly progress","data":[{"label":"Mon","value":4},{"label":"Tue","value":7},{"label":"Wed","value":5}]}}',
     '{"action":"graphic_check","args":{"path":"assets/report.svg","expectText":"Weekly progress"}}',
+    '{"action":"web_fetch","args":{"url":"https://example.com","maxChars":8000}}',
+    '{"action":"list_notes","args":{}}',
+    '{"action":"read_note","args":{"path":".cie/agent/notes/research.md"}}',
+    '{"action":"search_notes","args":{"query":"previous research","limit":10}}',
+    '{"action":"git_info","args":{"operation":"status"}}',
   ];
   if (!readOnly) {
     const approval = writeApproved ? "" : "  // requires user approval";
@@ -2471,6 +2501,13 @@ export function agentToolCatalog(
     tools.push(`{"action":"install_mobile_app","args":{"platform":"android","id":"emulator-5554","path":"build/app.apk"}}${commandApproval}`);
     tools.push(`{"action":"launch_mobile_app","args":{"platform":"android","id":"emulator-5554","target":"com.example.app"}}${commandApproval}`);
     tools.push(`{"action":"install_toolchain","args":{"id":"godot"}}${commandApproval}  // brew/snap/choco install; requires user approval`);
+    tools.push(`{"action":"save_note","args":{"title":"Research: topic","content":"notes with sources","tags":["research"],"sources":["https://example.com"]}}${approval}  // saves under .cie/agent/notes`);
+    tools.push(`{"action":"create_project_tool","args":{"name":"check-links","language":"js","description":"Validate links","code":"// reusable script"}}${approval}  // saves under .cie/agent/tools`);
+    tools.push(`{"action":"create_skill","args":{"name":"my-workflow","description":"When to use it","body":"instructions","enable":true}}${approval}  // creates .cie/skills/<name>/SKILL.md`);
+    tools.push(`{"action":"git_commit","args":{"message":"feat: change","stageAll":true}}${approval}  // stages and commits; never pushes`);
+    tools.push(`{"action":"git_create_branch","args":{"name":"feature/x","checkout":true}}${approval}`);
+    tools.push(`{"action":"git_remote","args":{"name":"origin","url":"git@github.com:owner/repo.git"}}${approval}`);
+    tools.push(`{"action":"compress_video","args":{"path":"assets/demo.mp4","maxWidth":1280,"crf":28,"preset":"medium"}}${commandApproval}  // ffmpeg`);
     tools.push(`{"action":"install_skill","args":{"source":"owner/repo","ref":"main","skills":["skill-folder"],"scope":"project","enable":true}}${approval}  // install SKILL.md packs; scripts are never executed`);
     tools.push(`{"action":"set_skill_enabled","args":{"key":"project:project-cie:my-skill","enabled":true}}${approval}`);
     tools.push(`{"action":"remove_skill","args":{"key":"project:project-cie:my-skill"}}  // always requires confirmation`);
@@ -3391,6 +3428,18 @@ export async function runAgentTask(
         remove_skill: "Removing a skill…",
         create_graphic: "Creating a graphic…",
         graphic_check: "Checking a graphic…",
+        web_fetch: "Reading a web page…",
+        save_note: "Saving a research note…",
+        list_notes: "Listing research notes…",
+        read_note: "Reading a research note…",
+        search_notes: "Searching research notes…",
+        create_project_tool: "Creating a reusable project tool…",
+        create_skill: "Creating a skill…",
+        git_info: "Inspecting Git…",
+        git_commit: "Creating a Git commit…",
+        git_create_branch: "Creating a Git branch…",
+        git_remote: "Updating a Git remote…",
+        compress_video: "Compressing a video…",
         install_toolchain: "Installing a toolchain…",
         run_project_tool: "Running saved project tool…",
         delegate_research: "Delegating read-only research…",
@@ -4323,6 +4372,231 @@ export async function runAgentTask(
         observation = `Created ${created.kind} graphic: ${created.path} (${created.bytes} bytes, ${created.mime}).`;
         log("success", "Graphic created", created.path);
         ok = true;
+      } else if (action === "web_fetch") {
+        const url = String(args.url ?? "").trim();
+        if (!url) throw new Error("A URL is required.");
+        const fetched = await webFetch(url, Number(args.maxChars) || undefined);
+        observation = [
+          `URL: ${fetched.finalUrl}`,
+          `Status: ${fetched.status} · ${fetched.contentType} · ${fetched.bytes} bytes`,
+          fetched.title ? `Title: ${fetched.title}` : "",
+          fetched.truncated ? "(page text truncated)" : "",
+          "",
+          fetched.text || "(no readable text)",
+        ]
+          .filter(Boolean)
+          .join("\n");
+        log("success", "Web page fetched", `${fetched.status} · ${fetched.bytes} bytes`);
+        ok = true;
+      } else if (action === "save_note") {
+        const title = String(args.title ?? "").trim();
+        const content = String(args.content ?? "").trim();
+        if (!title || !content) throw new Error("Note title and content are required.");
+        const allowed = await requirePermission(
+          "write",
+          "save_note",
+          title,
+          "Save a research note under .cie/agent/notes.",
+          { preview: content.slice(0, 500) },
+        );
+        if (!allowed) throw new Error("The user denied permission to save this note.");
+        const saved = await saveResearchNote(analysis.rootPath, {
+          title,
+          content,
+          tags: Array.isArray(args.tags) ? args.tags.map(String) : undefined,
+          sources: Array.isArray(args.sources) ? args.sources.map(String) : undefined,
+          name: typeof args.name === "string" ? args.name : undefined,
+          append: args.append === true,
+        });
+        observation = `Saved note: ${saved.path} (${saved.bytes} bytes).`;
+        log("success", "Research note saved", saved.path);
+        ok = true;
+      } else if (action === "list_notes") {
+        const notes = await listResearchNotes(analysis.rootPath);
+        observation =
+          notes.length === 0
+            ? "No research notes yet."
+            : [
+                `${notes.length} research notes:`,
+                ...notes.map(
+                  (note) =>
+                    `- ${note.title} · ${note.path}${note.tags.length ? ` · ${note.tags.join(", ")}` : ""}`,
+                ),
+              ].join("\n");
+        log("info", "Research notes listed", `${notes.length} notes`);
+        ok = true;
+      } else if (action === "read_note") {
+        const notePath = String(args.path ?? "").trim();
+        if (!notePath) throw new Error("A note path is required.");
+        const note = await readResearchNote(analysis.rootPath, notePath);
+        observation = [
+          `Note: ${note.title}`,
+          note.sources.length ? `Sources: ${note.sources.join(", ")}` : "",
+          "",
+          note.content,
+        ]
+          .filter(Boolean)
+          .join("\n");
+        log("success", "Research note read", note.path);
+        ok = true;
+      } else if (action === "search_notes") {
+        const query = String(args.query ?? "").trim();
+        if (!query) throw new Error("A note search query is required.");
+        const results = await searchResearchNotes(analysis.rootPath, query, Number(args.limit) || 10);
+        observation =
+          results.length === 0
+            ? "No matching research notes."
+            : [
+                `${results.length} matching notes:`,
+                ...results.map(
+                  (result) => `- ${result.title} · ${result.path}\n  ${result.snippet}`,
+                ),
+              ].join("\n");
+        log("info", "Research notes searched", `${results.length} matches`);
+        ok = true;
+      } else if (action === "create_project_tool") {
+        const name = String(args.name ?? "").trim();
+        const code = String(args.code ?? "");
+        if (!name || !code.trim()) throw new Error("Tool name and code are required.");
+        const language = args.language === "ts" ? "ts" : args.language === "py" ? "py" : args.language === "sh" ? "sh" : "js";
+        const allowed = await requirePermission(
+          "write",
+          "create_project_tool",
+          name,
+          `Create a reusable ${language} tool under .cie/agent/tools. It can be run later with run_project_tool.`,
+          { preview: code.slice(0, 600) },
+        );
+        if (!allowed) throw new Error("The user denied permission to create this project tool.");
+        const tool = await createProjectTool(analysis.rootPath, {
+          name,
+          description: typeof args.description === "string" ? args.description : undefined,
+          language,
+          code,
+        });
+        observation = `Created project tool: ${tool.name} · ${tool.path}\nRun it with run_project_tool name="${tool.name}".`;
+        log("success", "Project tool created", tool.name);
+        ok = true;
+      } else if (action === "create_skill") {
+        const name = String(args.name ?? "").trim();
+        const description = String(args.description ?? "").trim();
+        const body = String(args.body ?? "").trim();
+        if (!name || !description || !body) throw new Error("Skill name, description and instructions are required.");
+        const allowed = await requirePermission(
+          "write",
+          "create_skill",
+          name,
+          "Create a project skill under .cie/skills. It is enabled for this project unless enable=false.",
+          { preview: body.slice(0, 600) },
+        );
+        if (!allowed) throw new Error("The user denied permission to create this skill.");
+        const skill = await createSkill(analysis.rootPath, projectId, {
+          name,
+          description,
+          body,
+          allowedTools: typeof args.allowedTools === "string" ? args.allowedTools : undefined,
+          enable: args.enable !== false,
+        });
+        observation = `Created skill: ${skill.name} · ${skill.path}${skill.enabled ? " · enabled" : ""}`;
+        log("success", "Skill created", skill.name);
+        ok = true;
+      } else if (action === "git_info") {
+        const operation = ["status", "diff", "log", "branches", "remotes"].includes(String(args.operation))
+          ? (String(args.operation) as "status" | "diff" | "log" | "branches" | "remotes")
+          : "status";
+        const output = await gitInfo(analysis.rootPath, operation, {
+          path: typeof args.path === "string" ? args.path : undefined,
+          limit: Number(args.limit) || undefined,
+          staged: args.staged === true,
+        });
+        observation = output;
+        log("info", "Git inspected", operation);
+        ok = true;
+      } else if (action === "git_commit") {
+        const message = String(args.message ?? "").trim();
+        if (!message) throw new Error("A commit message is required.");
+        const allowed = await requirePermission(
+          "write",
+          "git_commit",
+          analysis.projectName,
+          `Create a Git commit: ${message}`,
+          { preview: message },
+        );
+        if (!allowed) throw new Error("The user denied permission to commit.");
+        const result = await gitCommit(analysis.rootPath, message, {
+          files: Array.isArray(args.files) ? args.files.map(String) : undefined,
+          stageAll: args.stageAll === true,
+        });
+        observation = `Commit ${result.commit ?? "created"}.\n${result.output}`;
+        log("success", "Git commit created", result.commit);
+        ok = true;
+      } else if (action === "git_create_branch") {
+        const name = String(args.name ?? "").trim();
+        if (!name) throw new Error("A branch name is required.");
+        const allowed = await requirePermission(
+          "write",
+          "git_create_branch",
+          name,
+          "Create a Git branch.",
+          { preview: name },
+        );
+        if (!allowed) throw new Error("The user denied permission to create a branch.");
+        const result = await gitCreateBranch(analysis.rootPath, name, args.checkout !== false);
+        observation = `Current branch: ${result.branch}\n${result.output}`;
+        log("success", "Git branch created", result.branch);
+        ok = true;
+      } else if (action === "git_remote") {
+        const name = String(args.name ?? "origin").trim();
+        const url = String(args.url ?? "").trim();
+        if (!name) throw new Error("A remote name is required.");
+        if (!url && args.remove !== true) throw new Error("A remote URL is required.");
+        const allowed = await requirePermission(
+          "write",
+          "git_remote",
+          name,
+          args.remove === true ? "Remove a Git remote." : `Set Git remote ${name} to ${url}.`,
+          { preview: url || name },
+        );
+        if (!allowed) throw new Error("The user denied permission to update the remote.");
+        const output = await gitSetRemote(analysis.rootPath, name, url, args.remove === true);
+        observation = output || `Remote ${name} updated.`;
+        log("success", "Git remote updated", name);
+        ok = true;
+      } else if (action === "compress_video") {
+        const videoPath = String(args.path ?? "").trim();
+        if (!videoPath) throw new Error("A video path is required.");
+        const allowed = await requirePermission(
+          "command",
+          "compress_video",
+          videoPath,
+          "Compress a video with ffmpeg. This writes a new file.",
+          { preview: `maxWidth=${Number(args.maxWidth) || 1280} crf=${Number(args.crf) || 28}` },
+        );
+        if (!allowed) throw new Error("The user denied permission to compress this video.");
+        const result = await compressVideo(analysis.rootPath, {
+          path: videoPath,
+          outputPath: typeof args.outputPath === "string" ? args.outputPath : undefined,
+          maxWidth: Number(args.maxWidth) || undefined,
+          crf: Number(args.crf) || undefined,
+          preset:
+            args.preset === "ultrafast" ||
+            args.preset === "veryfast" ||
+            args.preset === "fast" ||
+            args.preset === "slow"
+              ? args.preset
+              : "medium",
+        });
+        observation = [
+          `Compressed ${result.input.path} → ${result.output.path}`,
+          `${result.input.bytes} → ${result.output.bytes} bytes · saved ${result.savedBytes} (${result.savedPercent}%)`,
+          `Dimensions: ${result.input.width ?? "?"}×${result.input.height ?? "?"} → ${result.output.width ?? "?"}×${result.output.height ?? "?"}`,
+          result.input.durationSeconds ? `Duration: ${result.input.durationSeconds.toFixed(1)}s` : "",
+          `Command: ${result.command}`,
+        ]
+          .filter(Boolean)
+          .join("\n");
+        evidence.push({ path: result.output.path, label: "Compressed video" });
+        log("success", "Video compressed", `${result.savedPercent}% saved`);
+        ok = true;
       } else if (action === "write_file") {
         if (changedFiles.length >= AGENT_MAX_WRITES) throw new Error(`Write limit reached (${AGENT_MAX_WRITES} files).`);
         const filePath = normalizeAgentPath(analysis.rootPath, args.path);
@@ -4487,14 +4761,23 @@ export async function runAgentTask(
     if (actionCount > 1) {
       observation = `${observation}\n\n(Your reply contained ${actionCount} tool calls; all were executed in order. One JSON action per turn is still preferred.)`;
     }
-    step.observation = clampObservation(
-      observation,
+    const observationLimit =
       step.action === "read_file" || step.action === "find_in_file"
         ? 3_200
-        : step.action === "run_command"
-          ? 2_500
-          : 1_500,
-    );
+        : step.action === "web_fetch"
+          ? 8_000
+          : step.action === "read_note"
+            ? 12_000
+            : step.action === "git_info"
+              ? 8_000
+              : step.action === "list_notes" || step.action === "search_notes"
+                ? 4_000
+                : step.action === "compress_video"
+                  ? 4_000
+                  : step.action === "run_command"
+                    ? 2_500
+                    : 1_500;
+    step.observation = clampObservation(observation, observationLimit);
     step.ok = ok;
     step.durationMs = Date.now() - started;
     step.tokenUsage = stepUsage;

@@ -480,3 +480,69 @@ export async function updateInstalledSkill(
     enabled,
   };
 }
+
+export async function createSkill(
+  projectRoot: string,
+  projectId: string,
+  input: {
+    name: string;
+    description: string;
+    body: string;
+    allowedTools?: string;
+    enable?: boolean;
+  },
+  options: { dataDir?: string; homeDir?: string } = {},
+): Promise<{
+  key: string;
+  name: string;
+  directory: string;
+  path: string;
+  enabled: boolean;
+}> {
+  const name = input.name.trim().slice(0, 80);
+  if (!name) throw new Error("A skill name is required.");
+  const description = input.description.trim().slice(0, 300);
+  if (!description) throw new Error("A skill description is required.");
+  const body = input.body.trim();
+  if (!body) throw new Error("Skill instructions are required.");
+  if (body.length > 12_000) throw new Error("Skill instructions are too large (12k character limit).");
+  const root = targetRoot(projectRoot, "project", options.dataDir ?? getDataDir());
+  await fs.mkdir(root, { recursive: true });
+  let directory = safeDirectoryName(name);
+  let counter = 2;
+  while (await fs.stat(path.join(root, directory)).then(() => true).catch(() => false)) {
+    directory = `${safeDirectoryName(name)}-${counter}`;
+    counter += 1;
+    if (counter > 50) throw new Error("Could not choose a free skill folder name.");
+  }
+  const target = path.join(root, directory);
+  await fs.mkdir(target, { recursive: true });
+  const allowed = input.allowedTools?.trim();
+  const lines = ["---", `name: ${name}`, `description: ${description}`];
+  if (allowed) lines.push(`allowed-tools: ${allowed}`);
+  lines.push("---", "", body, "");
+  const document = lines.join("\n");
+  await fs.writeFile(path.join(target, "SKILL.md"), document, "utf8");
+  const key = `project:project-cie:${directory}`;
+  if (input.enable !== false) {
+    await setSkillEnabled(projectRoot, projectId, key, true, options).catch(() => undefined);
+  }
+  const lock = await readLock(root);
+  lock.skills[key] = {
+    name,
+    directory,
+    source: "generated",
+    ref: "local",
+    hash: crypto.createHash("sha1").update(document).digest("hex").slice(0, 16),
+    installedAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+  await writeLock(root, lock);
+  return {
+    key,
+    name,
+    directory,
+    path: path.relative(projectRoot, path.join(target, "SKILL.md")),
+    enabled: input.enable !== false,
+  };
+}

@@ -77,6 +77,7 @@ async function writeRegistry(rootPath: string, registry: RegistryFile): Promise<
 export async function syncProjectTools(rootPath: string): Promise<ProjectToolList> {
   const registry = await readRegistry(rootPath);
   const manual = registry.tools.filter((tool) => tool.source === "manual");
+  const manualPaths = new Set(manual.map((tool) => tool.path).filter(Boolean));
   const previousAuto = new Map(
     registry.tools.filter((tool) => tool.source === "auto").map((tool) => [tool.name, tool]),
   );
@@ -91,6 +92,7 @@ export async function syncProjectTools(rootPath: string): Promise<ProjectToolLis
       if (!entry.isFile() || entry.isSymbolicLink()) continue;
       if (entry.name.startsWith(".") || entry.name.endsWith(".json")) continue;
       const relative = `${TOOLS_DIR}/${entry.name}`;
+      if (manualPaths.has(relative)) continue;
       const command = commandFor(relative);
       if (!command) continue;
       const name = toolName(entry.name);
@@ -172,4 +174,51 @@ export async function recordProjectToolRun(
       : tool,
   );
   await writeRegistry(rootPath, registry);
+}
+
+
+export async function createProjectTool(
+  rootPath: string,
+  input: {
+    name: string;
+    description?: string;
+    language?: "js" | "ts" | "py" | "sh";
+    code: string;
+  },
+): Promise<ProjectTool> {
+  const language = input.language ?? "js";
+  const extension = language === "ts" ? ".ts" : language === "py" ? ".py" : language === "sh" ? ".sh" : ".js";
+  const name = await nextProjectToolName(rootPath, input.name);
+  if (!/^[a-z0-9._-]{1,60}$/.test(name)) throw new Error("Invalid tool name.");
+  const code = input.code.trim();
+  if (!code) throw new Error("Tool code is required.");
+  if (Buffer.byteLength(code, "utf8") > 300_000) throw new Error("Tool code is larger than the 300 KB limit.");
+  const relative = `${TOOLS_DIR}/${name}${extension}`;
+  const absolute = path.resolve(rootPath, relative);
+  if (!absolute.startsWith(`${path.resolve(rootPath, TOOLS_DIR)}${path.sep}`)) {
+    throw new Error("Tool path is outside the tools folder.");
+  }
+  const command = commandFor(relative);
+  if (!command) throw new Error("Unsupported tool language.");
+  await fs.mkdir(path.dirname(absolute), { recursive: true });
+  await fs.writeFile(absolute, `${code}\n`, { encoding: "utf8", mode: 0o600 });
+  const registry = await readRegistry(rootPath);
+  const now = new Date().toISOString();
+  const tool: ProjectTool = {
+    name,
+    description:
+      input.description?.trim().slice(0, 500) ||
+      `Agent-created reusable ${language} tool. Run it with run_project_tool instead of rewriting the same logic.`,
+    command,
+    tags: ["generated", language],
+    source: "manual",
+    path: relative,
+    createdAt: now,
+    updatedAt: now,
+    successCount: 0,
+    failureCount: 0,
+  };
+  registry.tools = [...registry.tools.filter((item) => item.name !== name), tool].slice(0, MAX_TOOLS);
+  await writeRegistry(rootPath, registry);
+  return tool;
 }

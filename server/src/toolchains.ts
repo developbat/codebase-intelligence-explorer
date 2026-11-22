@@ -73,6 +73,28 @@ const DEFINITIONS: Definition[] = [
       win32: "choco install rustup.install -y",
     },
   },
+  {
+    id: "ffmpeg",
+    name: "FFmpeg",
+    commands: ["ffmpeg"],
+    args: ["-version"],
+    install: {
+      darwin: "brew install ffmpeg",
+      linux: "sudo apt-get install -y ffmpeg",
+      win32: "choco install ffmpeg -y",
+    },
+  },
+  {
+    id: "ffprobe",
+    name: "FFprobe",
+    commands: ["ffprobe"],
+    args: ["-version"],
+    install: {
+      darwin: "brew install ffmpeg",
+      linux: "sudo apt-get install -y ffmpeg",
+      win32: "choco install ffmpeg -y",
+    },
+  },
   { id: "xcrun", name: "Xcode simctl", commands: ["xcrun"], args: ["--find", "simctl"], install: {} },
   { id: "adb", name: "Android adb", commands: ["adb"], args: ["version"], install: {} },
   { id: "emulator", name: "Android emulator", commands: ["emulator"], args: ["-version"], install: {} },
