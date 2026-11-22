@@ -17,6 +17,8 @@ export interface DocumentStats {
   words: number;
   checkedBoxes: number;
   uncheckedBoxes: number;
+  uncheckedItems: { line: number; text: string }[];
+  checkedItems: { line: number; text: string }[];
   headings: number;
   links: number;
 }
@@ -59,23 +61,36 @@ export function documentStats(text: string): DocumentStats {
   const lines = text.split("\n");
   let checkedBoxes = 0;
   let uncheckedBoxes = 0;
+  const uncheckedItems: { line: number; text: string }[] = [];
+  const checkedItems: { line: number; text: string }[] = [];
   let headings = 0;
   let links = 0;
-  for (const line of lines) {
+  lines.forEach((line, index) => {
     if (/^\s*#{1,6}\s/.test(line)) headings += 1;
     const box = /^\s*(?:[-*+]|\d+\.)\s+\[([ xX])\]/.exec(line);
     if (box) {
-      if (box[1].toLowerCase() === "x") checkedBoxes += 1;
-      else uncheckedBoxes += 1;
+      const text = line
+        .replace(/^\s*(?:[-*+]|\d+\.)\s+\[/, "")
+        .replace(/^[ xX]?\]\s*/, "")
+        .trim();
+      if (box[1].toLowerCase() === "x") {
+        checkedBoxes += 1;
+        if (checkedItems.length < 200) checkedItems.push({ line: index + 1, text });
+      } else {
+        uncheckedBoxes += 1;
+        if (uncheckedItems.length < 200) uncheckedItems.push({ line: index + 1, text });
+      }
     }
     links += (line.match(/\[[^\]]+\]\([^)]+\)/g) ?? []).length;
-  }
+  });
   return {
     lines: lines.length,
     chars: text.length,
     words: (text.match(/\S+/g) ?? []).length,
     checkedBoxes,
     uncheckedBoxes,
+    uncheckedItems,
+    checkedItems,
     headings,
     links,
   };

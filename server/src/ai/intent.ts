@@ -6,8 +6,10 @@ import { recordUsage } from "./usage";
 import { getPublicSettings, resolveAgentRole, resolveProvider } from "./settings";
 import { pickAlternateAgentModel } from "./agents";
 import { healthKey, modelHealthByProviderModel } from "./modelStats";
+import { estimateUsageCost } from "./pricing";
 import type { AnalysisResult } from "../../../shared/types";
 import type {
+  DocumentOperation,
   IntentAnalysis,
   IntentKind,
   IntentMode,
@@ -21,6 +23,7 @@ import {
   INTENT_SCOPES,
   INTENT_VERIFICATIONS,
 } from "../../../shared/intent";
+import { documentStats, readDocument } from "../documentTools";
 
 const MAX_OUTPUT_TOKENS = 700;
 const TIMEOUT_MS = 35_000;
@@ -89,7 +92,7 @@ function systemPrompt(): string {
   return `You are the intent analyst for a coding agent. Read the user request in any language (typos are possible) and the project facts. Return JSON only. Never write code.
 
 Schema:
-{"kind":"edit|question|run|scaffold|analyze","understanding":"one sentence in the user's language","language":"tr|en|zh|...","needsClarification":true|false,"question":"question in the user's language","options":[{"label":"short option in the user's language","suffix":"text appended to the user's original instruction when this option is chosen"}],"scope":"trivial|small|medium|large","mode":"single|loop","areas":["exact project-relative file paths"],"verification":"none|browser|test|build","assumptions":["short assumptions"]}
+{"kind":"edit|question|run|scaffold|analyze","understanding":"one sentence in the user's language","language":"tr|en|zh|...","needsClarification":true|false,"question":"question in the user's language","options":[{"label":"short option in the user's language","suffix":"text appended to the user's original instruction when this option is chosen"}],"scope":"trivial|small|medium|large","mode":"single|loop","areas":["exact project-relative file paths"],"verification":"none|browser|test|build","documentOperation":"none|count_unchecked|list_unchecked|count_checked|list_checked","assumptions":["short assumptions"]}
 
 Rules:
 - Restate the user's goal accurately in "understanding". Paraphrase it, do not copy it. Describe what the user wants, not an investigation plan. Do not invent features or fields.
@@ -104,6 +107,7 @@ Rules:
 - "areas": likely existing files from the sample; put new files only when the request clearly creates them. Do not invent unrelated files.
 - Prefer the smallest area that can satisfy the request. A CSS-only change must point at the stylesheet, not every file.
 - "verification": browser for UI/static pages, test when tests exist and behavior is testable, build when compilation is the main risk, none when nothing meaningful applies.
+- "documentOperation": for an attached Markdown/text document, use count_unchecked for a count of unchecked checkboxes, list_unchecked for the full list, count_checked/list_checked likewise, otherwise none. This is extraction, not code.
 - Never make the user choose a model or restate the whole request.
 - If the user already answered a clarification, needsClarification must be false.
 
@@ -113,6 +117,30 @@ User: "add a task detail field"
 
 Bad clarification example (do not do this):
 "Which files should I inspect?" or "Where is the task form?"`;
+}
+
+async function attachmentFacts(analysis: AnalysisResult, instruction: string): Promise<string> {
+  const paths = [...instruction.matchAll(/(?:Ek dosya|Attached file|Ekli dosya):\s*([^\s]+)/gi)]
+    .map((match) => match[1])
+    .slice(0, 3);
+  if (paths.length === 0) return "";
+  const lines: string[] = [];
+  for (const pathValue of paths) {
+    try {
+      // eslint-disable-next-line no-await-in-loop
+      const document = await readDocument(analysis.rootPath, pathValue, {
+        maxChars: 12_000,
+        ocr: false,
+      });
+      const stats = document.stats ?? documentStats(document.text);
+      lines.push(
+        `- ${document.path}: ${stats.lines} lines, ${stats.checkedBoxes} checked, ${stats.uncheckedBoxes} unchecked checkboxes`,
+      );
+    } catch {
+      lines.push(`- ${pathValue}: unreadable`);
+    }
+  }
+  return `Attached documents:\n${lines.join("\n")}`;
 }
 
 async function userPrompt(
@@ -130,6 +158,7 @@ async function userPrompt(
           .map((message) => `${message.role}: ${message.content.slice(0, 1_200)}`)
           .join("\n")}`
       : "",
+    await attachmentFacts(analysis, instruction),
     `User request:\n${instruction.trim()}`,
   ]
     .filter(Boolean)
@@ -172,6 +201,11 @@ export function parseIntentResponse(
   const scope = pickEnum(parsed.scope, INTENT_SCOPES, "small") as IntentScope;
   const mode = pickEnum(parsed.mode, INTENT_MODES, scope === "large" || scope === "medium" ? "loop" : "single") as IntentMode;
   const verification = pickEnum(parsed.verification, INTENT_VERIFICATIONS, "none") as IntentVerification;
+  const documentOperation = pickEnum(
+    parsed.documentOperation,
+    ["none", "count_unchecked", "list_unchecked", "count_checked", "list_checked"] as const,
+    "none",
+  ) as DocumentOperation;
   const understanding =
     typeof parsed.understanding === "string" && parsed.understanding.trim()
       ? parsed.understanding.trim().slice(0, 500)
@@ -239,6 +273,7 @@ export function parseIntentResponse(
     mode,
     areas,
     verification,
+    documentOperation,
     assumptions,
   };
 }
@@ -275,7 +310,14 @@ export async function analyzeIntent(
   projectId: string,
   instruction: string,
   options: IntentOptions = {},
-): Promise<{ intent: IntentAnalysis; provider: string; model: string; totalTokens: number }> {
+): Promise<{
+  intent: IntentAnalysis;
+  provider: string;
+  model: string;
+  totalTokens: number;
+  tokenUsage: { inputTokens: number; outputTokens: number; totalTokens: number };
+  costUsd?: number;
+}> {
   const analysis = await loadAnalysis(projectId);
   if (!instruction.trim()) throw new Error("An instruction is required.");
   const config = await resolveIntentModel(options);
@@ -334,6 +376,7 @@ export async function analyzeIntent(
         mode: "single",
         areas: [],
         verification: "none",
+        documentOperation: "none",
         assumptions: ["Intent analyst could not parse its reply; proceeding with one focused task."],
       };
     }
@@ -354,5 +397,13 @@ export async function analyzeIntent(
     totalTokens: tokenUsage.totalTokens,
   }).catch(() => undefined);
 
-  return { intent, provider: config.id, model: config.model, totalTokens: tokenUsage.totalTokens };
+  const costUsd = await estimateUsageCost(config.id, config.model, tokenUsage).catch(() => undefined);
+  return {
+    intent,
+    provider: config.id,
+    model: config.model,
+    totalTokens: tokenUsage.totalTokens,
+    tokenUsage,
+    costUsd,
+  };
 }

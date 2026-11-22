@@ -93,3 +93,21 @@ test("unsafe and invented areas are removed", () => {
 test("invalid replies throw so the caller can retry", () => {
   assert.throws(() => parseIntentResponse("not json", analysis, "x"), /JSON/i);
 });
+
+test("document checkbox operations are preserved", () => {
+  const intent = parseIntentResponse(
+    JSON.stringify({
+      kind: "analyze",
+      understanding: "list unchecked",
+      needsClarification: false,
+      scope: "trivial",
+      mode: "single",
+      areas: [],
+      verification: "none",
+      documentOperation: "list_unchecked",
+    }),
+    analysis,
+    "list remaining tasks",
+  );
+  assert.equal(intent.documentOperation, "list_unchecked");
+});

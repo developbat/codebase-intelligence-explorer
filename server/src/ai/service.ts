@@ -1973,6 +1973,11 @@ export async function agentSeedContext(
         [
           `Attached document: ${document.path} · ${document.kind} · ${document.bytes} bytes`,
           `Structure: ${stats.lines} lines · ${stats.words} words · ${stats.headings} headings · ${stats.links} links · ${stats.checkedBoxes} checked / ${stats.uncheckedBoxes} unchecked checkboxes`,
+          stats.uncheckedItems.length > 0
+            ? `Unchecked items:\n${stats.uncheckedItems
+                .map((item) => `- line ${item.line}: ${item.text}`)
+                .join("\n")}`
+            : "",
           document.text.slice(0, 2_000),
         ].join("\n"),
       );
