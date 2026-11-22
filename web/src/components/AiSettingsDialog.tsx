@@ -386,15 +386,6 @@ export function AiSettingsDialog({
               </button>
             ))}
 
-            <button className="ai-provider ai-provider-add is-bottom" onClick={startAdd}>
-              <span className="ai-provider-icon">
-                <Plus size={14} />
-              </span>
-              <span className="ai-provider-main">
-                <span className="ai-provider-name">{t("Add provider")}</span>
-                <span className="ai-provider-state">{t("Name, URL, key and models")}</span>
-              </span>
-            </button>
           </div>
 
           <div className="ai-provider-form">

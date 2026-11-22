@@ -7,6 +7,7 @@ import {
   MinusCircle,
 } from "lucide-react";
 import type { ProjectTask, ProjectTaskQueue } from "../../../shared/tasks";
+import { formatUsd } from "../../../shared/pricing";
 import { useI18n } from "../i18n";
 
 interface TaskQueueCardProps {
@@ -43,6 +44,7 @@ export function TaskQueueCard({
     queue.tasks.find((task) => task.status === "pending");
   const percent = queue.tasks.length > 0 ? Math.round((done / queue.tasks.length) * 100) : 0;
   const totalTokens = queue.tasks.reduce((sum, task) => sum + (task.tokenUsage?.totalTokens ?? 0), 0);
+  const totalCost = queue.tasks.reduce((sum, task) => sum + (task.costUsd ?? 0), 0);
   return (
     <details className={`task-queue-card is-${queue.status}`} open={defaultOpen ? true : undefined}>
       <summary>
@@ -55,6 +57,7 @@ export function TaskQueueCard({
             {done}/{queue.tasks.length} {t("done")}
             {failed > 0 ? ` · ${failed} ${t("failed")}` : ""} · {t(queue.status)}
             {totalTokens > 0 ? ` · ${tokenLabel(totalTokens)} ${t("tokens")}` : ""}
+            {totalCost > 0 ? ` · ${formatUsd(totalCost)}` : ""}
           </small>
         </span>
         <span className="task-queue-progress" aria-hidden="true">
@@ -83,6 +86,7 @@ export function TaskQueueCard({
                 {task.provider ? ` · ${task.provider}/${task.model ?? ""}` : ""}
                 {task.attempts > 1 ? ` · ${task.attempts} ${t("attempts")}` : ""}
                 {task.tokenUsage?.totalTokens ? ` · ${tokenLabel(task.tokenUsage.totalTokens)} ${t("tokens")}` : ""}
+                {task.costUsd ? ` · ${formatUsd(task.costUsd)}` : ""}
               </small>
               {task.resultSummary ? <p>{task.resultSummary}</p> : null}
               {task.verification?.command ? (

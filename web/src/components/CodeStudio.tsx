@@ -132,6 +132,7 @@ import { useI18n } from "../i18n";
 import { ProjectSwitcher } from "./ProjectSwitcher";
 import { MarkdownText } from "./MarkdownText";
 import { formatTokens } from "./UsageDialog";
+import { formatUsd } from "../../../shared/pricing";
 import { AgentPermissionDialog } from "./AgentPermissionDialog";
 import { SettingsScreen, type SettingsTab } from "./SettingsScreen";
 import { AgentPlanCard } from "./AgentPlanCard";
@@ -541,6 +542,7 @@ export function CodeStudio({
     steps?: AiAgentStep[];
     logs?: AiAgentLogEntry[];
     tokenUsage?: AiTokenUsage;
+    costUsd?: number;
     plan?: AiAgentPlan;
   };
   type StudioChatTab = { id: string; title: string; createdAt: string };
@@ -2279,6 +2281,7 @@ export function CodeStudio({
           steps: result.steps,
           logs: result.logs?.slice(-150),
           tokenUsage: result.tokenUsage,
+          costUsd: result.costUsd,
           plan: result.plan,
         },
       ]);
@@ -3035,6 +3038,7 @@ export function CodeStudio({
                   {workflowMessage.tokenUsage ? (
                     <span className="studio-token-badge">
                       {formatTokens(workflowMessage.tokenUsage.totalTokens)} {t("tokens")}
+                      {workflowMessage.costUsd ? ` · ${formatUsd(workflowMessage.costUsd)}` : ""}
                     </span>
                   ) : null}
                   {workflowMessage.steps && workflowMessage.steps.length > 0 ? (
@@ -3088,6 +3092,7 @@ export function CodeStudio({
                       {workflowMessage.tokenUsage ? (
                         <span className="studio-token-badge">
                           {formatTokens(workflowMessage.tokenUsage.totalTokens)} {t("tokens")}
+                          {workflowMessage.costUsd ? ` · ${formatUsd(workflowMessage.costUsd)}` : ""}
                         </span>
                       ) : null}
                     </summary>

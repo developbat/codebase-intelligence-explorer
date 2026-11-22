@@ -9,6 +9,7 @@ import type {
   AiUsageReport,
 } from "../../../shared/ai";
 import { getDataDir } from "../store";
+import { findPrice, getPricingReport, priceFor, usageCost } from "./pricing";
 
 const MAX_ENTRIES = 10_000;
 
@@ -29,6 +30,10 @@ function addUsage(target: AiTokenUsage, entry: AiUsageEntry): void {
   target.inputTokens += entry.inputTokens;
   target.outputTokens += entry.outputTokens;
   target.totalTokens += entry.totalTokens;
+}
+
+function costOf(entry: AiUsageEntry, prices: Awaited<ReturnType<typeof getPricingReport>>["prices"]): number | undefined {
+  return entry.costUsd ?? usageCost(entry, findPrice(prices, entry.provider, entry.model));
 }
 
 let writeQueue: Promise<void> = Promise.resolve();
@@ -65,6 +70,9 @@ export async function recordUsage(
     id: crypto.randomUUID(),
     createdAt: new Date().toISOString(),
   };
+  const price = await priceFor(input.provider, input.model).catch(() => undefined);
+  const cost = usageCost(input, price);
+  if (cost !== undefined) entry.costUsd = cost;
   writeQueue = writeQueue
     .then(async () => {
       const file = await readUsage();
@@ -94,17 +102,40 @@ function withinDays(iso: string, days: number): boolean {
 
 export async function getProjectUsage(projectId: string): Promise<AiUsageReport> {
   const file = await readUsage();
-  const entries = file.entries.filter((entry) => entry.projectId === projectId);
+  const pricing = await getPricingReport().catch(() => ({
+    prices: [],
+    sources: [],
+    updatedAt: undefined,
+  }));
+  const entries = file.entries
+    .filter((entry) => entry.projectId === projectId)
+    .map((entry) => {
+      const costUsd = costOf(entry, pricing.prices);
+      return costUsd === undefined ? entry : { ...entry, costUsd };
+    });
   const total = emptyUsage();
   const today = emptyUsage();
   const last7Days = emptyUsage();
+  let totalCostUsd = 0;
+  let todayCostUsd = 0;
+  let last7DaysCostUsd = 0;
+  let unpricedRequests = 0;
   const byModel = new Map<string, AiUsageBucket>();
   const byDay = new Map<string, AiUsageDay>();
 
   for (const entry of entries) {
     addUsage(total, entry);
-    if (isToday(entry.createdAt)) addUsage(today, entry);
-    if (withinDays(entry.createdAt, 7)) addUsage(last7Days, entry);
+    const cost = entry.costUsd;
+    if (cost === undefined) unpricedRequests += 1;
+    else totalCostUsd += cost;
+    if (isToday(entry.createdAt)) {
+      addUsage(today, entry);
+      if (cost !== undefined) todayCostUsd += cost;
+    }
+    if (withinDays(entry.createdAt, 7)) {
+      addUsage(last7Days, entry);
+      if (cost !== undefined) last7DaysCostUsd += cost;
+    }
 
     const modelKey = `${entry.provider}::${entry.model}`;
     const model = byModel.get(modelKey) ?? {
@@ -114,11 +145,13 @@ export async function getProjectUsage(projectId: string): Promise<AiUsageReport>
       inputTokens: 0,
       outputTokens: 0,
       totalTokens: 0,
+      costUsd: 0,
     };
     model.requests += 1;
     model.inputTokens += entry.inputTokens;
     model.outputTokens += entry.outputTokens;
     model.totalTokens += entry.totalTokens;
+    if (cost !== undefined) model.costUsd = (model.costUsd ?? 0) + cost;
     byModel.set(modelKey, model);
 
     const day = entry.createdAt.slice(0, 10);
@@ -128,11 +161,13 @@ export async function getProjectUsage(projectId: string): Promise<AiUsageReport>
       inputTokens: 0,
       outputTokens: 0,
       totalTokens: 0,
+      costUsd: 0,
     };
     bucket.requests += 1;
     bucket.inputTokens += entry.inputTokens;
     bucket.outputTokens += entry.outputTokens;
     bucket.totalTokens += entry.totalTokens;
+    if (cost !== undefined) bucket.costUsd = (bucket.costUsd ?? 0) + cost;
     byDay.set(day, bucket);
   }
 
@@ -144,5 +179,10 @@ export async function getProjectUsage(projectId: string): Promise<AiUsageReport>
     byModel: [...byModel.values()].sort((a, b) => b.totalTokens - a.totalTokens),
     byDay: [...byDay.values()].sort((a, b) => (a.day < b.day ? 1 : -1)).slice(0, 30),
     recent: [...entries].sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1)).slice(0, 40),
+    totalCostUsd: Number(totalCostUsd.toFixed(6)),
+    todayCostUsd: Number(todayCostUsd.toFixed(6)),
+    last7DaysCostUsd: Number(last7DaysCostUsd.toFixed(6)),
+    unpricedRequests,
+    pricingUpdatedAt: pricing.updatedAt,
   };
 }

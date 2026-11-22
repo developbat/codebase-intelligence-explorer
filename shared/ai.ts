@@ -283,6 +283,7 @@ export interface AiUsageEntry {
   inputTokens: number;
   outputTokens: number;
   totalTokens: number;
+  costUsd?: number;
   createdAt: string;
 }
 
@@ -293,6 +294,7 @@ export interface AiUsageBucket {
   inputTokens: number;
   outputTokens: number;
   totalTokens: number;
+  costUsd?: number;
 }
 
 export interface AiUsageDay {
@@ -301,6 +303,7 @@ export interface AiUsageDay {
   inputTokens: number;
   outputTokens: number;
   totalTokens: number;
+  costUsd?: number;
 }
 
 export interface AiUsageReport {
@@ -311,6 +314,11 @@ export interface AiUsageReport {
   byModel: AiUsageBucket[];
   byDay: AiUsageDay[];
   recent: AiUsageEntry[];
+  totalCostUsd?: number;
+  todayCostUsd?: number;
+  last7DaysCostUsd?: number;
+  unpricedRequests?: number;
+  pricingUpdatedAt?: string;
 }
 
 export interface AiContextFile {
@@ -598,6 +606,7 @@ export interface AiAgentResult {
   createdAt: string;
   usage?: AiUsage;
   tokenUsage?: AiTokenUsage;
+  costUsd?: number;
   plan?: AiAgentPlan;
   logs?: AiAgentLogEntry[];
   taskQueue?: ProjectTaskQueue;

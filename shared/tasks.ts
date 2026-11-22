@@ -31,6 +31,7 @@ export interface ProjectTask {
     outputTokens: number;
     totalTokens: number;
   };
+  costUsd?: number;
   verification?: {
     command?: string;
     ok?: boolean;

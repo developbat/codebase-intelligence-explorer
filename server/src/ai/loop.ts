@@ -23,6 +23,8 @@ import { recordUsage } from "./usage";
 import { getPublicSettings, resolveAgentRole, resolveProvider } from "./settings";
 import { pickAlternateAgentModel } from "./agents";
 import { healthKey, modelHealthByProviderModel } from "./modelStats";
+import { estimateUsageCost } from "./pricing";
+import { formatUsd } from "../../../shared/pricing";
 import { preferredVerificationCommand, reportsRemainingWork, runAgentTask } from "./service";
 
 const MAX_PLANNED_TASKS = 12;
@@ -425,6 +427,7 @@ function aggregateResult(
     (total, result) => addUsage(total, result.tokenUsage),
     emptyUsage(),
   );
+  const costUsd = queue.tasks.reduce((total, task) => total + (task.costUsd ?? 0), 0);
   const stoppedReason: AiAgentResult["stoppedReason"] =
     queue.status === "stopped" ? "aborted" : queue.status === "completed" ? "finished" : "max_steps";
   const lines = [
@@ -432,6 +435,7 @@ function aggregateResult(
     "",
     `- Completed: ${done}/${queue.tasks.length}`,
     `- Blocked/failed: ${failed}`,
+    costUsd > 0 ? `- Estimated cost: ${formatUsd(costUsd)}` : "",
     changedFiles.length > 0 ? `- Changed files: ${changedFiles.map((file) => `\`${file}\``).join(", ")}` : "",
     commands.length > 0 ? `- Commands: ${commands.map((command) => `\`${command}\``).join(", ")}` : "",
     "",
@@ -455,6 +459,7 @@ function aggregateResult(
     model,
     createdAt: new Date().toISOString(),
     tokenUsage,
+    costUsd: costUsd > 0 ? Number(costUsd.toFixed(6)) : undefined,
     taskQueue: queue,
   };
 }
@@ -787,6 +792,13 @@ export async function runProjectLoop(
         `${taskConfig.id}/${taskConfig.model} is unavailable. The run will switch to a working model.`,
       );
     }
+    const attemptCost = await estimateUsageCost(taskConfig.id, taskConfig.model, result.tokenUsage).catch(
+      () => undefined,
+    );
+    const totalCost =
+      attemptCost === undefined
+        ? task.costUsd
+        : Number(((task.costUsd ?? 0) + attemptCost).toFixed(6));
     queue = markTask(queue, task.id, {
       status,
       completedAt: nowIso(),
@@ -794,6 +806,7 @@ export async function runProjectLoop(
       changedFiles: result.changedFiles,
       commands: result.ranCommands,
       tokenUsage: addUsage(task.tokenUsage ?? emptyUsage(), result.tokenUsage),
+      costUsd: totalCost,
       verification: taskVerification ?? (verification ? { command: verification } : undefined),
     });
     queue = await saveQueue(analysis.rootPath, queue);

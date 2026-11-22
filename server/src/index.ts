@@ -20,8 +20,9 @@ import { listProviderModels, testProvider } from "./ai/providers";
 import { autoConfigureAgents } from "./ai/agents";
 import { clearModelCatalog, getModelCatalog, importModelCatalog } from "./ai/catalog";
 import { getModelHealth } from "./ai/modelStats";
+import { getPricingReport, refreshPricing } from "./ai/pricing";
 import { isBrowserCheckAvailable, runBrowserCheck } from "./browserCheck";
-import { listProjectTools } from "./projectTools";
+import { findProjectTool, listProjectTools, recordProjectToolRun } from "./projectTools";
 import {
   bootMobileDevice,
   captureMobileScreenshot,
@@ -380,13 +381,33 @@ app.get("/api/ai/models", async (req, res) => {
       res.status(400).json({ error: "Unknown AI provider." });
       return;
     }
-    res.json({
-      models: await listProviderModels(provider, {
-        refresh: req.query.refresh === "1" || req.query.refresh === "true",
-      }),
-    });
+    const refresh = req.query.refresh === "1" || req.query.refresh === "true";
+    const models = await listProviderModels(provider, { refresh });
+    let pricingUpdatedAt: string | undefined;
+    if (refresh) {
+      pricingUpdatedAt = await refreshPricing()
+        .then((report) => report.updatedAt)
+        .catch(() => undefined);
+    }
+    res.json({ models, pricingUpdatedAt });
   } catch (error) {
     handleError(res, error);
+  }
+});
+
+app.get("/api/ai/pricing", async (_req, res) => {
+  try {
+    res.json(await getPricingReport());
+  } catch (error) {
+    handleError(res, error);
+  }
+});
+
+app.post("/api/ai/pricing/refresh", async (_req, res) => {
+  try {
+    res.json(await refreshPricing());
+  } catch (error) {
+    handleError(res, error, 400);
   }
 });
 
@@ -555,6 +576,29 @@ app.get("/api/projects/:id/tools", async (req, res) => {
   try {
     const analysis = await loadAnalysis(req.params.id);
     res.json(await listProjectTools(analysis.rootPath));
+  } catch (error) {
+    handleError(res, error, 400);
+  }
+});
+
+app.post("/api/projects/:id/tools/run", async (req, res) => {
+  try {
+    const analysis = await loadAnalysis(req.params.id);
+    const name = typeof req.body?.name === "string" ? req.body.name.trim() : "";
+    if (!name) {
+      res.status(400).json({ error: "A tool name is required." });
+      return;
+    }
+    const tool = await findProjectTool(analysis.rootPath, name);
+    if (!tool) {
+      res.status(404).json({ error: "Project tool not found." });
+      return;
+    }
+    const result = await runProjectCommand(analysis.rootPath, tool.command, undefined, {
+      timeoutMs: 180_000,
+    });
+    await recordProjectToolRun(analysis.rootPath, name, result.exitCode === 0).catch(() => undefined);
+    res.json({ tool, result });
   } catch (error) {
     handleError(res, error, 400);
   }

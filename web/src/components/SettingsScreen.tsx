@@ -11,6 +11,7 @@ import {
   Smartphone,
   Settings2,
   ShieldCheck,
+  Wrench,
   Sparkles,
   X,
 } from "lucide-react";
@@ -25,6 +26,7 @@ import { AgentSettingsPanel } from "./AgentSettingsPanel";
 import { ModelCatalogPanel } from "./ModelCatalogPanel";
 import { MobileDevicesPanel } from "./MobileDevicesPanel";
 import { ToolchainsPanel } from "./ToolchainsPanel";
+import { ToolsPanel } from "./ToolsPanel";
 
 export type SettingsTab =
   | "general"
@@ -35,7 +37,8 @@ export type SettingsTab =
   | "editor"
   | "usage"
   | "prompts"
-  | "skills";
+  | "skills"
+  | "tools";
 
 interface SettingsScreenProps {
   open: boolean;
@@ -72,6 +75,7 @@ const TABS: { id: SettingsTab; label: string; icon: typeof Settings2 }[] = [
   { id: "usage", label: "Usage", icon: BarChart3 },
   { id: "prompts", label: "Prompts", icon: FileText },
   { id: "skills", label: "Skills", icon: Sparkles },
+  { id: "tools", label: "Tools", icon: Wrench },
 ];
 
 function SettingsToggle({
@@ -408,6 +412,8 @@ export function SettingsScreen({
                 <div className="settings-empty">{t("Open a project to manage skills.")}</div>
               )
             ) : null}
+
+            {tab === "tools" ? <ToolsPanel projectId={projectId} /> : null}
           </div>
         </section>
       </div>

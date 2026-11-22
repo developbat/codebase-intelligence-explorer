@@ -91,6 +91,7 @@ import { chatComplete } from "./complete";
 import { resolveProvider } from "./settings";
 import { recordUsage } from "./usage";
 import { recordModelOutcome } from "./modelStats";
+import { estimateUsageCost } from "./pricing";
 import type { IntentAnalysis } from "../../../shared/intent";
 import { pickAlternateAgentModel } from "./agents";
 import { getPrompt, renderPrompt } from "./prompts";
@@ -4989,6 +4990,7 @@ export async function runAgentTask(
     });
   }
 
+  const costUsd = await estimateUsageCost(config.id, config.model, tokenTotal).catch(() => undefined);
   const invalidProtocolSteps = steps.filter((step) => step.action === "invalid").length;
   await recordModelOutcome(config.id, config.model, {
     success: stoppedReason === "finished" && invalidProtocolSteps < 2,
@@ -5021,6 +5023,7 @@ export async function runAgentTask(
       contextFiles: evidence.slice(0, 30),
     },
     tokenUsage: tokenTotal,
+    costUsd,
     logs,
   };
 }

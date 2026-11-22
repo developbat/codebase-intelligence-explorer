@@ -79,7 +79,8 @@ import type {
   PlaceholderAssetRequest,
   PlaceholderAssetResult,
 } from "../../shared/assetPlaceholder";
-import type { ProjectToolList } from "../../shared/projectTools";
+import type { ProjectTool, ProjectToolList } from "../../shared/projectTools";
+import type { PricingReport } from "../../shared/pricing";
 import type {
   ToolchainInstallResult,
   ToolchainReport,
@@ -590,6 +591,15 @@ export const api = {
   projectTools: (projectId: string) =>
     request<ProjectToolList>(`/api/projects/${projectId}/tools`),
 
+  runProjectTool: (projectId: string, name: string) =>
+    request<{ tool: ProjectTool; result: RunCommandResult }>(
+      `/api/projects/${projectId}/tools/run`,
+      {
+        method: "POST",
+        body: JSON.stringify({ name }),
+      },
+    ),
+
   checkGraphic: (projectId: string, pathValue: string, expectText?: string) =>
     request<GraphicCheckResult>(`/api/projects/${projectId}/graphics/check`, {
       method: "POST",
@@ -695,6 +705,13 @@ export const api = {
     catalog: () => request<{ catalog: ModelCatalog | null }>("/api/ai/catalog"),
 
     modelHealth: () => request<{ models: ModelHealth[] }>("/api/ai/model-health"),
+
+    pricing: () => request<PricingReport>("/api/ai/pricing"),
+
+    refreshPricing: () =>
+      request<PricingReport>("/api/ai/pricing/refresh", {
+        method: "POST",
+      }),
 
     importCatalog: (input: { json?: string; url?: string; replace?: boolean }) =>
       request<CatalogImportResult>("/api/ai/catalog/import", {

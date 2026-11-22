@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { BarChart3, Loader2, X } from "lucide-react";
 import type { AiUsageReport, AiTokenUsage } from "../../../shared/ai";
+import type { ModelPricing, PricingReport } from "../../../shared/pricing";
+import { formatUsd } from "../../../shared/pricing";
 import { api } from "../api";
 import { useI18n } from "../i18n";
 
@@ -11,7 +13,15 @@ export function formatTokens(value: number): string {
   return String(Math.round(value));
 }
 
-function UsageCard({ label, usage }: { label: string; usage: AiTokenUsage }) {
+function UsageCard({
+  label,
+  usage,
+  costUsd,
+}: {
+  label: string;
+  usage: AiTokenUsage;
+  costUsd?: number;
+}) {
   return (
     <div className="usage-card">
       <span>{label}</span>
@@ -19,6 +29,7 @@ function UsageCard({ label, usage }: { label: string; usage: AiTokenUsage }) {
       <small>
         in {formatTokens(usage.inputTokens)} · out {formatTokens(usage.outputTokens)}
       </small>
+      <em>{formatUsd(costUsd)}</em>
     </div>
   );
 }
@@ -38,6 +49,9 @@ export function UsageDialog({
 }) {
   const { t } = useI18n();
   const [report, setReport] = useState<AiUsageReport | null>(null);
+  const [pricing, setPricing] = useState<PricingReport | null>(null);
+  const [showAllPrices, setShowAllPrices] = useState(false);
+  const [pricingBusy, setPricingBusy] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -46,10 +60,15 @@ export function UsageDialog({
     let cancelled = false;
     setBusy(true);
     setError(null);
-    api
-      .usage(projectId)
-      .then((value) => {
-        if (!cancelled) setReport(value);
+    Promise.all([
+      api.usage(projectId),
+      api.ai.pricing().catch(() => null),
+    ])
+      .then(([value, priceValue]) => {
+        if (!cancelled) {
+          setReport(value);
+          setPricing(priceValue);
+        }
       })
       .catch((requestError) => {
         if (!cancelled) {
@@ -65,6 +84,17 @@ export function UsageDialog({
   }, [open, projectId, t]);
 
   if (!open) return null;
+
+  const usedModels = new Set(
+    (report?.byModel ?? []).map((bucket) => `${bucket.provider}::${bucket.model}`),
+  );
+  const priceRows = (pricing?.prices ?? [])
+    .filter((price) => showAllPrices || usedModels.has(`${price.provider}::${price.model}`))
+    .sort(
+      (a, b) =>
+        a.provider.localeCompare(b.provider) || a.model.localeCompare(b.model),
+    )
+    .slice(0, showAllPrices ? 600 : 100);
 
   return (
     <div
@@ -103,9 +133,69 @@ export function UsageDialog({
         ) : report ? (
           <div className="usage-body">
             <div className="usage-cards">
-              <UsageCard label={t("Today")} usage={report.today} />
-              <UsageCard label={t("Last 7 days")} usage={report.last7Days} />
-              <UsageCard label={t("All time")} usage={report.total} />
+              <UsageCard label={t("Today")} usage={report.today} costUsd={report.todayCostUsd} />
+              <UsageCard label={t("Last 7 days")} usage={report.last7Days} costUsd={report.last7DaysCostUsd} />
+              <UsageCard label={t("All time")} usage={report.total} costUsd={report.totalCostUsd} />
+            </div>
+
+            <div className="usage-section">
+              <div className="usage-section-head">
+                <strong>{t("Prices per 1M tokens")}</strong>
+                <button
+                  className="ghost-button"
+                  onClick={() => {
+                    setPricingBusy(true);
+                    void api.ai
+                      .refreshPricing()
+                      .then(setPricing)
+                      .catch(() => undefined)
+                      .finally(() => setPricingBusy(false));
+                  }}
+                  disabled={pricingBusy}
+                >
+                  {pricingBusy ? <Loader2 size={10} className="spin" /> : null}
+                  {t("Refresh prices")}
+                </button>
+                <button className="ghost-button" onClick={() => setShowAllPrices((value) => !value)}>
+                  {showAllPrices ? t("Only used models") : t("All models")}
+                </button>
+              </div>
+              {priceRows.length === 0 ? (
+                <div className="usage-empty">
+                  {t("No price tariff found; usage is shown as free.")}
+                </div>
+              ) : (
+                <table className="usage-table usage-price-table">
+                  <thead>
+                    <tr>
+                      <th>{t("Provider")}</th>
+                      <th>{t("Model")}</th>
+                      <th>{t("Input / 1M")}</th>
+                      <th>{t("Output / 1M")}</th>
+                      <th>{t("Source")}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {priceRows.map((price) => (
+                      <tr key={`${price.provider}::${price.model}`}>
+                        <td>{price.provider}</td>
+                        <td className="mono">{price.model}</td>
+                        <td>{formatUsd(price.inputPerMillion)}</td>
+                        <td>{formatUsd(price.outputPerMillion)}</td>
+                        <td className="mono">{price.source}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+              <small className="usage-price-note">
+                {t(
+                  "Prices are USD per 1M tokens. “free” means no tariff was found for that model. Provider catalogs differ; OpenRouter pricing is matched to configured provider models when possible.",
+                )}
+                {pricing?.updatedAt
+                  ? ` ${t("Updated")}: ${new Date(pricing.updatedAt).toLocaleString()}`
+                  : ""}
+              </small>
             </div>
 
             <div className="usage-section">
@@ -122,6 +212,7 @@ export function UsageDialog({
                       <th>{t("Input")}</th>
                       <th>{t("Output")}</th>
                       <th>{t("Total")}</th>
+                      <th>{t("Cost")}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -133,6 +224,7 @@ export function UsageDialog({
                         <td>{formatTokens(bucket.inputTokens)}</td>
                         <td>{formatTokens(bucket.outputTokens)}</td>
                         <td className="strong">{formatTokens(bucket.totalTokens)}</td>
+                        <td>{formatUsd(bucket.costUsd)}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -153,6 +245,7 @@ export function UsageDialog({
                       <th>{t("Input")}</th>
                       <th>{t("Output")}</th>
                       <th>{t("Total")}</th>
+                      <th>{t("Cost")}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -163,6 +256,7 @@ export function UsageDialog({
                         <td>{formatTokens(day.inputTokens)}</td>
                         <td>{formatTokens(day.outputTokens)}</td>
                         <td className="strong">{formatTokens(day.totalTokens)}</td>
+                        <td>{formatUsd(day.costUsd)}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -182,6 +276,7 @@ export function UsageDialog({
                       <span>{entry.kind}</span>
                       <span className="mono">{entry.model}</span>
                       <strong>{formatTokens(entry.totalTokens)}</strong>
+                      <span>{formatUsd(entry.costUsd)}</span>
                     </div>
                   ))}
                 </div>
