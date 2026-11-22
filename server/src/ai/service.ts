@@ -100,7 +100,7 @@ import { resolveProvider } from "./settings";
 import { recordUsage } from "./usage";
 import { recordModelOutcome } from "./modelStats";
 import { estimateUsageCost } from "./pricing";
-import { savePlan } from "../plans";
+import { readLatestProjectPlan, savePlan } from "../plans";
 import type {
   AgentToolGroup,
   IntentAnalysis,
@@ -3368,6 +3368,13 @@ export async function runAgentTask(
     (options.intent.scope === "trivial" || options.intent.scope === "small");
   const contextMode = options.intent?.context ?? "project";
   const historyMode = options.intent?.history ?? "recent";
+  const latestProjectPlan =
+    contextMode !== "none" && (workspaceMode === "plan" || workspaceMode === "build")
+      ? await readLatestProjectPlan(
+          analysis.rootPath,
+          workspaceMode === "plan" ? 6_000 : 2_500,
+        ).catch(() => "")
+      : "";
   const toolGroups = resolveToolGroups(options.intent, instruction, workspaceMode);
   const seed =
     contextMode === "none"
@@ -3418,6 +3425,13 @@ export async function runAgentTask(
           commandsApproved ? "pre-approved" : "ask the user before running commands"
         }; delete and rename always need confirmation.`,
     seedText,
+    latestProjectPlan
+      ? `${
+          workspaceMode === "plan"
+            ? "Latest project plan — integrate the new request into this plan. Keep existing items unless the user asks to replace them:"
+            : "Latest project plan — guidance for this build. Use it when relevant, but do not treat it as the current task list:"
+        }\n${latestProjectPlan}`
+      : "",
     conversation.length > 0
       ? `Conversation so far:\n${conversation
           .map((message) => `${message.role}: ${message.content}`)

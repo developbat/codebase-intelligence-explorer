@@ -116,6 +116,8 @@ Rules:
 - Do not write, edit, rename or delete files.
 - Do not run commands.
 - Evidence budget: use at most 5 search/read tool calls. Plan from the index plus focused ranges; do not read the whole project.
+- The task context may include the latest project plan. Treat it as the current project plan: integrate the new request into it, keep existing items unless the user asks to replace them, and do not duplicate items.
+- If the user gives a single criterion, place it in the relevant section with acceptance and verification; do not create a one-line plan.
 - Keep the plan small enough to execute in the selected task budget.
 - If a decision is genuinely ambiguous, state the assumption in the plan instead of guessing silently.
 - Keep code, identifiers, paths and comments in their original language.

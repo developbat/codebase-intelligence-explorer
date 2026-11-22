@@ -125,7 +125,7 @@ import type {
   TestDiscovery,
   TestRunResult,
 } from "../../../shared/types";
-import { providerInfo, type AiAgentEvent, type AiAgentLogEntry, type AiAgentPermissionRequest, type AiAgentPlan, type AiAgentResult, type AiAgentStep, type AiPermissionDecision, type AiProviderId, type AiSettingsPublic, type AiTestGenerationResult, type AiTokenUsage, type AiWorkspaceMode, type AiPlanSummary } from "../../../shared/ai";
+import { providerInfo, type AiAgentEvent, type AiAgentLogEntry, type AiAgentPermissionRequest, type AiAgentPlan, type AiAgentResult, type AiAgentStep, type AiPermissionDecision, type AiProviderId, type AiSettingsPublic, type AiTestGenerationResult, type AiTokenUsage, type AiWorkspaceMode } from "../../../shared/ai";
 import { api } from "../api";
 import { activeProvider } from "../lib/ai";
 import { buildTree, collectFolderPaths, type TreeNode } from "../lib/tree";
@@ -560,9 +560,6 @@ export function CodeStudio({
   const [chatLiveLogs, setChatLiveLogs] = useState<AiAgentLogEntry[]>([]);
   const [chatLivePlan, setChatLivePlan] = useState<AiAgentPlan | null>(null);
   const [taskQueue, setTaskQueue] = useState<ProjectTaskQueue | null>(null);
-  const [plans, setPlans] = useState<AiPlanSummary[]>([]);
-  const [plansOpen, setPlansOpen] = useState(false);
-  const [plansBusy, setPlansBusy] = useState(false);
   const [clarification, setClarification] = useState<{
     request: ClarificationRequest;
     original: string;
@@ -803,19 +800,11 @@ export function CodeStudio({
   const readOnlyMode = studioMode !== "build";
   const effectiveAllowWrite = readOnlyMode ? false : agentAllowWrite;
   const effectiveAllowCommands = readOnlyMode ? false : agentAllowCommands;
-  const modeLabel =
-    studioMode === "ask"
-      ? t("Ask")
-      : studioMode === "plan"
-        ? t("Plan")
-        : studioMode === "research"
-          ? t("Research")
-          : t("Build");
   const modeHint =
     studioMode === "ask"
       ? t("Read-only answer from the project.")
       : studioMode === "plan"
-        ? t("Read-only plan saved under .cie/agent/plans.")
+        ? t("Read-only: AI adds your criteria to the project plan in .cie/agent/PLAN.md.")
         : studioMode === "research"
           ? t("Read-only research with web, documents and notes.")
           : t("Edits files and runs verification with your permission.");
@@ -823,7 +812,7 @@ export function CodeStudio({
     studioMode === "ask"
       ? t("Ask a question about this project…")
       : studioMode === "plan"
-        ? t("Describe the goal; I will produce an executable plan…")
+        ? t("Add a goal or criterion; AI will integrate it into the project plan…")
         : studioMode === "research"
           ? t("Research the web, a document, or this project…")
           : t("Ask, edit, run, or build something in this project…");
@@ -2175,38 +2164,6 @@ export function CodeStudio({
     );
   }
 
-  async function togglePlans() {
-    if (plansOpen) {
-      setPlansOpen(false);
-      return;
-    }
-    setPlansBusy(true);
-    try {
-      const result = await api.plans.list(analysis.id);
-      setPlans(result.plans);
-      setPlansOpen(true);
-      setTaskPanelOpen(false);
-    } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : t("Could not load plans."));
-    } finally {
-      setPlansBusy(false);
-    }
-  }
-
-  async function runSavedPlan(plan: AiPlanSummary) {
-    try {
-      const loaded = await api.plans.get(analysis.id, plan.name);
-      setPlansOpen(false);
-      setStudioMode("build");
-      void askProject(`Execute this plan:\n\n${loaded.content}`, true, {
-        workspaceMode: "build",
-        skipClarify: true,
-      });
-    } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : t("Could not open the plan."));
-    }
-  }
-
   async function askProject(
     question = chatInput,
     appendUser = true,
@@ -3461,46 +3418,7 @@ export function CodeStudio({
           </div>
         ) : null}
 
-        <div className="studio-composer">
-          {plansOpen ? (
-            <div className="studio-composer-task-panel studio-composer-plans-panel">
-              <div className="studio-composer-task-head">
-                <strong>{t("Saved plans")}</strong>
-                <button onClick={() => setPlansOpen(false)} aria-label={t("Close")}>
-                  <X size={12} />
-                </button>
-              </div>
-              {plansBusy ? (
-                <div className="studio-plans-empty">
-                  <Loader2 size={14} className="spin" /> {t("Loading plans…")}
-                </div>
-              ) : plans.length === 0 ? (
-                <div className="studio-plans-empty">{t("No saved plans yet.")}</div>
-              ) : (
-                <div className="studio-plans-list">
-                  {plans.map((plan) => (
-                    <div key={plan.name} className="studio-plans-item">
-                      <div>
-                        <strong>{plan.title}</strong>
-                        <code>{plan.path}</code>
-                      </div>
-                      <div className="studio-plans-actions">
-                        <button onClick={() => void openFile(plan.path)}>{t("Open")}</button>
-                        <button
-                          className="is-primary"
-                          onClick={() => void runSavedPlan(plan)}
-                          disabled={chatBusy}
-                        >
-                          <Play size={11} /> {t("Use in Build")}
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          ) : null}
-
+        <div className={`studio-composer is-${studioMode}`}>
           {taskQueue && taskQueue.tasks.length > 0 && taskPanelOpen ? (
             <div className="studio-composer-task-panel">
               <div className="studio-composer-task-head">
@@ -3525,29 +3443,6 @@ export function CodeStudio({
               />
             </div>
           ) : null}
-
-          <div className="studio-mode-bar">
-            <label className="studio-mode-select">
-              <span>{t("Mode")}</span>
-              <select
-                value={studioMode}
-                onChange={(event) => {
-                  const next = event.target.value as AiWorkspaceMode;
-                  setStudioMode(next);
-                  setTaskPanelOpen(false);
-                }}
-                disabled={chatBusy}
-                aria-label={t("Mode")}
-              >
-                <option value="ask">{t("Ask — read-only answer")}</option>
-                <option value="plan">{t("Plan — produce an executable plan")}</option>
-                <option value="build">{t("Build — edit files and verify")}</option>
-                <option value="research">{t("Research — web, documents and notes")}</option>
-              </select>
-            </label>
-            <span className={`studio-mode-pill is-${studioMode}`}>{modeLabel}</span>
-            <span className="studio-mode-hint">{modeHint}</span>
-          </div>
 
           {clarification ? (
             <div className="studio-clarify">
@@ -3660,46 +3555,71 @@ export function CodeStudio({
             )}
           </div>
 
-          <div className="studio-composer-perms">
-            <span className="studio-session-tokens">
-              {sessionTokens > 0 ? `${t("Session")} ${formatTokens(sessionTokens)} ${t("tokens")}` : ""}
-            </span>
-            <button
-              className={`studio-composer-task-button ${plansOpen ? "is-active" : ""}`}
-              onClick={() => void togglePlans()}
-              disabled={plansBusy}
-              title={t("Saved plans")}
-            >
-              {plansBusy ? <Loader2 size={14} className="spin" /> : <BrainCircuit size={14} />}
-              <span>{t("Plans")}</span>
-              {plans.length > 0 ? <b>{plans.length}</b> : null}
-            </button>
-            {taskQueue && taskQueue.tasks.length > 0 ? (
+          <div className="studio-composer-footer">
+            <div className="studio-mode-group">
+              <label className="studio-mode-select">
+                <span>{t("Mode")}</span>
+                <select
+                  value={studioMode}
+                  onChange={(event) => {
+                    const next = event.target.value as AiWorkspaceMode;
+                    setStudioMode(next);
+                    setTaskPanelOpen(false);
+                  }}
+                  disabled={chatBusy}
+                  aria-label={t("Mode")}
+                >
+                  <option value="ask">{t("Ask — read-only answer")}</option>
+                  <option value="plan">{t("Plan — add criteria to the project plan")}</option>
+                  <option value="build">{t("Build — edit files and verify")}</option>
+                  <option value="research">{t("Research — web, documents and notes")}</option>
+                </select>
+              </label>
+              <span className="studio-mode-hint">{modeHint}</span>
+            </div>
+            <div className="studio-composer-actions">
+              {studioMode === "plan" ? (
+                <button
+                  className="studio-footer-link"
+                  onClick={() => void openFile(".cie/agent/PLAN.md")}
+                  title={t("Project plan")}
+                >
+                  <ListChecks size={13} />
+                  <span>{t("Project plan")}</span>
+                </button>
+              ) : null}
+              {taskQueue && taskQueue.tasks.length > 0 ? (
+                <button
+                  className={`studio-composer-task-button ${
+                    taskQueue.status === "failed" ? "is-failed" : ""
+                  }`}
+                  onClick={() => setTaskPanelOpen((value) => !value)}
+                  title={t("Open task queue")}
+                >
+                  <ListChecks size={14} />
+                  <span>{t("Task queue")}</span>
+                  <b>
+                    {taskQueue.tasks.filter((task) => task.status === "done").length}/{taskQueue.tasks.length}
+                  </b>
+                  {taskQueue.status === "failed" ? <AlertTriangle size={12} /> : null}
+                </button>
+              ) : null}
+              <span className="studio-session-tokens">
+                {sessionTokens > 0 ? `${t("Session")} ${formatTokens(sessionTokens)} ${t("tokens")}` : ""}
+              </span>
               <button
-                className={`studio-composer-task-button ${
-                  taskQueue.status === "failed" ? "is-failed" : ""
-                }`}
-                onClick={() => {
-                  setPlansOpen(false);
-                  setTaskPanelOpen((value) => !value);
-                }}
-                title={t("Open task queue")}
+                className={`studio-loop-toggle ${consoleOpen ? "is-on" : ""}`}
+                onClick={() => setConsoleOpen((value) => !value)}
+                title={t("Console")}
               >
-                <ListChecks size={14} />
-                <span>{t("Task queue")}</span>
-                <b>
-                  {taskQueue.tasks.filter((task) => task.status === "done").length}/{taskQueue.tasks.length}
-                </b>
-                {taskQueue.status === "failed" ? <AlertTriangle size={12} /> : null}
+                <Terminal size={12} /> {t("Console")}
               </button>
-            ) : null}
-            <button
-              className={`studio-loop-toggle ${consoleOpen ? "is-on" : ""}`}
-              onClick={() => setConsoleOpen((value) => !value)}
-              title={t("Console")}
-            >
-              <Terminal size={12} /> {t("Console")}
-            </button>
+              {chatMessages.length > 0 ? (
+                <button className="studio-composer-clear" onClick={clearActiveChat}>
+                  {t("Clear")}
+                </button>
+              ) : null}
+            </div>
             <span
               className="studio-composer-model"
               title={modelNotice ? t("Effective model for this run") : undefined}
@@ -3710,11 +3630,6 @@ export function CodeStudio({
                   ? `${providerDisplayName(active.provider)} · ${active.model}`
                   : t("Configure AI")}
             </span>
-            {chatMessages.length > 0 ? (
-              <button className="studio-composer-clear" onClick={clearActiveChat}>
-                {t("Clear")}
-              </button>
-            ) : null}
           </div>
         </div>
 

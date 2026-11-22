@@ -3,7 +3,13 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { listPlans, readPlan, savePlan } from "./plans";
+import {
+  appendProjectPlan,
+  listPlans,
+  readLatestProjectPlan,
+  readPlan,
+  savePlan,
+} from "./plans";
 
 test("plans are saved, listed and read back", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "cie-plans-"));
@@ -19,6 +25,11 @@ test("plans are saved, listed and read back", async () => {
     assert.equal(plans[0].title, "Add dark mode");
     const loaded = await readPlan(root, saved.name);
     assert.match(loaded.content, /Add a theme toggle/);
+    const projectPlan = await readLatestProjectPlan(root);
+    assert.match(projectPlan, /Add a theme toggle/);
+    await appendProjectPlan(root, "## New criterion\nAdd a keyboard shortcut.", "Shortcut");
+    const updated = await readLatestProjectPlan(root);
+    assert.match(updated, /keyboard shortcut/);
   } finally {
     await fs.rm(root, { recursive: true, force: true });
   }

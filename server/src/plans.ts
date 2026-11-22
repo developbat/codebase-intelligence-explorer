@@ -10,8 +10,52 @@ export interface PlanSummary {
   bytes: number;
 }
 
+const PROJECT_PLAN_RELATIVE = ".cie/agent/PLAN.md";
+
 function plansDir(rootPath: string): string {
   return path.join(rootPath, ".cie", "agent", "plans");
+}
+
+function projectPlanAbsolute(rootPath: string): string {
+  return path.resolve(rootPath, PROJECT_PLAN_RELATIVE);
+}
+
+export function projectPlanPath(): string {
+  return PROJECT_PLAN_RELATIVE;
+}
+
+export async function readLatestProjectPlan(
+  rootPath: string,
+  maxChars = 6_000,
+): Promise<string> {
+  try {
+    const content = await fs.readFile(projectPlanAbsolute(rootPath), "utf8");
+    return content.trim().slice(-Math.max(500, maxChars));
+  } catch {
+    return "";
+  }
+}
+
+export async function appendProjectPlan(
+  rootPath: string,
+  content: string,
+  title: string,
+): Promise<string> {
+  const clean = content.trim();
+  if (!clean) return "";
+  const absolute = projectPlanAbsolute(rootPath);
+  if (!isWithin(rootPath, absolute)) throw new Error("Project plan path is outside the project.");
+  await fs.mkdir(path.dirname(absolute), { recursive: true });
+  let existing = "";
+  try {
+    existing = await fs.readFile(absolute, "utf8");
+  } catch {
+    existing = "# Project plan\n";
+  }
+  const stamp = new Date().toISOString();
+  const section = `\n\n---\n\n## ${stamp.slice(0, 16).replace("T", " ")} — ${title}\n\n${clean}\n`;
+  await fs.writeFile(absolute, `${existing.trimEnd()}${section}`, "utf8");
+  return PROJECT_PLAN_RELATIVE;
 }
 
 function slugify(value: string): string {
@@ -52,6 +96,7 @@ export async function savePlan(
   const absolute = path.resolve(directory, name);
   if (!isWithin(rootPath, absolute)) throw new Error("Plan path is outside the project.");
   await fs.writeFile(absolute, `${clean}\n`, "utf8");
+  await appendProjectPlan(rootPath, clean, title).catch(() => undefined);
   const stat = await fs.stat(absolute);
   return {
     name,

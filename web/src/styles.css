@@ -17559,12 +17559,11 @@ button.canvas-stat {
 }
 
 .studio-mode-hint {
-  min-width: 0;
-  overflow: hidden;
+  max-width: 360px;
   color: #7f9bbd;
-  font-size: 10.5px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  font-size: 10px;
+  line-height: 1.35;
+  white-space: normal;
 }
 
 .studio-composer-row {
@@ -17882,10 +17881,6 @@ button.canvas-stat {
 }
 
 @media (max-width: 900px) {
-  .studio-mode-hint {
-    display: none;
-  }
-
   .studio-attach-button {
     min-width: 78px;
     padding: 0 10px;
@@ -18027,4 +18022,149 @@ button.canvas-stat {
 
 .studio-workflow-evidence > button {
   font-size: 9.5px;
+}
+
+/* Footer layout: modes and actions share one row */
+
+.studio-composer-footer {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 9px 12px;
+  min-height: 34px;
+  padding-top: 2px;
+}
+
+.studio-composer-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.studio-footer-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid rgba(139, 168, 206, 0.28);
+  border-radius: 8px;
+  background: transparent;
+  color: #a9c3e2;
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.studio-footer-link:hover {
+  border-color: rgba(110, 168, 254, 0.5);
+  color: #e3f0ff;
+}
+
+.studio-composer-actions .studio-composer-model {
+  margin-left: 4px;
+}
+
+.studio-composer-footer .studio-session-tokens {
+  font-size: 10px;
+}
+
+/* Plan mode uses the amber accent on its controls */
+
+.studio-composer.is-plan .studio-send-button {
+  border-color: rgba(251, 191, 36, 0.58);
+  background: linear-gradient(180deg, rgba(245, 158, 11, 0.38), rgba(217, 119, 6, 0.28));
+  color: #fff7d6;
+}
+
+.studio-composer.is-plan .studio-send-button:hover:not(:disabled) {
+  border-color: rgba(251, 191, 36, 0.85);
+  background: linear-gradient(180deg, rgba(245, 158, 11, 0.52), rgba(217, 119, 6, 0.38));
+}
+
+.studio-composer.is-plan .studio-attach-button,
+.studio-composer.is-plan .studio-composer-task-button,
+.studio-composer.is-plan .studio-footer-link,
+.studio-composer.is-plan .studio-loop-toggle {
+  border-color: rgba(251, 191, 36, 0.4);
+  background: rgba(245, 158, 11, 0.1);
+  color: #fcd34d;
+}
+
+.studio-composer.is-plan .studio-attach-button:hover:not(:disabled),
+.studio-composer.is-plan .studio-composer-task-button:hover,
+.studio-composer.is-plan .studio-footer-link:hover {
+  border-color: rgba(251, 191, 36, 0.68);
+  background: rgba(245, 158, 11, 0.18);
+  color: #fff2c2;
+}
+
+.studio-composer.is-plan .studio-mode-select select {
+  border-color: rgba(251, 191, 36, 0.48);
+  box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.07);
+}
+
+.studio-mode-pill.is-plan,
+.studio-mode-badge.is-plan {
+  border-color: rgba(251, 191, 36, 0.46);
+  background: rgba(245, 158, 11, 0.12);
+  color: #fcd34d;
+}
+
+.studio-plan-result {
+  border-color: rgba(251, 191, 36, 0.38) !important;
+  background: rgba(245, 158, 11, 0.07) !important;
+}
+
+.studio-plan-result-head > svg,
+.studio-plan-result-head strong {
+  color: #fcd34d !important;
+}
+
+.studio-plan-result-head code {
+  color: #d9b96a !important;
+}
+
+.studio-plan-result-actions button {
+  border-color: rgba(251, 191, 36, 0.38) !important;
+  background: rgba(245, 158, 11, 0.1) !important;
+  color: #fcd34d !important;
+}
+
+.studio-plan-result-actions button.primary-button {
+  border-color: rgba(251, 191, 36, 0.55) !important;
+  background: rgba(245, 158, 11, 0.18) !important;
+  color: #fff2c2 !important;
+}
+
+@media (max-width: 760px) {
+  .studio-composer-actions {
+    width: 100%;
+    margin-left: 0;
+  }
+}
+
+
+.studio-composer-footer {
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.studio-mode-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 220px;
+  flex: 1 1 300px;
+}
+
+.studio-mode-group .studio-mode-select {
+  flex: none;
+}
+
+.studio-composer-footer .studio-composer-model {
+  flex-basis: 100%;
+  margin-left: 0;
+  text-align: right;
 }
