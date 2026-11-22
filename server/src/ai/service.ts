@@ -1768,6 +1768,12 @@ export function preferredVerificationCommand(
   return tooling?.typecheckCommands?.[0] ?? tooling?.buildCommands?.[0];
 }
 
+export function reportsIncompleteWiring(summary: string): boolean {
+  return /(?:html|markup|template|form)[^\n]{0,100}(?:yok|tanımlı değil|yer almıyor|missing|not present|does not exist)|(?:eklenmesi|eklenmeli)[^\n]{0,100}gerekiyor|kabul kriteri[^\n]{0,100}tam karşılan|bu adım[^\n]{0,80}yer almıyor/i.test(
+    summary,
+  );
+}
+
 export function looksLikePlanningText(summary: string): boolean {
   const text = summary.trim();
   if (!text) return false;
@@ -3035,6 +3041,82 @@ function buildPlanFromIntent(
   };
 }
 
+export interface MissingSelector {
+  id: string;
+  file: string;
+}
+
+const SELECTOR_SCAN_EXTENSIONS = /\.(?:html?|jsx?|tsx?|vue|svelte|php|erb|ejs|hbs|twig|astro)$/i;
+
+/**
+ * After a write, check that IDs referenced by the changed JavaScript are
+ * actually defined somewhere in the project markup or templates. This catches
+ * half-wired features such as querySelector("#task-assignee") without an input.
+ */
+export async function auditMissingSelectors(
+  analysis: AnalysisResult,
+  changedFiles: string[],
+): Promise<MissingSelector[]> {
+  const references = new Map<string, string>();
+  for (const filePath of changedFiles) {
+    if (!/\.(?:js|mjs|cjs|jsx|tsx?|vue|svelte)$/i.test(filePath)) continue;
+    try {
+      // eslint-disable-next-line no-await-in-loop
+      const file = await readSourceFile(analysis.rootPath, filePath);
+      const patterns = [
+        /querySelector(?:All)?\(\s*["'`]#([A-Za-z0-9_-]+)/g,
+        /getElementById\(\s*["'`]([A-Za-z0-9_-]+)/g,
+      ];
+      for (const pattern of patterns) {
+        for (const match of file.content.matchAll(pattern)) {
+          const id = match[1];
+          if (id && !references.has(id)) references.set(id, filePath);
+        }
+      }
+    } catch {
+      // unreadable changed file: skip
+    }
+  }
+  if (references.size === 0) return [];
+
+  const defined = new Set<string>();
+  const candidatePaths = new Set([
+    ...changedFiles,
+    ...analysis.files.map((file) => file.path),
+  ]);
+  const candidates = [...candidatePaths]
+    .filter(
+      (filePath) =>
+        SELECTOR_SCAN_EXTENSIONS.test(filePath) ||
+        /(?:^|\/)templates?\//i.test(filePath),
+    )
+    .slice(0, 240);
+  for (const filePath of candidates) {
+    if (references.size === defined.size) break;
+    try {
+      // eslint-disable-next-line no-await-in-loop
+      const content = await fs.readFile(path.resolve(analysis.rootPath, filePath), "utf8");
+      if (content.length > 400_000) continue;
+      for (const id of references.keys()) {
+        if (defined.has(id)) continue;
+        const escaped = id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        const idPattern = new RegExp(`id\\s*=\\s*["'\`]${escaped}["'\`]`);
+        const setAttributePattern = new RegExp(
+          `setAttribute\\(\\s*["']id["']\\s*,\\s*["']${escaped}["']`,
+        );
+        if (idPattern.test(content) || setAttributePattern.test(content)) {
+          defined.add(id);
+        }
+      }
+    } catch {
+      // skip unreadable candidate
+    }
+  }
+  return [...references.entries()]
+    .filter(([id]) => !defined.has(id))
+    .map(([id, file]) => ({ id, file }));
+}
+
 export function selectHistory(
   history: { role: "user" | "assistant"; content: string }[] | undefined,
   mode: IntentHistory | "none",
@@ -3568,6 +3650,9 @@ export async function runAgentTask(
   let readRejections = 0;
   let evidenceNudges = 0;
   let planningNudges = 0;
+  let selectorNudges = 0;
+  let wiringNudges = 0;
+  let missingSelectors: MissingSelector[] = [];
   let browserCheckCalls = 0;
   let remainingWorkRejected = false;
   let planPath: string | undefined;
@@ -3956,6 +4041,65 @@ export async function runAgentTask(
       }
 
       if (
+        !readOnlyMode &&
+        modelTurns < maxSteps &&
+        wiringNudges < 2 &&
+        reportsIncompleteWiring(rawSummary)
+      ) {
+        wiringNudges += 1;
+        const observation =
+          "Your own summary says the change is incomplete (missing markup, form control or wiring). Complete it now: add the missing input/control and update the data, render and persistence paths, then finish with the full result.";
+        log(
+          "warn",
+          "Finish rejected: incomplete wiring",
+          rawSummary.replace(/\s+/g, " ").slice(0, 160),
+        );
+        recordStep({
+          index,
+          action: "invalid",
+          args: {},
+          observation,
+          ok: false,
+          durationMs: Date.now() - started,
+          tokenUsage: stepUsage,
+        });
+        transcript.push({ role: "user", content: `Observation (step ${index}) [invalid]: ${observation}` });
+        continue;
+      }
+
+      const explainedMissingSelectors =
+        missingSelectors.length > 0 &&
+        /dynamic|runtime|created|generated|oluştur|dinamik|çalışma anında/i.test(rawSummary) &&
+        missingSelectors.every((item) =>
+          rawSummary.toLowerCase().includes(item.id.toLowerCase()),
+        );
+      if (
+        !readOnlyMode &&
+        missingSelectors.length > 0 &&
+        !explainedMissingSelectors &&
+        modelTurns < maxSteps &&
+        selectorNudges < 2
+      ) {
+        selectorNudges += 1;
+        const detail = missingSelectors
+          .map((item) => `#${item.id} (referenced in ${item.file})`)
+          .join(", ");
+        const observation = `UI wiring is incomplete: ${detail} is referenced but not defined in any project markup. Add the missing input/control to the HTML/template (or explain why it is created dynamically), then finish with the complete change.`;
+        log("warn", "Finish rejected: missing UI control", detail);
+        recordStep({
+          index,
+          action: "invalid",
+          args: {},
+          observation,
+          ok: false,
+          durationMs: Date.now() - started,
+          tokenUsage: stepUsage,
+        });
+        transcript.push({ role: "user", content: `Observation (step ${index}) [invalid]: ${observation}` });
+        continue;
+      }
+
+      if (
         readOnlyMode &&
         workspaceMode !== "plan" &&
         looksLikePlanningText(rawSummary)
@@ -4089,6 +4233,18 @@ export async function runAgentTask(
       }
 
       summary = rawSummary || "The agent finished without a summary.";
+      if (!readOnlyMode && missingSelectors.length > 0 && !explainedMissingSelectors) {
+        summary += `\n\n**UI wiring warning:** ${missingSelectors
+          .map((item) => `#${item.id} (${item.file})`)
+          .join(", ")} is referenced but not defined in any project markup.`;
+      }
+      if (
+        !readOnlyMode &&
+        browserCheckCalls === 0 &&
+        changedFiles.some((file) => /\.(?:html?|css|scss|sass|less|jsx|tsx|vue|svelte)$/i.test(file))
+      ) {
+        summary += "\n\n**UI check:** browser_check was not run for the changed interface.";
+      }
       if (workspaceMode === "plan" && summary.trim()) {
         const savedPlan = await savePlan(analysis.rootPath, summary, {
           goal: instruction,
@@ -5681,6 +5837,20 @@ export async function runAgentTask(
 
     if (actionCount > 1) {
       observation = `${observation}\n\n(Your reply contained ${actionCount} tool calls; all were executed in order. One JSON action per turn is still preferred.)`;
+    }
+    if (
+      ok &&
+      !readOnlyMode &&
+      ["write_file", "replace_in_file", "replace_many", "rename_path", "delete_file", "format_file"].includes(action)
+    ) {
+      missingSelectors = await auditMissingSelectors(analysis, changedFiles).catch(() => []);
+      if (missingSelectors.length > 0) {
+        const detail = missingSelectors
+          .map((item) => `#${item.id} (referenced in ${item.file})`)
+          .join(", ");
+        observation = `${observation}\n\nUI wiring check: ${detail} is not defined in any project markup. Add the corresponding input/control to the form/template (or explain why it is created dynamically) before finishing.`;
+        log("warn", "UI wiring incomplete", detail);
+      }
     }
     const observationLimit =
       step.action === "read_file" || step.action === "find_in_file"

@@ -203,6 +203,7 @@ Available tools:
 Rules:
 - Do not restate the task, explore unrelated modules or add features.
 - Do not finish while a requested edit is still unapplied.
+- If you add a field, input or control, update the data model, the creation form/markup, rendering and persistence. A JS-only change that references an element not present in the markup is incomplete.
 - If the requested behavior already exists, verify it and report that instead of rewriting.
 - If the target snippet is not found, search once more with a shorter marker before widening the read.
 - Keep code, identifiers, paths and comments in their original language.
@@ -261,6 +262,7 @@ Search strategy:
 - Before finishing, update every call site of a changed signature. The app runs an automatic typecheck/build verification when one is detected; if it reports errors, fix them.
 - If the edit map lists a route registry/container or bootstrap call site, update those files in the same run. Creating a service or controller without registering and injecting it is incomplete.
 - Do not finish with "remaining", "not done", "kalan" or "yapılmadı" while turns remain; complete the wiring or explain the blocker.
+- When adding a field, input or control, update every layer: data model, creation form/markup, rendering and persistence. If a selector such as #task-assignee is referenced, the matching element must exist in the markup.
 - Never guess. If the preloaded context is incomplete, search, find in files, list items, count, inspect JSON or read more files.
 - Use json_query for JSON arrays/objects; count_matches for counting; find_in_file for large files.
 - Use find_symbols to locate classes, functions and methods by name across every supported language before reading files.
@@ -308,6 +310,7 @@ Rules:
 - Before finishing, update every call site of a changed signature. The app runs an automatic typecheck/build verification when one is detected; if it reports errors, fix them.
 - If the edit map lists a route registry/container or bootstrap call site, update those files in the same run. Creating a service or controller without registering and injecting it is incomplete.
 - Do not finish with "remaining", "not done", "kalan" or "yapılmadı" while turns remain; complete the wiring or explain the blocker.
+- When adding a field, input or control, update every layer: data model, creation form/markup, rendering and persistence. If a selector such as #task-assignee is referenced, the matching element must exist in the markup.
 - Inspect the project before editing. Read a file before using replace_in_file.
 - write_file must contain the COMPLETE final file content, not a diff.
 - Keep changes scoped to the task; preserve existing style, imports and behavior.

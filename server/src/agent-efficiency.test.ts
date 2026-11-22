@@ -9,6 +9,7 @@ import {
 import {
   preferredVerificationCommand,
   readRangeCovered,
+  reportsIncompleteWiring,
   reportsRemainingWork,
 } from "./ai/service";
 
@@ -165,4 +166,14 @@ test("inspection answers are accepted only when substantive", () => {
     false,
   );
   assert.equal(isInspectionAnswer("Too short"), false);
+});
+
+test("a summary that admits missing markup is treated as incomplete", () => {
+  assert.equal(
+    reportsIncompleteWiring(
+      "index.html içinde #task-assignee girdisinin tanımlı olduğuna dair bir gözlem yok; bu eleman HTML'de yoksa atama yapılamaz. Kabul kriterinin tam karşılanması için input'un eklenmesi gerekiyor.",
+    ),
+    true,
+  );
+  assert.equal(reportsIncompleteWiring("All changes are complete and verified."), false);
 });

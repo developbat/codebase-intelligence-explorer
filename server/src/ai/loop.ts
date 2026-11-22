@@ -410,6 +410,7 @@ function taskInstruction(
     task.notes ? `Retry note: ${task.notes}` : "",
     prior ? `Previous task summaries (use this before reading context.md):\n${prior}` : "",
     "Read .cie/agent/context-digest.md first for compact prior context. Read .cie/agent/context.md only when the digest and summaries are insufficient; if it is large, search it with find_in_file or read only the relevant tail. Append useful durable context if you learn something new.",
+    "For a field/control change, wire all layers: data model, creation form/markup, rendering and persistence. A selector referenced in JS but absent from the markup is incomplete; run browser_check when the change is visual and available.",
     "Do not re-read files already fully read by a previous task unless the current task needs exact content after a change.",
     "Stay scoped to this task. Do not do later tasks. Do not revert earlier work.",
     verification ? `Verification command: ${verification}` : "",
