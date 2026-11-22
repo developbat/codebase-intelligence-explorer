@@ -217,6 +217,8 @@ export async function planProjectTasks(
               "Intent analyst:",
               `Understanding: ${options.intent.understanding}`,
               `Scope: ${options.intent.scope} · mode: ${options.intent.mode}`,
+              options.intent.approach ? `Approach: ${options.intent.approach}` : "",
+              options.intent.needsExhaustiveEvidence ? "This answer must be exhaustive; collect every item and verify the total." : "",
               options.intent.areas.length > 0
                 ? `Likely areas: ${options.intent.areas.join(", ")}`
                 : "",
@@ -490,6 +492,7 @@ function intentTask(
     title: goal.length > 90 ? `${goal.slice(0, 87)}…` : goal,
     detail: [
       intent.understanding,
+      intent.approach ? `Approach: ${intent.approach}` : "",
       intent.areas.length > 0 ? `Likely areas: ${intent.areas.join(", ")}` : "",
       intent.assumptions.length > 0 ? `Assumptions: ${intent.assumptions.join("; ")}` : goal,
     ]

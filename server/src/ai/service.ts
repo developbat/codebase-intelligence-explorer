@@ -1973,11 +1973,6 @@ export async function agentSeedContext(
         [
           `Attached document: ${document.path} · ${document.kind} · ${document.bytes} bytes`,
           `Structure: ${stats.lines} lines · ${stats.words} words · ${stats.headings} headings · ${stats.links} links · ${stats.checkedBoxes} checked / ${stats.uncheckedBoxes} unchecked checkboxes`,
-          stats.uncheckedItems.length > 0
-            ? `Unchecked items:\n${stats.uncheckedItems
-                .map((item) => `- line ${item.line}: ${item.text}`)
-                .join("\n")}`
-            : "",
           document.text.slice(0, 2_000),
         ].join("\n"),
       );
@@ -2519,6 +2514,7 @@ export function agentToolCatalog(
     '{"action":"read_document","args":{"path":"assets/screenshot.png","ocr":true,"lang":"eng"}}',
     '{"action":"search_document","args":{"path":"docs/spec.pdf","query":"deadline"}}',
     '{"action":"search_conversations","args":{"query":"what the user asked earlier","limit":5}}',
+    '{"action":"project_search","args":{"query":"unchecked tasks deadline","limit":15}}',
     '{"action":"list_notes","args":{}}',
     '{"action":"read_note","args":{"path":".cie/agent/notes/research.md"}}',
     '{"action":"search_notes","args":{"query":"previous research","limit":10}}',
@@ -3078,6 +3074,10 @@ export async function runAgentTask(
   const context = [
     projectBrief(analysis),
     "",
+    options.intent?.approach ? `Intent approach: ${options.intent.approach}` : "",
+    options.intent?.needsExhaustiveEvidence
+      ? "Evidence requirement: the answer must be exhaustive; collect every matching item and verify the total before finishing."
+      : "",
     `Working file (optional): ${options.activeFile ?? "none"}`,
     askMode
       ? "Permissions: read-only; file writes and commands are unavailable."
@@ -3171,6 +3171,7 @@ export async function runAgentTask(
   let modelTurns = 0;
   let writeNudges = 0;
   let readRejections = 0;
+  let evidenceNudges = 0;
   let browserCheckCalls = 0;
   let remainingWorkRejected = false;
 
@@ -3483,6 +3484,7 @@ export async function runAgentTask(
         read_document: "Reading a document…",
         search_document: "Searching inside a document…",
         search_conversations: "Searching earlier conversation…",
+        project_search: "Searching the project index and evidence…",
         convert_document: "Converting a document…",
         transform_image: "Processing an image…",
         save_note: "Saving a research note…",
@@ -3552,6 +3554,43 @@ export async function runAgentTask(
         });
         transcript.push({ role: "user", content: `Observation (step ${index}) [invalid]: ${observation}` });
         continue;
+      }
+
+      if (options.intent?.needsExhaustiveEvidence && evidenceNudges < 3) {
+        const lastTruncated = steps.reduce(
+          (max, item) =>
+            /truncated|cut off|only part|not all/i.test(item.observation) &&
+            ["read_document", "read_file", "search_document"].includes(item.action)
+              ? Math.max(max, item.index)
+              : max,
+          -1,
+        );
+        const completeAfter = steps.some(
+          (item) =>
+            item.index > lastTruncated &&
+            item.ok &&
+            ["read_document", "read_file", "search_document", "count_matches"].includes(item.action) &&
+            !/truncated|cut off|only part/i.test(item.observation),
+        );
+        const admitsIncomplete =
+          /truncated|cut off|only part|not all|kalan.*görüntülenemedi|kesildi/i.test(rawSummary);
+        if ((lastTruncated >= 0 && !completeAfter) || admitsIncomplete) {
+          evidenceNudges += 1;
+          const observation =
+            "The answer is not exhaustive. Do not finish with a partial list or a truncated read. Use search_document/count_matches or continue read_document with the returned startChar (or read_file with startLine) until every item is collected, verify the total, then finish with the complete result.";
+          log("warn", "Finish rejected: evidence incomplete", rawSummary.replace(/\s+/g, " ").slice(0, 160));
+          recordStep({
+            index,
+            action: "invalid",
+            args: {},
+            observation,
+            ok: false,
+            durationMs: Date.now() - started,
+            tokenUsage: stepUsage,
+          });
+          transcript.push({ role: "user", content: `Observation (step ${index}) [invalid]: ${observation}` });
+          continue;
+        }
       }
 
       if (
@@ -3751,7 +3790,7 @@ export async function runAgentTask(
             ),
           );
           const window = lines.slice(startLine - 1, endLine).join("\n");
-          const clipped = window.length > AGENT_READ_CHARS ? `${window.slice(0, AGENT_READ_CHARS)}\n… file window truncated …` : window;
+          const clipped = window.length > AGENT_READ_CHARS ? `${window.slice(0, AGENT_READ_CHARS)}\n… file window truncated; continue with startLine=${endLine + 1} …` : window;
           observation = `File: ${file.filePath} (${lines.length} lines, showing ${startLine}-${Math.min(endLine, lines.length)})\n${numberedContent(clipped, startLine)}`;
           evidence.push({ path: file.filePath, label: "Read by agent", startLine });
           ranges.push({ start: startLine, end: endLine, wholeFile: endLine >= lines.length, step: index });
@@ -4732,6 +4771,7 @@ export async function runAgentTask(
           ocr: args.ocr !== false,
           lang: typeof args.lang === "string" ? args.lang : undefined,
           maxChars: Number(args.maxChars) || undefined,
+          startChar: Number(args.startChar) || undefined,
         });
         const stats = document.stats ?? documentStats(document.text);
         observation = [
@@ -4740,7 +4780,9 @@ export async function runAgentTask(
           document.pages ? `Pages: ${document.pages}` : "",
           document.sheets ? `Sheets: ${document.sheets.join(", ")}` : "",
           document.width && document.height ? `Image: ${document.width}×${document.height}${document.ocr ? " · OCR" : ""}` : "",
-          document.truncated ? "(text truncated)" : "",
+          document.truncated
+            ? `(text truncated${document.nextChar ? `; continue with read_document startChar=${document.nextChar}` : ""})`
+            : "",
           "",
           document.text || "(no readable text)",
         ]
@@ -4780,6 +4822,56 @@ export async function runAgentTask(
                 ),
               ].join("\n");
         log("info", "Conversation searched", `${hits.length} matches`);
+        ok = true;
+      } else if (action === "project_search") {
+        const query = String(args.query ?? "").trim();
+        if (!query) throw new Error("A search query is required.");
+        const limit = Math.max(1, Math.min(30, Number(args.limit ?? 15) || 15));
+        const found = await agentSearch(analysis, query, limit);
+        const symbols = queryProjectSymbols(analysis, query, undefined, Math.min(12, limit));
+        const conversations =
+          args.includeConversations === true
+            ? await searchConversations(analysis.id, query, 5).catch(() => [])
+            : [];
+        const lines: string[] = [`Project search: ${query}`];
+        if (found.results.length > 0) {
+          lines.push("", "Best file hits:");
+          lines.push(
+            ...found.results.map(
+              (result) => `- ${result.path}:${result.line} — ${result.text.slice(0, 400)}`,
+            ),
+          );
+          lines.push(
+            "",
+            "Likely files to inspect:",
+            ...[...new Set(found.results.map((result) => result.path))].slice(0, 8).map((file) => `- ${file}`),
+          );
+        }
+        if (symbols.length > 0) {
+          lines.push("", "Matching symbols:");
+          lines.push(
+            ...symbols.map(
+              (symbol) =>
+                `- ${symbol.kind} ${symbol.qualifiedName} — ${symbol.filePath}:${symbol.startLine}`,
+            ),
+          );
+        }
+        if (conversations.length > 0) {
+          lines.push("", "Related earlier conversations:");
+          lines.push(
+            ...conversations.map(
+              (hit) => `- ${hit.title}${hit.snippet ? ` — ${hit.snippet}` : ""}`,
+            ),
+          );
+        }
+        if (found.results.length === 0 && symbols.length === 0) {
+          lines.push("", "No index or symbol hits. Try different terms or list_files/read_file.");
+        }
+        observation = lines.join("\n");
+        for (const result of found.results.slice(0, 10)) {
+          evidence.push({ path: result.path, label: "Project search", startLine: result.line });
+        }
+        log("info", "Project search completed", `${found.results.length} hits · ${symbols.length} symbols`);
         ok = true;
       } else if (action === "convert_document") {
         const documentPath = String(args.path ?? "").trim();
@@ -5019,6 +5111,8 @@ export async function runAgentTask(
                       ? 6_000
                       : step.action === "search_conversations"
                         ? 4_000
+                        : step.action === "project_search"
+                          ? 8_000
                       : step.action === "convert_document" || step.action === "transform_image"
                         ? 3_000
               : step.action === "list_notes" || step.action === "search_notes"

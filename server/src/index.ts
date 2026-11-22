@@ -43,7 +43,6 @@ import { getPublicSettings, updateAiSettings } from "./ai/settings";
 import { getPrompt, getPromptVersion, listPrompts, renderPrompt, resetPrompt, savePrompt } from "./ai/prompts";
 import { resolvePermission } from "./ai/permissions";
 import { analyzeIntent } from "./ai/intent";
-import { answerDocumentOperation } from "./documentAnswer";
 import type { IntentAnalysis } from "../../shared/intent";
 import { getProjectUsage } from "./ai/usage";
 import { buildChangeReport } from "./changes";
@@ -1079,9 +1078,6 @@ app.post("/api/projects/:id/ai/agent/stream", async (req, res) => {
   let intent: IntentAnalysis | undefined;
   let intentProvider: string | undefined;
   let intentModel: string | undefined;
-  let intentTotalTokens: number | undefined;
-  let intentTokenUsage: { inputTokens: number; outputTokens: number; totalTokens: number } | undefined;
-  let intentCostUsd: number | undefined;
   const history = Array.isArray(req.body?.history)
     ? (req.body.history as unknown[])
         .filter(
@@ -1108,9 +1104,6 @@ app.post("/api/projects/:id/ai/agent/stream", async (req, res) => {
       intent = analyzed.intent;
       intentProvider = analyzed.provider;
       intentModel = analyzed.model;
-      intentTotalTokens = analyzed.totalTokens;
-      intentTokenUsage = analyzed.tokenUsage;
-      intentCostUsd = analyzed.costUsd;
       write({
         type: "intent",
         intent: analyzed.intent,
@@ -1139,40 +1132,6 @@ app.post("/api/projects/:id/ai/agent/stream", async (req, res) => {
       unregisterAgentRun(req.params.id, controller);
       res.end();
       return;
-    }
-  }
-
-  if (intent && intent.documentOperation !== "none") {
-    try {
-      const analysis = await loadAnalysis(req.params.id);
-      const answer = await answerDocumentOperation(analysis.rootPath, instruction, intent);
-      if (answer) {
-        write({
-          type: "done",
-          result: {
-            instruction,
-            summary: answer.summary,
-            steps: [],
-            changedFiles: [],
-            ranCommands: [],
-            stoppedReason: "finished",
-            provider: intentProvider ?? "intent",
-            model: intentModel ?? "intent",
-            createdAt: new Date().toISOString(),
-            tokenUsage: intentTokenUsage ?? {
-              inputTokens: 0,
-              outputTokens: 0,
-              totalTokens: intentTotalTokens ?? 0,
-            },
-            costUsd: intentCostUsd,
-          },
-        });
-        unregisterAgentRun(req.params.id, controller);
-        res.end();
-        return;
-      }
-    } catch {
-      // fall through to the normal agent
     }
   }
 
@@ -1321,73 +1280,6 @@ app.post("/api/projects/:id/ai/loop/stream", async (req, res) => {
       res.end();
       return;
     }
-  }
-
-  if (intent && intent.documentOperation !== "none") {
-    try {
-      const analysis = await loadAnalysis(req.params.id);
-      const answer = await answerDocumentOperation(analysis.rootPath, goal, intent);
-      if (answer) {
-        write({
-          type: "done",
-          result: {
-            instruction: goal,
-            summary: answer.summary,
-            steps: [],
-            changedFiles: [],
-            ranCommands: [],
-            stoppedReason: "finished",
-            provider: intentProvider ?? "intent",
-            model: intentModel ?? "intent",
-            createdAt: new Date().toISOString(),
-            tokenUsage: intentTokenUsage ?? {
-              inputTokens: 0,
-              outputTokens: 0,
-              totalTokens: intentTotalTokens ?? 0,
-            },
-            costUsd: intentCostUsd,
-          },
-        });
-        unregisterAgentRun(req.params.id, controller);
-        res.end();
-        return;
-      }
-    } catch {
-      // fall through to the normal agent
-    }
-  }
-
-  if (intent && (intent.kind === "question" || intent.kind === "analyze")) {
-    try {
-      const result = await runAgentTask(
-        req.params.id,
-        goal,
-        {
-          activeFile: typeof req.body?.activeFile === "string" ? req.body.activeFile : undefined,
-          provider: intentProvider as AiProviderId | undefined,
-          model: intentModel,
-          allowWrite: false,
-          allowCommands: false,
-          language: typeof req.body?.language === "string" ? req.body.language : undefined,
-          maxSteps: 6,
-          mode: "auto",
-          interactive: false,
-          intent,
-        },
-        write,
-        controller.signal,
-      );
-      write({ type: "done", result });
-    } catch (error) {
-      write({
-        type: "error",
-        message: error instanceof Error ? error.message : "Question answering failed.",
-      });
-    } finally {
-      unregisterAgentRun(req.params.id, controller);
-      res.end();
-    }
-    return;
   }
 
   try {

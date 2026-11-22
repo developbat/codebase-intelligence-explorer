@@ -2,12 +2,6 @@ export type IntentKind = "edit" | "question" | "run" | "scaffold" | "analyze";
 export type IntentScope = "trivial" | "small" | "medium" | "large";
 export type IntentMode = "single" | "loop";
 export type IntentVerification = "none" | "browser" | "test" | "build";
-export type DocumentOperation =
-  | "none"
-  | "count_unchecked"
-  | "list_unchecked"
-  | "count_checked"
-  | "list_checked";
 
 export interface IntentOption {
   id: string;
@@ -27,7 +21,8 @@ export interface IntentAnalysis {
   mode: IntentMode;
   areas: string[];
   verification: IntentVerification;
-  documentOperation: DocumentOperation;
+  approach: string;
+  needsExhaustiveEvidence: boolean;
   assumptions: string[];
 }
 

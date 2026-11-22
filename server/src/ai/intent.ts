@@ -9,7 +9,6 @@ import { healthKey, modelHealthByProviderModel } from "./modelStats";
 import { estimateUsageCost } from "./pricing";
 import type { AnalysisResult } from "../../../shared/types";
 import type {
-  DocumentOperation,
   IntentAnalysis,
   IntentKind,
   IntentMode,
@@ -92,7 +91,7 @@ function systemPrompt(): string {
   return `You are the intent analyst for a coding agent. Read the user request in any language (typos are possible) and the project facts. Return JSON only. Never write code.
 
 Schema:
-{"kind":"edit|question|run|scaffold|analyze","understanding":"one sentence in the user's language","language":"tr|en|zh|...","needsClarification":true|false,"question":"question in the user's language","options":[{"label":"short option in the user's language","suffix":"text appended to the user's original instruction when this option is chosen"}],"scope":"trivial|small|medium|large","mode":"single|loop","areas":["exact project-relative file paths"],"verification":"none|browser|test|build","documentOperation":"none|count_unchecked|list_unchecked|count_checked|list_checked","assumptions":["short assumptions"]}
+{"kind":"edit|question|run|scaffold|analyze","understanding":"one sentence in the user's language","language":"tr|en|zh|...","needsClarification":true|false,"question":"question in the user's language","options":[{"label":"short option in the user's language","suffix":"text appended to the user's original instruction when this option is chosen"}],"scope":"trivial|small|medium|large","mode":"single|loop","areas":["exact project-relative file paths"],"verification":"none|browser|test|build","approach":"one-sentence strategy using tools and how to verify completeness","needsExhaustiveEvidence":true|false,"assumptions":["short assumptions"]}
 
 Rules:
 - Restate the user's goal accurately in "understanding". Paraphrase it, do not copy it. Describe what the user wants, not an investigation plan. Do not invent features or fields.
@@ -107,7 +106,8 @@ Rules:
 - "areas": likely existing files from the sample; put new files only when the request clearly creates them. Do not invent unrelated files.
 - Prefer the smallest area that can satisfy the request. A CSS-only change must point at the stylesheet, not every file.
 - "verification": browser for UI/static pages, test when tests exist and behavior is testable, build when compilation is the main risk, none when nothing meaningful applies.
-- "documentOperation": for an attached Markdown/text document, use count_unchecked for a count of unchecked checkboxes, list_unchecked for the full list, count_checked/list_checked likewise, otherwise none. This is extraction, not code.
+- "approach": choose the most efficient evidence strategy for this request. For complete lists/counts/audits, propose searching for the relevant markers and collecting all matches with count/offset; do not rely on a partial read.
+- "needsExhaustiveEvidence": true when the user asks for a complete list, count, audit or "all" items; otherwise false.
 - Never make the user choose a model or restate the whole request.
 - If the user already answered a clarification, needsClarification must be false.
 
@@ -201,11 +201,11 @@ export function parseIntentResponse(
   const scope = pickEnum(parsed.scope, INTENT_SCOPES, "small") as IntentScope;
   const mode = pickEnum(parsed.mode, INTENT_MODES, scope === "large" || scope === "medium" ? "loop" : "single") as IntentMode;
   const verification = pickEnum(parsed.verification, INTENT_VERIFICATIONS, "none") as IntentVerification;
-  const documentOperation = pickEnum(
-    parsed.documentOperation,
-    ["none", "count_unchecked", "list_unchecked", "count_checked", "list_checked"] as const,
-    "none",
-  ) as DocumentOperation;
+  const approach =
+    typeof parsed.approach === "string" && parsed.approach.trim()
+      ? parsed.approach.trim().slice(0, 800)
+      : "";
+  const needsExhaustiveEvidence = parsed.needsExhaustiveEvidence === true;
   const understanding =
     typeof parsed.understanding === "string" && parsed.understanding.trim()
       ? parsed.understanding.trim().slice(0, 500)
@@ -273,7 +273,8 @@ export function parseIntentResponse(
     mode,
     areas,
     verification,
-    documentOperation,
+    approach,
+    needsExhaustiveEvidence,
     assumptions,
   };
 }
@@ -376,7 +377,8 @@ export async function analyzeIntent(
         mode: "single",
         areas: [],
         verification: "none",
-        documentOperation: "none",
+        approach: "",
+        needsExhaustiveEvidence: false,
         assumptions: ["Intent analyst could not parse its reply; proceeding with one focused task."],
       };
     }

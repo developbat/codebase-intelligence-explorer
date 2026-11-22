@@ -17,8 +17,6 @@ export interface DocumentStats {
   words: number;
   checkedBoxes: number;
   uncheckedBoxes: number;
-  uncheckedItems: { line: number; text: string }[];
-  checkedItems: { line: number; text: string }[];
   headings: number;
   links: number;
 }
@@ -35,6 +33,8 @@ export interface DocumentResult {
   height?: number;
   imageFormat?: string;
   ocr?: boolean;
+  nextChar?: number;
+  hasMore?: boolean;
   stats?: DocumentStats;
   metadata?: Record<string, string | number>;
 }
@@ -61,25 +61,14 @@ export function documentStats(text: string): DocumentStats {
   const lines = text.split("\n");
   let checkedBoxes = 0;
   let uncheckedBoxes = 0;
-  const uncheckedItems: { line: number; text: string }[] = [];
-  const checkedItems: { line: number; text: string }[] = [];
   let headings = 0;
   let links = 0;
   lines.forEach((line, index) => {
     if (/^\s*#{1,6}\s/.test(line)) headings += 1;
     const box = /^\s*(?:[-*+]|\d+\.)\s+\[([ xX])\]/.exec(line);
     if (box) {
-      const text = line
-        .replace(/^\s*(?:[-*+]|\d+\.)\s+\[/, "")
-        .replace(/^[ xX]?\]\s*/, "")
-        .trim();
-      if (box[1].toLowerCase() === "x") {
-        checkedBoxes += 1;
-        if (checkedItems.length < 200) checkedItems.push({ line: index + 1, text });
-      } else {
-        uncheckedBoxes += 1;
-        if (uncheckedItems.length < 200) uncheckedItems.push({ line: index + 1, text });
-      }
+      if (box[1].toLowerCase() === "x") checkedBoxes += 1;
+      else uncheckedBoxes += 1;
     }
     links += (line.match(/\[[^\]]+\]\([^)]+\)/g) ?? []).length;
   });
@@ -89,17 +78,25 @@ export function documentStats(text: string): DocumentStats {
     words: (text.match(/\S+/g) ?? []).length,
     checkedBoxes,
     uncheckedBoxes,
-    uncheckedItems,
-    checkedItems,
     headings,
     links,
   };
 }
 
-function limitText(text: string, maxChars: number): { text: string; truncated: boolean } {
+function limitText(
+  text: string,
+  maxChars: number,
+  startChar = 0,
+): { text: string; truncated: boolean; nextChar: number; hasMore: boolean } {
   const clean = text.replace(/\r\n/g, "\n").trim();
-  if (clean.length <= maxChars) return { text: clean, truncated: false };
-  return { text: `${clean.slice(0, maxChars)}\n… content truncated …`, truncated: true };
+  const start = Math.max(0, Math.min(clean.length, Math.floor(startChar)));
+  const end = Math.min(clean.length, start + maxChars);
+  return {
+    text: end < clean.length ? `${clean.slice(start, end)}\n… content truncated …` : clean.slice(start, end),
+    truncated: end < clean.length,
+    nextChar: end,
+    hasMore: end < clean.length,
+  };
 }
 
 function stripHtml(html: string): string {
@@ -144,7 +141,14 @@ async function imageInfo(absolute: string): Promise<{ width?: number; height?: n
 
 async function extractPdf(
   absolute: string,
-  options: { pageStart?: number; pageEnd?: number; ocr?: boolean; lang?: string; maxChars: number },
+  options: {
+    pageStart?: number;
+    pageEnd?: number;
+    ocr?: boolean;
+    lang?: string;
+    maxChars: number;
+    startChar?: number;
+  },
 ): Promise<DocumentResult> {
   const start = Math.max(1, Math.round(options.pageStart ?? 1));
   const end = Math.max(start, Math.round(options.pageEnd ?? start + 49));
@@ -181,7 +185,7 @@ async function extractPdf(
     }
   }
   const stats = documentStats(text);
-  const limited = limitText(text, options.maxChars);
+  const limited = limitText(text, options.maxChars, options.startChar);
   return {
     path: absolute,
     kind: "pdf",
@@ -191,12 +195,14 @@ async function extractPdf(
     pages: text.split(/\f|\[\[PAGE\]\]|--- page ---/).length > 1 ? undefined : start,
     ocr,
     stats,
+    nextChar: limited.nextChar,
+    hasMore: limited.hasMore,
   };
 }
 
 async function extractSpreadsheet(
   absolute: string,
-  options: { sheet?: string; maxChars: number },
+  options: { sheet?: string; maxChars: number; startChar?: number },
 ): Promise<DocumentResult> {
   const workbook = XLSX.readFile(absolute, { cellDates: true, sheetRows: 2000 });
   const names = workbook.SheetNames;
@@ -211,7 +217,7 @@ async function extractSpreadsheet(
   });
   const fullText = blocks.join("\n\n");
   const stats = documentStats(fullText);
-  const limited = limitText(fullText, options.maxChars);
+  const limited = limitText(fullText, options.maxChars, options.startChar);
   return {
     path: absolute,
     kind: "spreadsheet",
@@ -220,6 +226,8 @@ async function extractSpreadsheet(
     truncated: limited.truncated,
     sheets: names,
     stats,
+    nextChar: limited.nextChar,
+    hasMore: limited.hasMore,
   };
 }
 
@@ -264,6 +272,7 @@ export async function readDocument(
     ocr?: boolean;
     lang?: string;
     maxChars?: number;
+    startChar?: number;
   } = {},
 ): Promise<DocumentResult> {
   const file = await resolveFile(rootPath, inputPath);
@@ -277,7 +286,7 @@ export async function readDocument(
   if (extension === ".doc" || extension === ".docx" || extension === ".rtf") {
     const fullText = await extractLegacyDocument(file.absolute);
     const stats = documentStats(fullText);
-    const limited = limitText(fullText, maxChars);
+    const limited = limitText(fullText, maxChars, options.startChar);
     return {
       path: file.relative,
       kind: "word",
@@ -285,6 +294,8 @@ export async function readDocument(
       text: limited.text,
       truncated: limited.truncated,
       stats,
+      nextChar: limited.nextChar,
+      hasMore: limited.hasMore,
     };
   }
   if ([".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tif", ".tiff", ".heic"].includes(extension)) {
@@ -300,7 +311,7 @@ export async function readDocument(
       }
     }
     const stats = documentStats(text);
-    const limited = limitText(text, maxChars);
+    const limited = limitText(text, maxChars, options.startChar);
     return {
       path: file.relative,
       kind: "image",
@@ -312,6 +323,8 @@ export async function readDocument(
       imageFormat: info.format,
       ocr,
       stats,
+      nextChar: limited.nextChar,
+      hasMore: limited.hasMore,
     };
   }
   const raw = await fs.readFile(file.absolute, "utf8").catch(() => {
@@ -327,7 +340,7 @@ export async function readDocument(
     }
   }
   const stats = documentStats(display);
-  const limited = limitText(display, maxChars);
+  const limited = limitText(display, maxChars, options.startChar);
   return {
     path: file.relative,
     kind: extension === ".json" ? "json" : extension === ".csv" ? "csv" : "text",
@@ -335,6 +348,8 @@ export async function readDocument(
     text: limited.text,
     truncated: limited.truncated,
     stats,
+    nextChar: limited.nextChar,
+    hasMore: limited.hasMore,
   };
 }
 

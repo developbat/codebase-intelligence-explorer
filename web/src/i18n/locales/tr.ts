@@ -1004,6 +1004,7 @@ export const tr: Dictionary = {
   "saved": "kayıtlı",
   "Project tools": "Proje araçları",
   "Tools": "Araçlar",
+  "Approach": "Yaklaşım",
   "Search project": "Projede ara",
   "Attach a file (PDF, Word, Excel, JSON, text, image)": "Dosya ekle (PDF, Word, Excel, JSON, metin, resim)",
   "Remove attachment": "Eki kaldır",

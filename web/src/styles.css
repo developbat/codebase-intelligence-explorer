@@ -17433,3 +17433,8 @@ button.canvas-stat {
   font-size: 10.5px;
   gap: 7px;
 }
+
+.studio-intent-approach {
+  color: #a99bd1 !important;
+  font-style: italic;
+}

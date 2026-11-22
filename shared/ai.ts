@@ -553,6 +553,7 @@ export type AiAgentAction =
   | "read_document"
   | "search_document"
   | "search_conversations"
+  | "project_search"
   | "convert_document"
   | "transform_image"
   | "save_note"

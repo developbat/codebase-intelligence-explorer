@@ -104,10 +104,12 @@ test("document checkbox operations are preserved", () => {
       mode: "single",
       areas: [],
       verification: "none",
-      documentOperation: "list_unchecked",
+      approach: "search for unchecked markers and collect every match",
+      needsExhaustiveEvidence: true,
     }),
     analysis,
     "list remaining tasks",
   );
-  assert.equal(intent.documentOperation, "list_unchecked");
+  assert.match(intent.approach, /unchecked markers/);
+  assert.equal(intent.needsExhaustiveEvidence, true);
 });
