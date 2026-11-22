@@ -58,6 +58,7 @@ export interface ProjectTaskQueue {
 }
 
 export interface ProjectTaskLoopOptions {
+  workspaceMode?: "ask" | "plan" | "build" | "research";
   maxTasks?: number;
   maxMinutes?: number;
   provider?: string;

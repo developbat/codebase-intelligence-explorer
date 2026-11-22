@@ -615,6 +615,8 @@ export interface AiAgentResult {
   tokenUsage?: AiTokenUsage;
   costUsd?: number;
   plan?: AiAgentPlan;
+  /** Markdown plan artifact saved under .cie/agent/plans. */
+  planPath?: string;
   logs?: AiAgentLogEntry[];
   taskQueue?: ProjectTaskQueue;
 }
@@ -624,6 +626,17 @@ export type AiPermissionKind = "write" | "command";
 export type AiPermissionDecision = "once" | "always" | "deny";
 
 export type AiAgentIntent = "question" | "explain" | "edit" | "multi_file" | "run" | "scaffold";
+
+/** User-selected workspace mode inside Code Studio. */
+export type AiWorkspaceMode = "ask" | "plan" | "build" | "research";
+
+export interface AiPlanSummary {
+  name: string;
+  path: string;
+  title: string;
+  createdAt: string;
+  bytes: number;
+}
 
 export interface AiAgentPlanStep {
   label: string;

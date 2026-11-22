@@ -44,7 +44,9 @@ import { getPublicSettings, updateAiSettings } from "./ai/settings";
 import { getPrompt, getPromptVersion, listPrompts, renderPrompt, resetPrompt, savePrompt } from "./ai/prompts";
 import { resolvePermission } from "./ai/permissions";
 import { analyzeIntent } from "./ai/intent";
+import { listPlans, readPlan } from "./plans";
 import type { IntentAnalysis } from "../../shared/intent";
+import type { AiWorkspaceMode } from "../../shared/ai";
 import { getProjectUsage } from "./ai/usage";
 import { buildChangeReport } from "./changes";
 import { formatProjectFile } from "./formatter";
@@ -1055,6 +1057,9 @@ app.post("/api/projects/:id/ai/agent", async (req, res) => {
       intent,
       mode:
         req.body?.mode === "ask" ? "ask" : req.body?.mode === "auto" ? "auto" : "coding",
+      workspaceMode: ["ask", "plan", "build", "research"].includes(req.body?.workspaceMode)
+        ? (req.body.workspaceMode as AiWorkspaceMode)
+        : undefined,
       interactive: false,
       history: Array.isArray(req.body?.history)
         ? req.body.history
@@ -1202,6 +1207,9 @@ app.post("/api/projects/:id/ai/agent/stream", async (req, res) => {
         intent,
         mode:
           req.body?.mode === "ask" ? "ask" : req.body?.mode === "auto" ? "auto" : "coding",
+        workspaceMode: ["ask", "plan", "build", "research"].includes(req.body?.workspaceMode)
+          ? (req.body.workspaceMode as AiWorkspaceMode)
+          : undefined,
         history,
       },
       write,
@@ -1213,6 +1221,24 @@ app.post("/api/projects/:id/ai/agent/stream", async (req, res) => {
   } finally {
     unregisterAgentRun(req.params.id, controller);
     res.end();
+  }
+});
+
+app.get("/api/projects/:id/plans", async (req, res) => {
+  try {
+    const analysis = await loadAnalysis(req.params.id);
+    res.json({ plans: await listPlans(analysis.rootPath) });
+  } catch (error) {
+    handleError(res, error, 400);
+  }
+});
+
+app.get("/api/projects/:id/plans/:name", async (req, res) => {
+  try {
+    const analysis = await loadAnalysis(req.params.id);
+    res.json(await readPlan(analysis.rootPath, req.params.name));
+  } catch (error) {
+    handleError(res, error, 400);
   }
 });
 
@@ -1377,6 +1403,9 @@ app.post("/api/projects/:id/ai/loop/stream", async (req, res) => {
         maxMinutes: Number(req.body?.maxMinutes) || undefined,
         replan: req.body?.replan === true,
         retryFailed: req.body?.retryFailed === true,
+        workspaceMode: ["ask", "plan", "build", "research"].includes(req.body?.workspaceMode)
+          ? (req.body.workspaceMode as AiWorkspaceMode)
+          : undefined,
         intent,
         history,
       },

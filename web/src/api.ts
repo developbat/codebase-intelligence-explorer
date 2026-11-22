@@ -38,6 +38,7 @@ import type {
   AiPromptDefinition,
   AiPromptVersionContent,
   AiAgentAutoResult,
+  AiPlanSummary,
   AiProviderId,
   AiReviewResult,
   AiSettingsInput,
@@ -651,6 +652,7 @@ export const api = {
         replan?: boolean;
         retryFailed?: boolean;
         clarified?: boolean;
+        workspaceMode?: "ask" | "plan" | "build" | "research";
         history?: { role: "user" | "assistant"; content: string }[];
       },
       onEvent: (event: AiAgentEvent) => void,
@@ -690,6 +692,15 @@ export const api = {
         reader.releaseLock();
       }
     },
+  },
+
+  plans: {
+    list: (projectId: string) =>
+      request<{ plans: AiPlanSummary[] }>(`/api/projects/${projectId}/plans`),
+    get: (projectId: string, name: string) =>
+      request<{ path: string; content: string }>(
+        `/api/projects/${projectId}/plans/${encodeURIComponent(name)}`,
+      ),
   },
 
   ai: {
@@ -921,6 +932,7 @@ export const api = {
         language?: string;
         maxSteps?: number;
         mode?: "ask" | "coding" | "auto";
+        workspaceMode?: "ask" | "plan" | "build" | "research";
         history?: { role: "user" | "assistant"; content: string }[];
         clarified?: boolean;
       },

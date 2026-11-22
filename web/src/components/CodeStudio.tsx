@@ -125,7 +125,7 @@ import type {
   TestDiscovery,
   TestRunResult,
 } from "../../../shared/types";
-import { providerInfo, type AiAgentEvent, type AiAgentLogEntry, type AiAgentPermissionRequest, type AiAgentPlan, type AiAgentResult, type AiAgentStep, type AiPermissionDecision, type AiProviderId, type AiSettingsPublic, type AiTestGenerationResult, type AiTokenUsage } from "../../../shared/ai";
+import { providerInfo, type AiAgentEvent, type AiAgentLogEntry, type AiAgentPermissionRequest, type AiAgentPlan, type AiAgentResult, type AiAgentStep, type AiPermissionDecision, type AiProviderId, type AiSettingsPublic, type AiTestGenerationResult, type AiTokenUsage, type AiWorkspaceMode, type AiPlanSummary } from "../../../shared/ai";
 import { api } from "../api";
 import { activeProvider } from "../lib/ai";
 import { buildTree, collectFolderPaths, type TreeNode } from "../lib/tree";
@@ -533,6 +533,10 @@ export function CodeStudio({
   const [permissionBusy, setPermissionBusy] = useState(false);
   const permissionRequest = permissionQueue[0] ?? null;
   const [chatInput, setChatInput] = useState("");
+  const [studioMode, setStudioMode] = useState<AiWorkspaceMode>(() => {
+    const stored = localStorage.getItem(`cie:studio-mode:${analysis.id}`);
+    return stored === "ask" || stored === "plan" || stored === "research" ? stored : "build";
+  });
   const [chatBusy, setChatBusy] = useState(false);
   const [chatError, setChatError] = useState<string | null>(null);
   const [chatRetryQuestion, setChatRetryQuestion] = useState<string | null>(null);
@@ -545,6 +549,8 @@ export function CodeStudio({
     tokenUsage?: AiTokenUsage;
     costUsd?: number;
     plan?: AiAgentPlan;
+    planPath?: string;
+    mode?: AiWorkspaceMode;
   };
   type StudioChatTab = { id: string; title: string; createdAt: string };
   const [chatMessages, setChatMessages] = useState<StudioChatMessage[]>([]);
@@ -554,6 +560,9 @@ export function CodeStudio({
   const [chatLiveLogs, setChatLiveLogs] = useState<AiAgentLogEntry[]>([]);
   const [chatLivePlan, setChatLivePlan] = useState<AiAgentPlan | null>(null);
   const [taskQueue, setTaskQueue] = useState<ProjectTaskQueue | null>(null);
+  const [plans, setPlans] = useState<AiPlanSummary[]>([]);
+  const [plansOpen, setPlansOpen] = useState(false);
+  const [plansBusy, setPlansBusy] = useState(false);
   const [clarification, setClarification] = useState<{
     request: ClarificationRequest;
     original: string;
@@ -776,6 +785,48 @@ export function CodeStudio({
   useEffect(() => {
     localStorage.setItem("cie:agent-commands", agentAllowCommands ? "on" : "off");
   }, [agentAllowCommands]);
+  useEffect(() => {
+    void api.tasks
+      .get(analysis.id)
+      .then((result) => setTaskQueue(result.queue))
+      .catch(() => undefined);
+  }, [analysis.id]);
+  useEffect(() => {
+    const stored = localStorage.getItem(`cie:studio-mode:${analysis.id}`);
+    setStudioMode(
+      stored === "ask" || stored === "plan" || stored === "research" ? stored : "build",
+    );
+  }, [analysis.id]);
+  useEffect(() => {
+    localStorage.setItem(`cie:studio-mode:${analysis.id}`, studioMode);
+  }, [analysis.id, studioMode]);
+  const readOnlyMode = studioMode !== "build";
+  const effectiveAllowWrite = readOnlyMode ? false : agentAllowWrite;
+  const effectiveAllowCommands = readOnlyMode ? false : agentAllowCommands;
+  const modeLabel =
+    studioMode === "ask"
+      ? t("Ask")
+      : studioMode === "plan"
+        ? t("Plan")
+        : studioMode === "research"
+          ? t("Research")
+          : t("Build");
+  const modeHint =
+    studioMode === "ask"
+      ? t("Read-only answer from the project.")
+      : studioMode === "plan"
+        ? t("Read-only plan saved under .cie/agent/plans.")
+        : studioMode === "research"
+          ? t("Read-only research with web, documents and notes.")
+          : t("Edits files and runs verification with your permission.");
+  const modePlaceholder =
+    studioMode === "ask"
+      ? t("Ask a question about this project…")
+      : studioMode === "plan"
+        ? t("Describe the goal; I will produce an executable plan…")
+        : studioMode === "research"
+          ? t("Research the web, a document, or this project…")
+          : t("Ask, edit, run, or build something in this project…");
 
   useEffect(() => {
     localStorage.setItem("cie:auto-check", autoCheck ? "on" : "off");
@@ -2124,11 +2175,48 @@ export function CodeStudio({
     );
   }
 
+  async function togglePlans() {
+    if (plansOpen) {
+      setPlansOpen(false);
+      return;
+    }
+    setPlansBusy(true);
+    try {
+      const result = await api.plans.list(analysis.id);
+      setPlans(result.plans);
+      setPlansOpen(true);
+      setTaskPanelOpen(false);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : t("Could not load plans."));
+    } finally {
+      setPlansBusy(false);
+    }
+  }
+
+  async function runSavedPlan(plan: AiPlanSummary) {
+    try {
+      const loaded = await api.plans.get(analysis.id, plan.name);
+      setPlansOpen(false);
+      setStudioMode("build");
+      void askProject(`Execute this plan:\n\n${loaded.content}`, true, {
+        workspaceMode: "build",
+        skipClarify: true,
+      });
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : t("Could not open the plan."));
+    }
+  }
+
   async function askProject(
     question = chatInput,
     appendUser = true,
-    runOptions: { retryFailed?: boolean; skipClarify?: boolean } = {},
+    runOptions: {
+      retryFailed?: boolean;
+      skipClarify?: boolean;
+      workspaceMode?: AiWorkspaceMode;
+    } = {},
   ) {
+    const modeForRun = runOptions.workspaceMode ?? studioMode;
     if (!active || (!question.trim() && !attachment) || chatBusy) return;
     const baseText = question.trim();
     const text = attachment
@@ -2208,11 +2296,12 @@ export function CodeStudio({
             activeFile: activeFile ?? undefined,
             provider: active.provider,
             model: active.model,
-            allowWrite: agentAllowWrite,
-            allowCommands: agentAllowCommands,
+            allowWrite: modeForRun === "build" ? agentAllowWrite : false,
+            allowCommands: modeForRun === "build" ? agentAllowCommands : false,
             language: locale,
-            maxTasks: 12,
-            maxMinutes: 45,
+            maxTasks: modeForRun === "build" ? 12 : 1,
+            maxMinutes: modeForRun === "build" ? 45 : 15,
+            workspaceMode: modeForRun,
             retryFailed: runOptions.retryFailed === true,
             clarified: runOptions.skipClarify === true,
             history: history.slice(-8),
@@ -2230,9 +2319,10 @@ export function CodeStudio({
             activeFile: activeFile ?? undefined,
             provider: active.provider,
             model: active.model,
-            allowWrite: agentAllowWrite,
-            allowCommands: agentAllowCommands,
+            allowWrite: modeForRun === "build" ? agentAllowWrite : false,
+            allowCommands: modeForRun === "build" ? agentAllowCommands : false,
             language: locale,
+            workspaceMode: modeForRun,
             clarified: runOptions.skipClarify === true,
           },
           handleEvent,
@@ -2284,6 +2374,8 @@ export function CodeStudio({
           tokenUsage: result.tokenUsage,
           costUsd: result.costUsd,
           plan: result.plan,
+          planPath: result.planPath,
+          mode: modeForRun,
         },
       ]);
       if (result.changedFiles.length > 0) {
@@ -3058,6 +3150,17 @@ export function CodeStudio({
                 <div className="studio-workflow-role">
                   {workflowMessage.role === "user" ? <User size={11} /> : <Bot size={11} />}
                   <span>{workflowMessage.role === "user" ? t("You") : active?.model ?? t("Agent")}</span>
+                  {workflowMessage.mode ? (
+                    <span className={`studio-mode-badge is-${workflowMessage.mode}`}>
+                      {workflowMessage.mode === "ask"
+                        ? t("Ask")
+                        : workflowMessage.mode === "plan"
+                          ? t("Plan")
+                          : workflowMessage.mode === "research"
+                            ? t("Research")
+                            : t("Build")}
+                    </span>
+                  ) : null}
                   {workflowMessage.tokenUsage ? (
                     <span className="studio-token-badge">
                       {formatTokens(workflowMessage.tokenUsage.totalTokens)} {t("tokens")}
@@ -3090,9 +3193,42 @@ export function CodeStudio({
                 {workflowMessage.role === "assistant" && workflowMessage.plan ? (
                   <AgentPlanCard
                     plan={workflowMessage.plan}
-                    allowWrite={agentAllowWrite}
-                    allowCommands={agentAllowCommands}
+                    allowWrite={effectiveAllowWrite}
+                    allowCommands={effectiveAllowCommands}
                   />
+                ) : null}
+                {workflowMessage.role === "assistant" && workflowMessage.planPath ? (
+                  <div className="studio-plan-result">
+                    <div className="studio-plan-result-head">
+                      <ListChecks size={14} />
+                      <div>
+                        <strong>{t("Plan saved")}</strong>
+                        <code>{workflowMessage.planPath}</code>
+                      </div>
+                    </div>
+                    <div className="studio-plan-result-actions">
+                      <button
+                        onClick={() => void openFile(workflowMessage.planPath ?? "")}
+                        title={t("Open plan")}
+                      >
+                        <FileCode2 size={12} /> {t("Open plan")}
+                      </button>
+                      <button
+                        className="primary-button"
+                        disabled={chatBusy}
+                        onClick={() => {
+                          setStudioMode("build");
+                          void askProject(
+                            `Execute this plan:\n\n${workflowMessage.content}`,
+                            true,
+                            { workspaceMode: "build", skipClarify: true },
+                          );
+                        }}
+                      >
+                        <Play size={12} /> {t("Run in Build")}
+                      </button>
+                    </div>
+                  </div>
                 ) : null}
                 <div className="studio-workflow-text">
                   {workflowMessage.role === "assistant" ? (
@@ -3217,8 +3353,8 @@ export function CodeStudio({
               {chatLivePlan ? (
                 <AgentPlanCard
                   plan={chatLivePlan}
-                  allowWrite={agentAllowWrite}
-                  allowCommands={agentAllowCommands}
+                  allowWrite={effectiveAllowWrite}
+                  allowCommands={effectiveAllowCommands}
                   defaultOpen
                 />
               ) : null}
@@ -3260,41 +3396,6 @@ export function CodeStudio({
             </div>
           ) : null}
         </div>
-
-        {taskQueue && taskQueue.tasks.length > 0 && !chatBusy ? (
-          <div className="studio-task-dock">
-            {taskPanelOpen ? (
-              <div className="studio-task-popover">
-                <div className="studio-task-popover-head">
-                  <strong>{t("Task queue")}</strong>
-                  <button onClick={() => setTaskPanelOpen(false)} aria-label={t("Close")}>
-                    <X size={11} />
-                  </button>
-                </div>
-                <TaskQueueCard
-                  queue={taskQueue}
-                  defaultOpen
-                  onOpenFile={(path) => void openFile(path)}
-                  onRetryFailed={() => {
-                    if (!taskQueue) return;
-                    setTaskPanelOpen(false);
-                    void askProject(taskQueue.goal, false, { retryFailed: true, skipClarify: true });
-                  }}
-                />
-              </div>
-            ) : null}
-            <button
-              className={`studio-task-dock-button ${
-                taskQueue.status === "failed" ? "is-failed" : ""
-              }`}
-              onClick={() => setTaskPanelOpen((value) => !value)}
-              title={t("Open task queue")}
-            >
-              <ListChecks size={14} />
-              {taskQueue.tasks.filter((task) => task.status === "done").length}/{taskQueue.tasks.length}
-            </button>
-          </div>
-        ) : null}
 
         {intentNotice ? (
           <div className="studio-intent-notice">
@@ -3361,33 +3462,93 @@ export function CodeStudio({
         ) : null}
 
         <div className="studio-composer">
-          <div className="studio-composer-perms">
-            <span className="studio-session-tokens">
-              {sessionTokens > 0 ? `${t("Session")} ${formatTokens(sessionTokens)} ${t("tokens")}` : ""}
-            </span>
-            <button
-              className={`studio-loop-toggle ${consoleOpen ? "is-on" : ""}`}
-              onClick={() => setConsoleOpen((value) => !value)}
-              title={t("Console")}
-            >
-              <Terminal size={10} /> {t("Console")}
-            </button>
-            <span
-              className="studio-composer-model"
-              title={modelNotice ? t("Effective model for this run") : undefined}
-            >
-              {modelNotice
-                ? `${modelNotice.to.provider} · ${modelNotice.to.model}`
-                : active
-                  ? `${providerDisplayName(active.provider)} · ${active.model}`
-                  : t("Configure AI")}
-            </span>
-            {chatMessages.length > 0 ? (
-              <button className="studio-composer-clear" onClick={clearActiveChat}>
-                {t("Clear")}
-              </button>
-            ) : null}
+          {plansOpen ? (
+            <div className="studio-composer-task-panel studio-composer-plans-panel">
+              <div className="studio-composer-task-head">
+                <strong>{t("Saved plans")}</strong>
+                <button onClick={() => setPlansOpen(false)} aria-label={t("Close")}>
+                  <X size={12} />
+                </button>
+              </div>
+              {plansBusy ? (
+                <div className="studio-plans-empty">
+                  <Loader2 size={14} className="spin" /> {t("Loading plans…")}
+                </div>
+              ) : plans.length === 0 ? (
+                <div className="studio-plans-empty">{t("No saved plans yet.")}</div>
+              ) : (
+                <div className="studio-plans-list">
+                  {plans.map((plan) => (
+                    <div key={plan.name} className="studio-plans-item">
+                      <div>
+                        <strong>{plan.title}</strong>
+                        <code>{plan.path}</code>
+                      </div>
+                      <div className="studio-plans-actions">
+                        <button onClick={() => void openFile(plan.path)}>{t("Open")}</button>
+                        <button
+                          className="is-primary"
+                          onClick={() => void runSavedPlan(plan)}
+                          disabled={chatBusy}
+                        >
+                          <Play size={11} /> {t("Use in Build")}
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          ) : null}
+
+          {taskQueue && taskQueue.tasks.length > 0 && taskPanelOpen ? (
+            <div className="studio-composer-task-panel">
+              <div className="studio-composer-task-head">
+                <strong>{t("Task queue")}</strong>
+                <button onClick={() => setTaskPanelOpen(false)} aria-label={t("Close")}>
+                  <X size={12} />
+                </button>
+              </div>
+              <TaskQueueCard
+                queue={taskQueue}
+                defaultOpen
+                onOpenFile={(path) => void openFile(path)}
+                onRetryFailed={() => {
+                  if (!taskQueue) return;
+                  setTaskPanelOpen(false);
+                  void askProject(taskQueue.goal, false, {
+                    retryFailed: true,
+                    skipClarify: true,
+                    workspaceMode: "build",
+                  });
+                }}
+              />
+            </div>
+          ) : null}
+
+          <div className="studio-mode-bar">
+            <label className="studio-mode-select">
+              <span>{t("Mode")}</span>
+              <select
+                value={studioMode}
+                onChange={(event) => {
+                  const next = event.target.value as AiWorkspaceMode;
+                  setStudioMode(next);
+                  setTaskPanelOpen(false);
+                }}
+                disabled={chatBusy}
+                aria-label={t("Mode")}
+              >
+                <option value="ask">{t("Ask — read-only answer")}</option>
+                <option value="plan">{t("Plan — produce an executable plan")}</option>
+                <option value="build">{t("Build — edit files and verify")}</option>
+                <option value="research">{t("Research — web, documents and notes")}</option>
+              </select>
+            </label>
+            <span className={`studio-mode-pill is-${studioMode}`}>{modeLabel}</span>
+            <span className="studio-mode-hint">{modeHint}</span>
           </div>
+
           {clarification ? (
             <div className="studio-clarify">
               <div className="studio-clarify-head">
@@ -3425,16 +3586,18 @@ export function CodeStudio({
               </div>
             </div>
           ) : null}
+
           {attachment ? (
             <div className="studio-attachment-chip">
-              <Paperclip size={11} />
+              <Paperclip size={13} />
               <span>{attachment.name}</span>
               <code>{attachment.path}</code>
               <button onClick={() => setAttachment(null)} aria-label={t("Remove attachment")}>
-                <X size={10} />
+                <X size={11} />
               </button>
             </div>
           ) : null}
+
           <div className="studio-composer-row">
             <button
               className="studio-attach-button"
@@ -3443,7 +3606,8 @@ export function CodeStudio({
               title={t("Attach a file (PDF, Word, Excel, JSON, text, image)")}
               aria-label={t("Attach a file (PDF, Word, Excel, JSON, text, image)")}
             >
-              {assetBusy ? <Loader2 size={14} className="spin" /> : <Paperclip size={14} />}
+              {assetBusy ? <Loader2 size={18} className="spin" /> : <Paperclip size={18} />}
+              <span>{t("File")}</span>
             </button>
             <input
               ref={taskFileInputRef}
@@ -3469,8 +3633,8 @@ export function CodeStudio({
                   void askProject();
                 }
               }}
-              placeholder={t("Ask, edit, run, or build something in this project…")}
-              rows={3}
+              placeholder={modePlaceholder}
+              rows={4}
             />
             {chatBusy ? (
               <button
@@ -3482,7 +3646,7 @@ export function CodeStudio({
                 }}
                 title={t("Stop agent")}
               >
-                <Square size={12} />
+                <Square size={16} />
               </button>
             ) : (
               <button
@@ -3491,9 +3655,66 @@ export function CodeStudio({
                 disabled={!active || (!chatInput.trim() && !attachment)}
                 title={t("Send")}
               >
-                <Send size={14} />
+                <Send size={18} />
               </button>
             )}
+          </div>
+
+          <div className="studio-composer-perms">
+            <span className="studio-session-tokens">
+              {sessionTokens > 0 ? `${t("Session")} ${formatTokens(sessionTokens)} ${t("tokens")}` : ""}
+            </span>
+            <button
+              className={`studio-composer-task-button ${plansOpen ? "is-active" : ""}`}
+              onClick={() => void togglePlans()}
+              disabled={plansBusy}
+              title={t("Saved plans")}
+            >
+              {plansBusy ? <Loader2 size={14} className="spin" /> : <BrainCircuit size={14} />}
+              <span>{t("Plans")}</span>
+              {plans.length > 0 ? <b>{plans.length}</b> : null}
+            </button>
+            {taskQueue && taskQueue.tasks.length > 0 ? (
+              <button
+                className={`studio-composer-task-button ${
+                  taskQueue.status === "failed" ? "is-failed" : ""
+                }`}
+                onClick={() => {
+                  setPlansOpen(false);
+                  setTaskPanelOpen((value) => !value);
+                }}
+                title={t("Open task queue")}
+              >
+                <ListChecks size={14} />
+                <span>{t("Task queue")}</span>
+                <b>
+                  {taskQueue.tasks.filter((task) => task.status === "done").length}/{taskQueue.tasks.length}
+                </b>
+                {taskQueue.status === "failed" ? <AlertTriangle size={12} /> : null}
+              </button>
+            ) : null}
+            <button
+              className={`studio-loop-toggle ${consoleOpen ? "is-on" : ""}`}
+              onClick={() => setConsoleOpen((value) => !value)}
+              title={t("Console")}
+            >
+              <Terminal size={12} /> {t("Console")}
+            </button>
+            <span
+              className="studio-composer-model"
+              title={modelNotice ? t("Effective model for this run") : undefined}
+            >
+              {modelNotice
+                ? `${modelNotice.to.provider} · ${modelNotice.to.model}`
+                : active
+                  ? `${providerDisplayName(active.provider)} · ${active.model}`
+                  : t("Configure AI")}
+            </span>
+            {chatMessages.length > 0 ? (
+              <button className="studio-composer-clear" onClick={clearActiveChat}>
+                {t("Clear")}
+              </button>
+            ) : null}
           </div>
         </div>
 

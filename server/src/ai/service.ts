@@ -19,6 +19,7 @@ import type {
   AiTaskFileChange,
   AiTaskResult,
   AiTestGenerationResult,
+  AiWorkspaceMode,
   AiUnresolvedAnalysis,
   AiUsage,
   AiAgentResult,
@@ -99,6 +100,7 @@ import { resolveProvider } from "./settings";
 import { recordUsage } from "./usage";
 import { recordModelOutcome } from "./modelStats";
 import { estimateUsageCost } from "./pricing";
+import { savePlan } from "../plans";
 import type {
   AgentToolGroup,
   IntentAnalysis,
@@ -1766,6 +1768,19 @@ export function preferredVerificationCommand(
   return tooling?.typecheckCommands?.[0] ?? tooling?.buildCommands?.[0];
 }
 
+export function looksLikePlanningText(summary: string): boolean {
+  const text = summary.trim();
+  if (!text) return false;
+  const lines = text.split("\n").filter((line) => line.trim().length > 0);
+  const delivered =
+    lines.length >= 4 &&
+    /(?:^|\n)\s*(?:[-*]|\d+\.|\|)/.test(text);
+  if (delivered) return false;
+  return /(?:need to|have to|i need to)\s+(?:read|check|inspect|search|open|scan|verify)|i(?:'ll| will)\s+(?:read|check|inspect|search|open|scan|start|look)|let me\s+(?:read|check|inspect|search|open|scan|start|look)|let's\s+(?:read|check|inspect|search|open|scan|start|look)|start (?:by|with)\s+(?:reading|checking|inspecting|searching)|first,?\s+(?:read|check|inspect|search)|read (?:the )?file (?:fully|completely|in chunks)|check (?:the )?file size|dosyayı\s+(?:tamamen|baştan|tümüyle)?\s*oku|önce\s+.{0,40}(?:oku|kontrol et|incele)|okuyayım|kontrol edeyim|inceleyeyim|başlayalım/i.test(
+    text,
+  );
+}
+
 export function reportsRemainingWork(summary: string): boolean {
   const remaining =
     /\b(not (?:done|implemented|completed)|remaining work|remains? (?:undone|to be done))\b|yapılmadı|tamamlanmadı|eksik kaldı|\bkalan\s*[:(]|\bnext step\b|sonraki adım/i.test(
@@ -2630,8 +2645,13 @@ function actionToolGroups(action: string): AgentToolGroup[] {
 export function resolveToolGroups(
   intent: IntentAnalysis | undefined,
   instruction: string,
+  workspaceMode: AiWorkspaceMode = "build",
 ): AgentToolGroup[] {
-  if (!intent) return [...AGENT_TOOL_GROUPS];
+  if (!intent) {
+    if (workspaceMode === "plan") return ["document", "git", "notes"];
+    if (workspaceMode === "research") return ["web", "document", "notes"];
+    return [...AGENT_TOOL_GROUPS];
+  }
   const groups = new Set<AgentToolGroup>(intent.toolGroups);
   if (intent.kind === "edit" || intent.kind === "scaffold") groups.add("edit");
   if (intent.kind === "question" || intent.kind === "analyze") {
@@ -2657,6 +2677,22 @@ export function resolveToolGroups(
     )
   ) {
     groups.add("document");
+  }
+  if (workspaceMode === "plan") {
+    groups.delete("edit");
+    groups.delete("command");
+    groups.add("document");
+    groups.add("git");
+    groups.add("notes");
+  } else if (workspaceMode === "research") {
+    groups.delete("edit");
+    groups.delete("command");
+    groups.add("web");
+    groups.add("document");
+    groups.add("notes");
+  } else if (workspaceMode === "ask") {
+    groups.delete("edit");
+    groups.delete("command");
   }
   return [...groups];
 }
@@ -2742,7 +2778,10 @@ export function agentToolCatalog(
     tools.push(`{"action":"remove_skill","args":{"key":"project:project-cie:my-skill"}}  // always requires confirmation`);
     tools.push(`{"action":"mobile_check","args":{"platform":"android","id":"emulator-5554","boot":true,"screenshot":true,"logs":true,"openUrl":"http://localhost:8081"}}${commandApproval}`);
   }
-  tools.push('{"action":"finish","args":{"summary":"what changed and how it was verified"}}');
+  if (readOnly && groups?.includes("notes")) {
+    tools.push('{"action":"save_note","args":{"title":"Research: topic","content":"notes with sources","tags":["research"],"sources":["https://example.com"]}}  // saves under .cie/agent/notes');
+  }
+  tools.push('{"action":"finish","args":{"summary":"final answer, plan, or change summary"}}');
   const allowed = groups ? new Set(groups) : null;
   return tools
     .filter((tool) => {
@@ -3021,6 +3060,7 @@ export async function runAgentTask(
     language?: string;
     maxSteps?: number;
     mode?: "ask" | "coding" | "auto";
+    workspaceMode?: AiWorkspaceMode;
     history?: { role: "user" | "assistant"; content: string }[];
     interactive?: boolean;
     forceFast?: boolean;
@@ -3032,11 +3072,14 @@ export async function runAgentTask(
   const analysis = await loadAnalysis(projectId);
   if (!instruction.trim()) throw new Error("An agent instruction is required.");
   const config = await resolveProvider(options.provider, options.model);
-  const askMode = options.mode === "ask";
+  const workspaceMode: AiWorkspaceMode =
+    options.workspaceMode ?? (options.mode === "ask" ? "ask" : "build");
+  const readOnlyMode = workspaceMode !== "build";
+  const askMode = readOnlyMode;
   const autoMode = options.mode === "auto";
-  let writeApproved = !askMode && options.allowWrite === true;
-  let commandsApproved = !askMode && options.allowCommands === true;
-  const interactive = !askMode && options.interactive !== false;
+  let writeApproved = !readOnlyMode && options.allowWrite === true;
+  let commandsApproved = !readOnlyMode && options.allowCommands === true;
+  const interactive = !readOnlyMode && options.interactive !== false;
   const runId = `run_${crypto.randomUUID()}`;
   const fastTask =
     options.forceFast === true ||
@@ -3046,7 +3089,19 @@ export async function runAgentTask(
   // maxSteps limits model turns, not individual tool actions from a multi-call reply.
   const maxSteps = Math.max(
     2,
-    Math.min(20, options.maxSteps ?? (askMode ? 8 : fastTask ? 10 : AGENT_MAX_STEPS)),
+    Math.min(
+      20,
+      options.maxSteps ??
+        (workspaceMode === "plan"
+          ? 8
+          : workspaceMode === "research"
+            ? 12
+            : readOnlyMode
+              ? 8
+              : fastTask
+                ? 10
+                : AGENT_MAX_STEPS),
+    ),
   );
   const createdAt = new Date().toISOString();
   const evidence: AiContextFile[] = [];
@@ -3091,7 +3146,15 @@ export async function runAgentTask(
     detail: string | undefined,
     options: { preview?: string; destructive?: boolean } = {},
   ): Promise<boolean> => {
-    if (askMode) return false;
+    if (readOnlyMode) {
+      if (
+        (workspaceMode === "research" || workspaceMode === "plan") &&
+        tool === "save_note"
+      ) {
+        return true;
+      }
+      return false;
+    }
     const destructive = options.destructive === true;
     if (!destructive) {
       if (kind === "write" && writeApproved) return true;
@@ -3260,22 +3323,52 @@ export async function runAgentTask(
     return verification;
   };
 
-  const plan = options.intent
+  let plan = options.intent
     ? buildPlanFromIntent(options.intent, options.activeFile, verificationCommand)
     : buildAgentPlan(analysis, instruction, {
         activeFile: options.activeFile,
-        askMode,
+        askMode: readOnlyMode,
         verificationCommand,
       });
+  if (readOnlyMode) {
+    plan = {
+      ...plan,
+      intent: "question",
+      needsWrite: false,
+      needsCommand: false,
+      verification: undefined,
+      risk: "low",
+      summary:
+        workspaceMode === "plan"
+          ? "Inspect the project and produce an executable plan."
+          : workspaceMode === "research"
+            ? "Investigate the project and sources, then answer with evidence."
+            : plan.summary,
+      steps:
+        workspaceMode === "plan"
+          ? [
+              { label: "Inspect the goal and relevant project evidence" },
+              { label: "Write ordered tasks with acceptance criteria" },
+              { label: "Save the plan artifact and report open questions" },
+            ]
+          : workspaceMode === "research"
+            ? [
+                { label: "Search project and external sources" },
+                { label: "Verify claims and collect citations" },
+                { label: "Summarize findings and open questions" },
+              ]
+            : plan.steps,
+    };
+  }
   activePlan = plan;
   const narrowEdit =
-    !askMode &&
+    !readOnlyMode &&
     plan.needsWrite &&
     options.intent?.kind === "edit" &&
     (options.intent.scope === "trivial" || options.intent.scope === "small");
   const contextMode = options.intent?.context ?? "project";
   const historyMode = options.intent?.history ?? "recent";
-  const toolGroups = resolveToolGroups(options.intent, instruction);
+  const toolGroups = resolveToolGroups(options.intent, instruction, workspaceMode);
   const seed =
     contextMode === "none"
       ? ""
@@ -3335,13 +3428,19 @@ export async function runAgentTask(
     .filter(Boolean)
     .join("\n");
 
-  const focusedRead = !askMode && contextMode === "focused" && !plan.needsWrite;
+  const focusedRead =
+    !readOnlyMode && contextMode === "focused" && !plan.needsWrite;
   const basePromptId = askMode ? "agent.ask" : autoMode ? "agent.auto" : "agent.coding";
-  const promptId = narrowEdit
-    ? "agent.focused"
-    : focusedRead
-      ? "agent.inspect"
-      : basePromptId;
+  const promptId =
+    workspaceMode === "plan"
+      ? "agent.plan"
+      : workspaceMode === "research"
+        ? "agent.research"
+        : narrowEdit
+          ? "agent.focused"
+          : focusedRead
+            ? "agent.inspect"
+            : basePromptId;
   const prompt = await getPrompt(promptId, projectId);
   const languageInstruction = aiLanguageInstruction(options.language ?? "en");
   const fastSuffix =
@@ -3353,7 +3452,7 @@ export async function runAgentTask(
       ? "\n\nNarrow edit profile: use project_search or find_in_file first and locate the exact selector, property, symbol or snippet. Read at most 3 focused ranges (about 60 lines each). Never read a whole file above 160 lines; if a whole-file read is rejected, read only the matching range. Then use replace_in_file with the exact existing snippet."
       : "";
   const readOnlySuffix =
-    !askMode && !plan.needsWrite
+    workspaceMode === "ask"
       ? "\n\nInspection profile: this task is read-only. Read at most 6 files, never re-read the same range, and finish with a compact report. Do not propose a large next-step list."
       : "";
   const enabledSkills = await loadEnabledSkills(analysis.rootPath, projectId).catch(() => []);
@@ -3381,7 +3480,7 @@ export async function runAgentTask(
   }
   const systemContent =
     renderPrompt(prompt.system, {
-      tools: agentToolCatalog(askMode, writeApproved, commandsApproved, toolGroups),
+      tools: agentToolCatalog(readOnlyMode, writeApproved, commandsApproved, toolGroups),
       language: languageInstruction,
     }) +
     (skillsPrompt ? `\n\n${skillsPrompt}` : "") +
@@ -3404,7 +3503,13 @@ export async function runAgentTask(
     log(
       "info",
       "Fast task profile selected",
-      narrowEdit ? "compact focused-edit prompt · focused reads" : "small task · focused reads",
+      workspaceMode === "plan"
+        ? "planning profile · read-only evidence"
+        : workspaceMode === "research"
+          ? "research profile · read-only evidence"
+          : narrowEdit
+            ? "compact focused-edit prompt · focused reads"
+            : "small task · focused reads",
     );
   }
   const system: ChatMessage = {
@@ -3448,8 +3553,10 @@ export async function runAgentTask(
   let writeNudges = 0;
   let readRejections = 0;
   let evidenceNudges = 0;
+  let planningNudges = 0;
   let browserCheckCalls = 0;
   let remainingWorkRejected = false;
+  let planPath: string | undefined;
 
   for (let index = 1; ; index += 1) {
     if (signal?.aborted) {
@@ -3478,7 +3585,7 @@ export async function runAgentTask(
         `${next.action}${agentActionTarget(next.args) ? ` · ${agentActionTarget(next.args)}` : ""}`,
       );
     } else {
-    if (!askMode && plan.needsWrite && changedFiles.length === 0) {
+    if (!readOnlyMode && plan.needsWrite && changedFiles.length === 0) {
       const turnsLeft = maxSteps - modelTurns;
       if (modelTurns >= 4 && writeNudges === 0) {
         writeNudges = 1;
@@ -3834,6 +3941,39 @@ export async function runAgentTask(
         continue;
       }
 
+      if (
+        readOnlyMode &&
+        workspaceMode !== "plan" &&
+        looksLikePlanningText(rawSummary)
+      ) {
+        planningNudges += 1;
+        const observation =
+          "Your finish summary is an internal plan or next-step note, not an answer. Do not finish with phrases like 'need to read', 'let's check' or 'I will inspect'. Call the needed tool now, collect the evidence, then finish with the actual answer in Markdown. If something truly blocks you, state the exact blocker and what you tried.";
+        log(
+          "warn",
+          "Finish rejected: internal plan",
+          rawSummary.replace(/\s+/g, " ").slice(0, 160),
+        );
+        recordStep({
+          index,
+          action: "invalid",
+          args: {},
+          observation,
+          ok: false,
+          durationMs: Date.now() - started,
+          tokenUsage: stepUsage,
+        });
+        transcript.push({ role: "user", content: `Observation (step ${index}) [invalid]: ${observation}` });
+        if (planningNudges >= 2) {
+          stoppedReason = "error";
+          errorMessage =
+            "The model kept returning an internal plan instead of an answer. Retry or switch to a stronger model.";
+          summary = errorMessage;
+          break;
+        }
+        continue;
+      }
+
       if (options.intent?.needsExhaustiveEvidence && evidenceNudges < 3) {
         const lastTruncated = steps.reduce(
           (max, item) =>
@@ -3872,7 +4012,7 @@ export async function runAgentTask(
       }
 
       if (
-        !askMode &&
+        !readOnlyMode &&
         modelTurns < maxSteps &&
         !remainingWorkRejected &&
         reportsRemainingWork(rawSummary)
@@ -3894,7 +4034,7 @@ export async function runAgentTask(
         continue;
       }
 
-      if (!askMode && changedFiles.length > 0) {
+      if (!readOnlyMode && changedFiles.length > 0) {
         const verification = await verifyChanges();
         if (verification.ran && !verification.ok && !verification.cached) {
           const observation = `Verification failed. Fix the reported errors before finishing again.\nCommand: ${verification.command}\n${verification.output.slice(0, 4_000)}`;
@@ -3921,6 +4061,15 @@ export async function runAgentTask(
       }
 
       summary = rawSummary || "The agent finished without a summary.";
+      if (workspaceMode === "plan" && summary.trim()) {
+        const savedPlan = await savePlan(analysis.rootPath, summary, {
+          goal: instruction,
+        }).catch(() => null);
+        if (savedPlan) {
+          planPath = savedPlan.path;
+          log("success", "Plan saved", savedPlan.path);
+        }
+      }
       step.observation = summary;
       step.ok = true;
       step.durationMs = Date.now() - started;
@@ -5699,6 +5848,7 @@ export async function runAgentTask(
     model: config.model,
     createdAt,
     plan: activePlan ?? plan,
+    planPath,
     usage: {
       inputChars,
       estimatedTokens: Math.ceil(inputChars / 4),

@@ -1,5 +1,10 @@
 import type { AnalysisResult } from "../../../shared/types";
-import type { AiAgentEvent, AiAgentResult, AiTokenUsage } from "../../../shared/ai";
+import type {
+  AiAgentEvent,
+  AiAgentResult,
+  AiTokenUsage,
+  AiWorkspaceMode,
+} from "../../../shared/ai";
 import type { IntentAnalysis } from "../../../shared/intent";
 import type {
   ProjectTask,
@@ -439,6 +444,7 @@ function aggregateResult(
   const costUsd = queue.tasks.reduce((total, task) => total + (task.costUsd ?? 0), 0);
   const stoppedReason: AiAgentResult["stoppedReason"] =
     queue.status === "stopped" ? "aborted" : queue.status === "completed" ? "finished" : "max_steps";
+  const planPath = taskResults.find((result) => result.planPath)?.planPath;
   const lines = [
     `Task loop finished for: **${goal}**`,
     "",
@@ -447,6 +453,7 @@ function aggregateResult(
     costUsd > 0 ? `- Estimated cost: ${formatUsd(costUsd)}` : "",
     changedFiles.length > 0 ? `- Changed files: ${changedFiles.map((file) => `\`${file}\``).join(", ")}` : "",
     commands.length > 0 ? `- Commands: ${commands.map((command) => `\`${command}\``).join(", ")}` : "",
+    planPath ? `- Plan: \`${planPath}\`` : "",
     "",
     "### Tasks",
     ...queue.tasks.map(
@@ -469,6 +476,7 @@ function aggregateResult(
     createdAt: new Date().toISOString(),
     tokenUsage,
     costUsd: costUsd > 0 ? Number(costUsd.toFixed(6)) : undefined,
+    planPath,
     taskQueue: queue,
   };
 }
@@ -477,16 +485,24 @@ function intentTask(
   goal: string,
   intent: IntentAnalysis,
   verification?: string,
+  workspaceMode: AiWorkspaceMode = "build",
 ): ProjectTask {
   const at = nowIso();
-  const readOnly = intent.kind === "question" || intent.kind === "analyze" || intent.kind === "run";
-  const effort = readOnly
-    ? "simple"
-    : intent.scope === "trivial" || intent.scope === "small"
-      ? "simple"
-      : intent.scope === "medium"
-        ? "standard"
-        : "hard";
+  const readOnly =
+    workspaceMode !== "build" ||
+    intent.kind === "question" ||
+    intent.kind === "analyze" ||
+    intent.kind === "run";
+  const effort =
+    workspaceMode !== "build"
+      ? "standard"
+      : readOnly
+        ? "simple"
+        : intent.scope === "trivial" || intent.scope === "small"
+          ? "simple"
+          : intent.scope === "medium"
+            ? "standard"
+            : "hard";
   return {
     id: "task-1",
     title: goal.length > 90 ? `${goal.slice(0, 87)}…` : goal,
@@ -498,10 +514,16 @@ function intentTask(
     ]
       .filter(Boolean)
       .join("\n"),
-    acceptance: "The requested change is implemented and verified.",
+    acceptance:
+      workspaceMode === "plan"
+        ? "A concrete plan with ordered tasks, acceptance criteria and verification is saved."
+        : workspaceMode === "research"
+          ? "The answer cites the evidence and states open questions."
+          : "The requested change is implemented and verified.",
     status: "pending",
     effort,
-    role: effort === "simple" ? "fast" : "main",
+    role:
+      workspaceMode !== "build" || effort !== "simple" ? "main" : "fast",
     dependsOn: [],
     attempts: 0,
     changedFiles: [],
@@ -565,10 +587,11 @@ export async function runProjectLoop(
     }
   }
   const verification = preferredVerificationCommand(analysis.tooling);
+  const workspaceMode: AiWorkspaceMode = options.workspaceMode ?? "build";
   let queue = await loadQueue(analysis.rootPath, projectId);
   const sameGoal = queue?.goal.trim() === goal.trim();
   const intent = options.intent;
-  const intentSingle = intent?.mode === "single";
+  const intentSingle = workspaceMode !== "build" || intent?.mode === "single";
   if (
     !queue ||
     options.replan ||
@@ -579,7 +602,7 @@ export async function runProjectLoop(
   ) {
     if (intent && intentSingle) {
       queue = await createQueue(analysis.rootPath, projectId, goal.trim(), [
-        intentTask(goal, intent, verification),
+        intentTask(goal, intent, verification, workspaceMode),
       ]);
       await appendTaskContext(
         analysis.rootPath,
@@ -700,14 +723,20 @@ export async function runProjectLoop(
           allowWrite: options.allowWrite === true,
           allowCommands: options.allowCommands === true,
           language: options.language,
-          maxSteps: taskLooksLikeInspection(current)
-            ? 5
-            : current.effort === "simple"
-              ? 6
-              : current.effort === "hard"
-                ? 16
-                : 10,
+          maxSteps:
+            workspaceMode === "plan"
+              ? 8
+              : workspaceMode === "research"
+                ? 12
+                : taskLooksLikeInspection(current)
+                  ? 5
+                  : current.effort === "simple"
+                    ? 6
+                    : current.effort === "hard"
+                      ? 16
+                      : 10,
           mode: "auto",
+          workspaceMode,
           interactive: true,
           forceFast: current.effort === "simple",
           intent: options.intent,
