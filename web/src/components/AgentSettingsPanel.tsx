@@ -22,6 +22,7 @@ import type {
   AiSettingsPublic,
 } from "../../../shared/ai";
 import { api } from "../api";
+import { FallbackSettingsPanel } from "./FallbackSettingsPanel";
 import { useI18n } from "../i18n";
 import { readCache, writeCache } from "../lib/resourceCache";
 
@@ -310,6 +311,8 @@ export function AgentSettingsPanel({ settings, onSaved }: AgentSettingsPanelProp
           );
         })}
       </div>
+
+      <FallbackSettingsPanel settings={settings} onSaved={onSaved} />
 
       {message ? (
         <div className={`ai-test-result ${message.ok ? "is-ok" : "is-error"}`}>

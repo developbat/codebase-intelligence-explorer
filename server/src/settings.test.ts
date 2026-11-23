@@ -118,3 +118,35 @@ test("provider model lists are cached and agent roles can be configured", async 
     await fs.rm(dataDir, { recursive: true, force: true });
   }
 });
+
+test("fallback chain and price caps are persisted", async () => {
+  const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), "cie-settings-"));
+  const previous = process.env.CIE_DATA_DIR;
+  process.env.CIE_DATA_DIR = dataDir;
+  try {
+    await updateAiSettings({ provider: "openai", apiKey: "test-key" });
+    await updateAiSettings({
+      autoSwitchModels: false,
+      fallback: {
+        chain: [
+          { provider: "openai", model: "gpt-test-small" },
+          { provider: "openai", model: "gpt-test-large" },
+        ],
+        maxOutputPricePerMillion: 2.5,
+        maxInputPricePerMillion: 1.25,
+      },
+    });
+    const settings = await getPublicSettings();
+    assert.equal(settings.autoSwitchModels, false);
+    assert.deepEqual(settings.fallback.chain, [
+      { provider: "openai", model: "gpt-test-small" },
+      { provider: "openai", model: "gpt-test-large" },
+    ]);
+    assert.equal(settings.fallback.maxOutputPricePerMillion, 2.5);
+    assert.equal(settings.fallback.maxInputPricePerMillion, 1.25);
+  } finally {
+    if (previous === undefined) delete process.env.CIE_DATA_DIR;
+    else process.env.CIE_DATA_DIR = previous;
+    await fs.rm(dataDir, { recursive: true, force: true });
+  }
+});

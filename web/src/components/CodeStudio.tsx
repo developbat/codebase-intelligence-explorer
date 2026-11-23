@@ -654,7 +654,7 @@ export function CodeStudio({
     planPath?: string;
     mode?: AiWorkspaceMode;
   };
-  type StudioChatTab = { id: string; title: string; createdAt: string };
+  type StudioChatTab = { id: string; title: string; createdAt: string; updatedAt: string };
   const [chatMessages, setChatMessages] = useState<StudioChatMessage[]>([]);
   const [chatTabs, setChatTabs] = useState<StudioChatTab[]>([]);
   const [activeChatId, setActiveChatId] = useState("");
@@ -685,7 +685,7 @@ export function CodeStudio({
   const chatHydratedRef = useRef(false);
   const skipChatSaveRef = useRef(false);
   const [summaryBusy, setSummaryBusy] = useState(false);
-  const [sidebarTab, setSidebarTab] = useState<"files" | "chat" | "tools" | "project">("files");
+  const [sidebarTab, setSidebarTab] = useState<"files" | "chat" | "tools" | "project">("chat");
   const [leftWidth, setLeftWidth] = useState(() => {
     const stored = Number(localStorage.getItem("cie:studio-left-width"));
     return Number.isFinite(stored) && stored >= 140 ? stored : 252;
@@ -696,6 +696,7 @@ export function CodeStudio({
     return stored === 318 ? 420 : stored;
   });
   const [chatExpanded, setChatExpanded] = useState(false);
+  const [previewFullscreen, setPreviewFullscreen] = useState(false);
   const [rightTab, setRightTab] = useState<"preview" | string>("preview");
   const [consoleOpen, setConsoleOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -777,11 +778,17 @@ export function CodeStudio({
     try {
       const parsedTabs = JSON.parse(localStorage.getItem(tabsKey) ?? "[]") as StudioChatTab[];
       let tabs = Array.isArray(parsedTabs)
-        ? parsedTabs.filter((tab) => tab && typeof tab.id === "string")
+        ? parsedTabs
+            .filter((tab) => tab && typeof tab.id === "string")
+            .map((tab) => ({
+              ...tab,
+              updatedAt: tab.updatedAt ?? tab.createdAt ?? new Date().toISOString(),
+            }))
         : [];
       if (tabs.length === 0) {
         const id = `chat-${Date.now()}`;
-        tabs = [{ id, title: t("New chat"), createdAt: new Date().toISOString() }];
+        const at = new Date().toISOString();
+        tabs = [{ id, title: t("New chat"), createdAt: at, updatedAt: at }];
         let migrated: StudioChatMessage[] = [];
         try {
           const legacy = JSON.parse(localStorage.getItem(legacyKey) ?? "[]") as StudioChatMessage[];
@@ -798,7 +805,8 @@ export function CodeStudio({
       setChatMessages(readMessages(active));
     } catch {
       const id = `chat-${Date.now()}`;
-      setChatTabs([{ id, title: t("New chat"), createdAt: new Date().toISOString() }]);
+      const at = new Date().toISOString();
+      setChatTabs([{ id, title: t("New chat"), createdAt: at, updatedAt: at }]);
       setActiveChatId(id);
       setChatMessages([]);
     } finally {
@@ -1096,6 +1104,18 @@ export function CodeStudio({
       ),
     );
   }, [activeChatId, chatMessages, t]);
+
+  useEffect(() => {
+    if (!activeChatId || chatMessages.length === 0) return;
+    const at = new Date().toISOString();
+    setChatTabs((current) =>
+      current.map((tab) =>
+        tab.id === activeChatId && tab.updatedAt !== at
+          ? { ...tab, updatedAt: at }
+          : tab,
+      ),
+    );
+  }, [activeChatId, chatMessages]);
 
   useEffect(() => {
     if (codeModel) return;
@@ -2189,10 +2209,12 @@ export function CodeStudio({
 
   function createChatTab() {
     if (chatBusy) return;
+    const at = new Date().toISOString();
     const tab: StudioChatTab = {
       id: `chat-${Date.now()}`,
       title: t("New chat"),
-      createdAt: new Date().toISOString(),
+      createdAt: at,
+      updatedAt: at,
     };
     persistChatMessages(activeChatId, chatMessages);
     skipChatSaveRef.current = true;
@@ -2236,10 +2258,12 @@ export function CodeStudio({
       // ignore storage failures
     }
     if (remaining.length === 0) {
+      const at = new Date().toISOString();
       const tab: StudioChatTab = {
         id: `chat-${Date.now()}`,
         title: t("New chat"),
-        createdAt: new Date().toISOString(),
+        createdAt: at,
+        updatedAt: at,
       };
       setChatTabs([tab]);
       setActiveChatId(tab.id);
@@ -2688,6 +2712,8 @@ export function CodeStudio({
     <div
       ref={studioRef}
       className={`code-studio ${chatExpanded ? "chat-expanded" : ""} ${
+        previewFullscreen ? "preview-fullscreen" : ""
+      } ${
         leftWidth <= 155 ? "sidebar-collapsed" : ""
       } ${resizing ? "is-resizing" : ""}`}
       style={{ "--studio-left": `${leftWidth}px`, "--studio-right": `${rightWidth}px` } as CSSProperties}
@@ -2813,7 +2839,10 @@ export function CodeStudio({
                 >
                   <button onClick={() => switchChatTab(tab.id)} disabled={chatBusy} title={tab.title}>
                     <MessageSquare size={9} />
-                    <span>{tab.title}</span>
+                    <span>
+                      {tab.title}
+                      <small>{new Date(tab.updatedAt).toLocaleString()}</small>
+                    </span>
                   </button>
                   <button
                     onClick={() => closeChatTab(tab.id)}
@@ -2825,6 +2854,9 @@ export function CodeStudio({
                 </div>
               ))}
             </div>
+            <button className="studio-side-chat-new" onClick={createChatTab} disabled={chatBusy}>
+              <Plus size={11} /> {t("New chat")}
+            </button>
             <div className="studio-side-chat-preview">
               <span>{t("Active chat")}</span>
               {chatMessages.length === 0 ? (
@@ -3557,37 +3589,22 @@ export function CodeStudio({
         ) : null}
 
         {modelNotice ? (
-          <div
-            className="studio-model-modal-backdrop"
-            role="presentation"
-            onMouseDown={() => setModelNotice(null)}
-          >
-            <div
-              className="studio-model-modal"
-              role="dialog"
-              aria-modal="true"
-              aria-label={t("Model switched")}
-              onMouseDown={(event) => event.stopPropagation()}
-            >
-              <div className="studio-model-modal-head">
-                <AlertTriangle size={16} />
-                <div>
-                  <strong>{t("Model switched")}</strong>
-                  <small>{t("The selected model was unavailable. This run continues with a different model.")}</small>
-                </div>
-              </div>
-              <div className="studio-model-modal-route">
+          <div className="studio-model-toast" role="status" aria-live="polite">
+            <span className="studio-model-toast-icon">
+              <RefreshCw size={14} />
+            </span>
+            <div className="studio-model-toast-body">
+              <strong>{t("Model switched automatically")}</strong>
+              <span>
                 <code>{modelNotice.from.provider}/{modelNotice.from.model}</code>
                 <b>→</b>
                 <code>{modelNotice.to.provider}/{modelNotice.to.model}</code>
-              </div>
-              <p>{modelNotice.reason}</p>
-              <div className="studio-model-modal-actions">
-                <button className="primary-button" onClick={() => setModelNotice(null)}>
-                  {t("Got it")}
-                </button>
-              </div>
+              </span>
+              <small>{modelNotice.reason}</small>
             </div>
+            <button onClick={() => setModelNotice(null)} aria-label={t("Dismiss")}>
+              <X size={12} />
+            </button>
           </div>
         ) : null}
 
@@ -3669,27 +3686,7 @@ export function CodeStudio({
             </div>
           ) : null}
 
-          <div className="studio-composer-row">
-            <button
-              className="studio-attach-button"
-              onClick={() => taskFileInputRef.current?.click()}
-              disabled={assetBusy || chatBusy}
-              title={t("Attach a file (PDF, Word, Excel, JSON, text, image)")}
-              aria-label={t("Attach a file (PDF, Word, Excel, JSON, text, image)")}
-            >
-              {assetBusy ? <Loader2 size={18} className="spin" /> : <Paperclip size={18} />}
-              <span>{t("File")}</span>
-            </button>
-            <input
-              ref={taskFileInputRef}
-              type="file"
-              hidden
-              accept=".pdf,.doc,.docx,.rtf,.xls,.xlsx,.csv,.json,.txt,.md,.html,.htm,image/*"
-              onChange={(event) => {
-                const file = event.target.files?.[0];
-                if (file) void attachTaskFile(file);
-              }}
-            />
+          <div className="studio-composer-input-wrap">
             <textarea
               value={chatInput}
               onChange={(event) => {
@@ -3705,11 +3702,31 @@ export function CodeStudio({
                 }
               }}
               placeholder={modePlaceholder}
-              rows={4}
+              rows={5}
+            />
+            <button
+              className="studio-attach-inline"
+              onClick={() => taskFileInputRef.current?.click()}
+              disabled={assetBusy || chatBusy}
+              title={t("Attach a file (PDF, Word, Excel, JSON, text, image)")}
+              aria-label={t("Attach a file (PDF, Word, Excel, JSON, text, image)")}
+            >
+              {assetBusy ? <Loader2 size={15} className="spin" /> : <Paperclip size={15} />}
+              <span>{t("File")}</span>
+            </button>
+            <input
+              ref={taskFileInputRef}
+              type="file"
+              hidden
+              accept=".pdf,.doc,.docx,.rtf,.xls,.xlsx,.csv,.json,.txt,.md,.html,.htm,image/*"
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                if (file) void attachTaskFile(file);
+              }}
             />
             {chatBusy ? (
               <button
-                className="studio-send-button is-stop"
+                className="studio-send-button is-stop studio-send-inline"
                 onClick={() => {
                   agentStopRequestedRef.current = true;
                   void api.ai.stop(analysis.id).catch(() => undefined);
@@ -3721,7 +3738,7 @@ export function CodeStudio({
               </button>
             ) : (
               <button
-                className="studio-send-button"
+                className="studio-send-button studio-send-inline"
                 onClick={() => void askProject()}
                 disabled={!active || (!chatInput.trim() && !attachment)}
                 title={t("Send")}
@@ -4775,6 +4792,14 @@ export function CodeStudio({
                   </span>
                 </div>
               )}
+              <button
+                className="studio-preview-fullscreen-button"
+                onClick={() => setPreviewFullscreen((value) => !value)}
+                title={previewFullscreen ? t("Exit full screen") : t("Full screen preview")}
+                aria-label={previewFullscreen ? t("Exit full screen") : t("Full screen preview")}
+              >
+                {previewFullscreen ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+              </button>
             </div>
           ) : activeFile ? (
             <div className="studio-right-editor">

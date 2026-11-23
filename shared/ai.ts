@@ -197,6 +197,20 @@ export interface AiModelHealthSettings {
   penaltyPerFailure: number;
 }
 
+export interface AiModelRef {
+  provider: string;
+  model: string;
+}
+
+export interface AiFallbackSettings {
+  /** Ordered fallback chain. Empty means use the automatic heuristic. */
+  chain: AiModelRef[];
+  /** Skip fallback models whose output price is above this USD / 1M tokens. */
+  maxOutputPricePerMillion?: number;
+  /** Skip fallback models whose input price is above this USD / 1M tokens. */
+  maxInputPricePerMillion?: number;
+}
+
 export interface AiSettingsPublic {
   defaultProvider: AiProviderId;
   defaultModel: string;
@@ -204,6 +218,7 @@ export interface AiSettingsPublic {
   agentRoles: AiAgentRoleState[];
   modelHealth: AiModelHealthSettings;
   autoSwitchModels: boolean;
+  fallback: AiFallbackSettings;
 }
 
 export interface AiCustomProviderInput {
@@ -230,6 +245,7 @@ export interface AiSettingsInput {
   agentRoles?: Partial<Record<AiAgentRole, AiAgentRoleConfig>>;
   modelHealth?: Partial<AiModelHealthSettings>;
   autoSwitchModels?: boolean;
+  fallback?: Partial<AiFallbackSettings>;
 }
 
 export interface AiUsage {

@@ -4,6 +4,7 @@ import type {
   AiAgentRole,
   AiAgentRoleConfig,
   AiCustomProviderInput,
+  AiFallbackSettings,
   AiModelHealthSettings,
   AiProviderId,
   AiSettingsInput,
@@ -46,6 +47,7 @@ interface StoredSettings {
   agentRoles: StoredAgentRoles;
   modelHealth: AiModelHealthSettings;
   autoSwitchModels: boolean;
+  fallback: AiFallbackSettings;
 }
 
 export const AI_AGENT_ROLES: AiAgentRole[] = ["main", "planner", "fast", "reviewer"];
@@ -135,6 +137,34 @@ function defaults(): StoredSettings {
     agentRoles: { main, planner: main, fast: main, reviewer: main },
     modelHealth: DEFAULT_MODEL_HEALTH,
     autoSwitchModels: true,
+    fallback: { chain: [] },
+  };
+}
+
+function normalizeFallback(input?: Partial<AiFallbackSettings>): AiFallbackSettings {
+  const chain = Array.isArray(input?.chain)
+    ? input.chain
+        .filter(
+          (item): item is { provider: string; model: string } =>
+            Boolean(
+              item &&
+                typeof item.provider === "string" &&
+                item.provider.trim() &&
+                typeof item.model === "string" &&
+                item.model.trim(),
+            ),
+        )
+        .map((item) => ({ provider: item.provider.trim(), model: item.model.trim() }))
+        .slice(0, 12)
+    : [];
+  const normalizePrice = (value: unknown) => {
+    const number = Number(value);
+    return Number.isFinite(number) && number > 0 ? Math.min(10_000, number) : undefined;
+  };
+  return {
+    chain,
+    maxOutputPricePerMillion: normalizePrice(input?.maxOutputPricePerMillion),
+    maxInputPricePerMillion: normalizePrice(input?.maxInputPricePerMillion),
   };
 }
 
@@ -205,6 +235,7 @@ async function loadStored(): Promise<StoredSettings> {
       agentRoles,
       modelHealth: normalizeModelHealth(parsed.modelHealth),
       autoSwitchModels: parsed.autoSwitchModels !== false,
+      fallback: normalizeFallback(parsed.fallback),
     };
   } catch {
     return base;
@@ -275,6 +306,7 @@ export async function getPublicSettings(): Promise<AiSettingsPublic> {
     agentRoles,
     modelHealth: stored.modelHealth,
     autoSwitchModels: stored.autoSwitchModels !== false,
+    fallback: stored.fallback,
   };
 }
 
@@ -429,6 +461,10 @@ export async function updateAiSettings(input: AiSettingsInput): Promise<AiSettin
 
   if (input.autoSwitchModels !== undefined) {
     stored.autoSwitchModels = input.autoSwitchModels === true;
+  }
+
+  if (input.fallback) {
+    stored.fallback = normalizeFallback({ ...stored.fallback, ...input.fallback });
   }
 
   if (input.agentRoles) {

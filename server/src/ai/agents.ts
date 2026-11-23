@@ -8,6 +8,7 @@ import type {
 import type { CatalogModel, ModelCatalog } from "../../../shared/catalog";
 import { getPublicSettings, updateAiSettings } from "./settings";
 import { getModelCatalog } from "./catalog";
+import { findPrice, getPricingReport } from "./pricing";
 import {
   healthKey,
   isModelUnhealthy,
@@ -199,6 +200,48 @@ export async function pickAlternateAgentModel(exclude?: {
   const settings = await getPublicSettings();
   const catalog = await getModelCatalog().catch(() => null);
   const health = await modelHealthByProviderModel();
+  const pricing = await getPricingReport().catch(() => null);
+  const priceAllowed = (candidate: { provider: string; model: string }) => {
+    if (!pricing) return true;
+    const price = findPrice(pricing.prices, candidate.provider, candidate.model);
+    if (!price) return true;
+    const maxInput = settings.fallback?.maxInputPricePerMillion;
+    const maxOutput = settings.fallback?.maxOutputPricePerMillion;
+    if (maxInput !== undefined && price.inputPerMillion !== undefined && price.inputPerMillion > maxInput) {
+      return false;
+    }
+    if (
+      maxOutput !== undefined &&
+      price.outputPerMillion !== undefined &&
+      price.outputPerMillion > maxOutput
+    ) {
+      return false;
+    }
+    return true;
+  };
+  const healthyAndAffordable = (candidate: { provider: string; model: string }) => {
+    const item = health.get(healthKey(candidate.provider, candidate.model));
+    return !isModelUnhealthy(item, settings.modelHealth) && priceAllowed(candidate);
+  };
+
+  const chain = settings.fallback?.chain ?? [];
+  if (chain.length > 0) {
+    const chained = chain
+      .filter((item) => !(item.provider === exclude?.provider && item.model === exclude?.model))
+      .filter((item) =>
+        settings.providers.some(
+          (provider) => provider.id === item.provider && (provider.hasKey || provider.custom),
+        ),
+      )
+      .map((item) => ({
+        provider: item.provider,
+        model: item.model,
+        reason: "configured fallback chain",
+      }))
+      .filter(healthyAndAffordable);
+    return chained[0] ?? null;
+  }
+
   const configured = settings.providers.filter(
     (provider) => (provider.hasKey || provider.custom) && provider.id !== exclude?.provider,
   );
@@ -240,10 +283,7 @@ export async function pickAlternateAgentModel(exclude?: {
     }
   }
   if (candidates.length === 0) return null;
-  const healthy = candidates.filter((candidate) => {
-    const item = health.get(healthKey(candidate.provider, candidate.model));
-    return !isModelUnhealthy(item, settings.modelHealth);
-  });
+  const healthy = candidates.filter(healthyAndAffordable);
   const pool = healthy.length > 0 ? healthy : candidates;
   // Prefer an explicitly cheap/fast-looking model before role-based picks.
   // This prevents a run that lost its original model from moving every later

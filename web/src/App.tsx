@@ -887,7 +887,7 @@ export default function App() {
           ) : null}
           {analysis ? <IndexStatusBadge projectId={analysis.id} /> : null}
           <button
-            className="icon-button topbar-icon"
+            className="ghost-button topbar-settings-button"
             onClick={() => {
               if (!analysis) return;
               changeProduct("studio");
@@ -900,7 +900,8 @@ export default function App() {
             title={t("Settings")}
             aria-label={t("Settings")}
           >
-            <Settings2 size={15} />
+            <Settings2 size={14} />
+            <span>{t("Settings")}</span>
           </button>
         </div>
       </header>
