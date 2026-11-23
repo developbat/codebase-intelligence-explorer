@@ -87,6 +87,11 @@ export function TaskQueueCard({
                 {task.attempts > 1 ? ` · ${task.attempts} ${t("attempts")}` : ""}
                 {task.tokenUsage?.totalTokens ? ` · ${tokenLabel(task.tokenUsage.totalTokens)} ${t("tokens")}` : ""}
                 {task.costUsd ? ` · ${formatUsd(task.costUsd)}` : ""}
+                {task.tokenBudget
+                  ? ` · ${t("budget")} ${tokenLabel(task.tokenBudget)}${
+                      task.costBudgetUsd ? ` / ${formatUsd(task.costBudgetUsd)}` : ""
+                    }`
+                  : ""}
               </small>
               {task.notes ? <p className="task-queue-note">{task.notes}</p> : null}
               {task.resultSummary ? <p>{task.resultSummary}</p> : null}

@@ -5,11 +5,13 @@ import {
   intentTask,
   isInspectionAnswer,
   shouldRetryWithEditFirst,
+  taskBudgetForEffort,
   taskLooksLikeInspection,
   taskLooksLikeVerification,
   taskLooksLikeWrite,
 } from "./ai/loop";
 import {
+  budgetExceeded,
   preferredVerificationCommand,
   readRangeCovered,
   reportsIncompleteWiring,
@@ -228,4 +230,22 @@ test("ask mode is a cheap read-only task profile", () => {
   assert.equal(task.effort, "simple");
   assert.equal(task.role, "main");
   assert.equal(task.verification, undefined);
+});
+
+test("task budgets scale with effort and stop runaway usage", () => {
+  assert.deepEqual(taskBudgetForEffort("simple"), { tokens: 80_000, costUsd: 0.05 });
+  assert.deepEqual(taskBudgetForEffort("standard"), { tokens: 160_000, costUsd: 0.12 });
+  assert.deepEqual(taskBudgetForEffort("hard"), { tokens: 320_000, costUsd: 0.25 });
+  assert.equal(
+    budgetExceeded({ inputTokens: 0, outputTokens: 0, totalTokens: 80_001 }, undefined, 80_000),
+    true,
+  );
+  assert.equal(
+    budgetExceeded({ inputTokens: 0, outputTokens: 0, totalTokens: 10 }, 0.051, undefined, 0.05),
+    true,
+  );
+  assert.equal(
+    budgetExceeded({ inputTokens: 0, outputTokens: 0, totalTokens: 10 }, 0.01, 80_000, 0.05),
+    false,
+  );
 });

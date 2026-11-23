@@ -12,6 +12,9 @@ export interface ProjectTask {
   detail: string;
   acceptance?: string;
   status: ProjectTaskStatus;
+  /** Per-task safety budget; the loop stops before the next model call. */
+  tokenBudget?: number;
+  costBudgetUsd?: number;
   effort: ProjectTaskEffort;
   role: ProjectTaskRole;
   dependsOn: string[];
@@ -59,6 +62,8 @@ export interface ProjectTaskQueue {
 
 export interface ProjectTaskLoopOptions {
   workspaceMode?: "ask" | "plan" | "build" | "research";
+  tokenBudget?: number;
+  costBudgetUsd?: number;
   maxTasks?: number;
   maxMinutes?: number;
   provider?: string;

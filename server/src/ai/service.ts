@@ -3117,6 +3117,20 @@ export async function auditMissingSelectors(
     .map(([id, file]) => ({ id, file }));
 }
 
+export function budgetExceeded(
+  tokenUsage: AiTokenUsage | undefined,
+  estimatedCostUsd: number | undefined,
+  tokenBudget?: number,
+  costBudgetUsd?: number,
+): boolean {
+  if (tokenBudget && tokenUsage && tokenUsage.totalTokens >= tokenBudget) return true;
+  return Boolean(
+    costBudgetUsd !== undefined &&
+      estimatedCostUsd !== undefined &&
+      estimatedCostUsd >= costBudgetUsd,
+  );
+}
+
 export function selectHistory(
   history: { role: "user" | "assistant"; content: string }[] | undefined,
   mode: IntentHistory | "none",
@@ -3147,6 +3161,8 @@ export async function runAgentTask(
     interactive?: boolean;
     forceFast?: boolean;
     forceWrite?: boolean;
+    tokenBudget?: number;
+    costBudgetUsd?: number;
     intent?: IntentAnalysis;
   } = {},
   emit: (event: AiAgentEvent) => void = () => {},
@@ -3688,6 +3704,21 @@ export async function runAgentTask(
       stoppedReason = "aborted";
       summary = "Stopped by the user.";
       break;
+    }
+    if (options.tokenBudget || options.costBudgetUsd !== undefined) {
+      const costSoFar = await estimateUsageCost(config.id, config.model, tokenTotal).catch(
+        () => undefined,
+      );
+      if (budgetExceeded(tokenTotal, costSoFar, options.tokenBudget, options.costBudgetUsd)) {
+        stoppedReason = "budget";
+        summary = `Task budget exceeded: ${tokenTotal.totalTokens.toLocaleString()} tokens${
+          options.tokenBudget ? ` of ${options.tokenBudget.toLocaleString()}` : ""
+        }${costSoFar !== undefined ? ` · $${costSoFar.toFixed(4)}` : ""}${
+          options.costBudgetUsd !== undefined ? ` of $${options.costBudgetUsd.toFixed(4)}` : ""
+        }. Stopped before the next model call to avoid further cost.`;
+        log("warn", "Task budget exceeded", summary.slice(0, 180));
+        break;
+      }
     }
     // A native multi-call reply is one model turn; queued actions do not
     // consume another turn or another model request.
@@ -6015,7 +6046,11 @@ export async function runAgentTask(
 
   if (stoppedReason === "aborted") {
     summary = summary || "Stopped by the user.";
-  } else if (stoppedReason !== "finished" && stoppedReason !== "error") {
+  } else if (
+    stoppedReason !== "finished" &&
+    stoppedReason !== "error" &&
+    stoppedReason !== "budget"
+  ) {
     stoppedReason = "max_steps";
     summary =
       "The agent reached the step limit before finishing. Review the steps and run a follow-up instruction to continue.";

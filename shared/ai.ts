@@ -606,7 +606,7 @@ export interface AiAgentResult {
   steps: AiAgentStep[];
   changedFiles: string[];
   ranCommands: string[];
-  stoppedReason: "finished" | "max_steps" | "error" | "aborted";
+  stoppedReason: "finished" | "max_steps" | "error" | "aborted" | "budget";
   error?: string;
   provider: string;
   model: string;

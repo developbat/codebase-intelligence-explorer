@@ -427,6 +427,15 @@ function taskInstruction(
     .join("\n");
 }
 
+export function taskBudgetForEffort(effort: ProjectTaskEffort): {
+  tokens: number;
+  costUsd: number;
+} {
+  if (effort === "simple") return { tokens: 80_000, costUsd: 0.05 };
+  if (effort === "hard") return { tokens: 320_000, costUsd: 0.25 };
+  return { tokens: 160_000, costUsd: 0.12 };
+}
+
 export function shouldRetryWithEditFirst(
   stoppedReason: string,
   changedFiles: string[],
@@ -461,8 +470,19 @@ function aggregateResult(
     emptyUsage(),
   );
   const costUsd = queue.tasks.reduce((total, task) => total + (task.costUsd ?? 0), 0);
+  const budgetBlocked = queue.tasks.some(
+    (task) =>
+      task.status === "blocked" &&
+      /task budget exceeded/i.test(`${task.notes ?? ""} ${task.resultSummary ?? ""}`),
+  );
   const stoppedReason: AiAgentResult["stoppedReason"] =
-    queue.status === "stopped" ? "aborted" : queue.status === "completed" ? "finished" : "max_steps";
+    queue.status === "stopped"
+      ? "aborted"
+      : queue.status === "completed"
+        ? "finished"
+        : budgetBlocked
+          ? "budget"
+          : "max_steps";
   const planPath = taskResults.find((result) => result.planPath)?.planPath;
   const lines = [
     `Task loop finished for: **${goal}**`,
@@ -551,6 +571,9 @@ export function intentTask(
     attempts: 0,
     changedFiles: [],
     commands: [],
+    tokenBudget:
+      effort === "simple" ? 80_000 : effort === "hard" ? 320_000 : 160_000,
+    costBudgetUsd: effort === "simple" ? 0.05 : effort === "hard" ? 0.25 : 0.12,
     verification: verification && !readOnly ? { command: verification } : undefined,
     createdAt: at,
     updatedAt: at,
@@ -692,10 +715,16 @@ export async function runProjectLoop(
       seenTasks.add(task.id);
       executedCount += 1;
     }
+    const defaultBudget = taskBudgetForEffort(task.effort);
+    const tokenBudget = options.tokenBudget ?? task.tokenBudget ?? defaultBudget.tokens;
+    const costBudgetUsd =
+      options.costBudgetUsd ?? task.costBudgetUsd ?? defaultBudget.costUsd;
     queue = markTask(queue, task.id, {
       status: "in_progress",
       startedAt: nowIso(),
       attempts: task.attempts + 1,
+      tokenBudget,
+      costBudgetUsd,
     });
     const current = queue.tasks.find((item) => item.id === task.id);
     if (!current) break;
@@ -766,6 +795,8 @@ export async function runProjectLoop(
           interactive: true,
           forceFast: current.effort === "simple",
           forceWrite,
+          tokenBudget,
+          costBudgetUsd,
           intent: options.intent,
           history: options.history?.slice(-8),
         },
@@ -841,7 +872,7 @@ export async function runProjectLoop(
       !summaryAllowsNoChanges(result.summary);
     const pendingWork = !inspectionTask && reportsRemainingWork(result.summary);
     const status =
-      result.stoppedReason === "aborted"
+      result.stoppedReason === "aborted" || result.stoppedReason === "budget"
         ? "blocked"
         : inspectionAnswer
           ? "done"
@@ -874,7 +905,9 @@ export async function runProjectLoop(
         ? task.costUsd
         : Number(((task.costUsd ?? 0) + attemptCost).toFixed(6));
     const answerNote =
-      inspectionAnswer && result.stoppedReason !== "finished"
+      inspectionAnswer &&
+      result.stoppedReason !== "finished" &&
+      result.stoppedReason !== "budget"
         ? "Stopped at the step limit; the answer above is the best evidence collected."
         : undefined;
     queue = markTask(queue, task.id, {
@@ -908,7 +941,12 @@ export async function runProjectLoop(
       const burnedStepsWithoutEdit =
         !inspectionTask &&
         shouldRetryWithEditFirst(result.stoppedReason, result.changedFiles);
-      if (inspectionTask) {
+      if (result.stoppedReason === "budget") {
+        queue = markTask(queue, task.id, {
+          status: "blocked",
+          notes: `Task budget exceeded (${tokenBudget.toLocaleString()} tokens / $${costBudgetUsd.toFixed(2)}). The task was stopped to prevent further cost.`,
+        });
+      } else if (inspectionTask) {
         // A read-only inspection task already produced its best evidence. Retrying
         // it with another model usually repeats the same work and can leave the UI
         // in a long "pending" state after a complete answer. Fail once, keep the

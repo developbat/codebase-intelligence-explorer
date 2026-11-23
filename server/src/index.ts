@@ -1060,6 +1060,8 @@ app.post("/api/projects/:id/ai/agent", async (req, res) => {
       workspaceMode: ["ask", "plan", "build", "research"].includes(req.body?.workspaceMode)
         ? (req.body.workspaceMode as AiWorkspaceMode)
         : undefined,
+      tokenBudget: Number(req.body?.tokenBudget) || undefined,
+      costBudgetUsd: Number(req.body?.costBudgetUsd) || undefined,
       interactive: false,
       history: Array.isArray(req.body?.history)
         ? req.body.history
@@ -1210,6 +1212,8 @@ app.post("/api/projects/:id/ai/agent/stream", async (req, res) => {
         workspaceMode: ["ask", "plan", "build", "research"].includes(req.body?.workspaceMode)
           ? (req.body.workspaceMode as AiWorkspaceMode)
           : undefined,
+        tokenBudget: Number(req.body?.tokenBudget) || undefined,
+        costBudgetUsd: Number(req.body?.costBudgetUsd) || undefined,
         history,
       },
       write,
@@ -1406,6 +1410,8 @@ app.post("/api/projects/:id/ai/loop/stream", async (req, res) => {
         workspaceMode: ["ask", "plan", "build", "research"].includes(req.body?.workspaceMode)
           ? (req.body.workspaceMode as AiWorkspaceMode)
           : undefined,
+        tokenBudget: Number(req.body?.tokenBudget) || undefined,
+        costBudgetUsd: Number(req.body?.costBudgetUsd) || undefined,
         intent,
         history,
       },

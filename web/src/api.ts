@@ -653,6 +653,8 @@ export const api = {
         retryFailed?: boolean;
         clarified?: boolean;
         workspaceMode?: "ask" | "plan" | "build" | "research";
+        tokenBudget?: number;
+        costBudgetUsd?: number;
         history?: { role: "user" | "assistant"; content: string }[];
       },
       onEvent: (event: AiAgentEvent) => void,
