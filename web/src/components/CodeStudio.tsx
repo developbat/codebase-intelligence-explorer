@@ -424,7 +424,7 @@ function StudioTree({
 }
 
 function isLspEditorPath(filePath: string): boolean {
-  return /\.(?:ts|tsx|js|jsx|mjs|cjs|mts|cts)$/i.test(filePath);
+  return /\.(?:ts|tsx|js|jsx|mjs|cjs|mts|cts|py|pyi|go|rs|php)$/i.test(filePath);
 }
 
 function lspPosition(view: EditorView, lineNumber: number, character: number): number {

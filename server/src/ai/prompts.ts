@@ -266,7 +266,7 @@ Search strategy:
 - Never guess. If the preloaded context is incomplete, search, find in files, list items, count, inspect JSON or read more files.
 - Use json_query for JSON arrays/objects; count_matches for counting; find_in_file for large files.
 - Use find_symbols to locate classes, functions and methods by name across every supported language before reading files.
-- For TypeScript/JavaScript, use lsp_hover and lsp_completion when an API or symbol is uncertain, and diagnostics after a change. The diagnostics tool uses the LSP server when available; other languages fall back to syntax checkers.
+- For supported languages (TypeScript/JavaScript, Python, Go, Rust, PHP), use lsp_hover and lsp_completion when an API or symbol is uncertain, and diagnostics after a change. The diagnostics tool uses the matching LSP server when available; unsupported languages fall back to syntax checkers.
 - Use sqlite_query for read-only SELECT/WITH/EXPLAIN queries against SQLite databases; use csv_query for CSV/TSV columns, filters, counts and rows. Never write to data files.
 - Use git_blame to explain when and by whom a specific line changed.
 - Use find_symbols to locate classes, functions and methods by name across every supported language before reading files.

@@ -24,29 +24,140 @@ interface JsonRpcMessage {
   error?: { code: number; message: string };
 }
 
-const LSP_EXTENSIONS = new Set([".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".mts", ".cts"]);
+interface LspServerDefinition {
+  id: string;
+  name: string;
+  command: string;
+  args: string[];
+  extensions: string[];
+  languageId: (filePath: string) => string;
+}
+
+export interface LspServerStatus {
+  id: string;
+  name: string;
+  available: boolean;
+  extensions: string[];
+}
+
+const SERVERS: LspServerDefinition[] = [
+  {
+    id: "typescript",
+    name: "TypeScript Language Server",
+    command: "typescript-language-server",
+    args: ["--stdio"],
+    extensions: [".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".mts", ".cts"],
+    languageId: (filePath) => {
+      const extension = path.extname(filePath).toLowerCase();
+      if (extension === ".tsx") return "typescriptreact";
+      if (extension === ".jsx") return "javascriptreact";
+      if (extension === ".js" || extension === ".mjs" || extension === ".cjs") return "javascript";
+      return "typescript";
+    },
+  },
+  {
+    id: "pyright",
+    name: "Pyright",
+    command: "pyright-langserver",
+    args: ["--stdio"],
+    extensions: [".py", ".pyi"],
+    languageId: () => "python",
+  },
+  {
+    id: "rust-analyzer",
+    name: "rust-analyzer",
+    command: "rust-analyzer",
+    args: [],
+    extensions: [".rs"],
+    languageId: () => "rust",
+  },
+  {
+    id: "gopls",
+    name: "gopls",
+    command: "gopls",
+    args: ["serve"],
+    extensions: [".go"],
+    languageId: () => "go",
+  },
+  {
+    id: "intelephense",
+    name: "Intelephense",
+    command: "intelephense",
+    args: ["--stdio"],
+    extensions: [".php"],
+    languageId: () => "php",
+  },
+];
+
 const REQUEST_TIMEOUT_MS = 8_000;
 const DIAGNOSTICS_TIMEOUT_MS = 4_000;
 
-export function isLspAvailable(): boolean {
-  return fs.existsSync(cliPath());
-}
-
-function cliPath(): string {
-  const fromSource = path.resolve(
-    path.dirname(fileURLToPath(import.meta.url)),
-    "../../node_modules/typescript-language-server/lib/cli.mjs",
-  );
-  if (fs.existsSync(fromSource)) return fromSource;
-  return path.resolve(process.cwd(), "node_modules/typescript-language-server/lib/cli.mjs");
-}
-
-function languageId(filePath: string): string {
+export function lspServerFor(filePath: string): LspServerDefinition | null {
   const extension = path.extname(filePath).toLowerCase();
-  if (extension === ".tsx") return "typescriptreact";
-  if (extension === ".jsx") return "javascriptreact";
-  if (extension === ".js" || extension === ".mjs" || extension === ".cjs") return "javascript";
-  return "typescript";
+  return SERVERS.find((server) => server.extensions.includes(extension)) ?? null;
+}
+
+function commandExists(command: string): boolean {
+  if (command.includes(path.sep)) return fs.existsSync(command);
+  return (process.env.PATH ?? "")
+    .split(path.delimiter)
+    .some((directory) =>
+      [command, `${command}.cmd`, `${command}.exe`].some((name) =>
+        fs.existsSync(path.join(directory, name)),
+      ),
+    );
+}
+
+function appLocalBinary(command: string): string | undefined {
+  const candidate = path.resolve(process.cwd(), "node_modules", ".bin", command);
+  return fs.existsSync(candidate) ? candidate : undefined;
+}
+
+function projectLocalBinary(rootPath: string, command: string): string | undefined {
+  const candidate = path.resolve(rootPath, "node_modules", ".bin", command);
+  return fs.existsSync(candidate) ? candidate : undefined;
+}
+
+function resolveServerCommand(
+  definition: LspServerDefinition,
+  rootPath: string,
+): { command: string; args: string[] } {
+  if (definition.id === "typescript") {
+    const fromSource = path.resolve(
+      path.dirname(fileURLToPath(import.meta.url)),
+      "../../node_modules/typescript-language-server/lib/cli.mjs",
+    );
+    if (fs.existsSync(fromSource)) {
+      return { command: process.execPath, args: [fromSource, ...definition.args] };
+    }
+    const local = appLocalBinary(definition.command) ?? projectLocalBinary(rootPath, definition.command);
+    if (local) return { command: local, args: definition.args };
+  } else {
+    const local =
+      projectLocalBinary(rootPath, definition.command) ??
+      appLocalBinary(definition.command);
+    if (local) return { command: local, args: definition.args };
+  }
+  return { command: definition.command, args: definition.args };
+}
+
+export function isLspAvailable(): boolean {
+  return lspServersStatus().some((server) => server.available);
+}
+
+export function lspServersStatus(): LspServerStatus[] {
+  return SERVERS.map((server) => {
+    const resolved = resolveServerCommand(server, process.cwd());
+    return {
+      id: server.id,
+      name: server.name,
+      available:
+        resolved.command === process.execPath
+          ? fs.existsSync(resolved.args[0] ?? "")
+          : commandExists(resolved.command),
+      extensions: server.extensions,
+    };
+  });
 }
 
 function uriFor(rootPath: string, filePath: string): string {
@@ -63,8 +174,12 @@ class LspClient {
   private versions = new Map<string, number>();
   private closed = false;
 
-  constructor(private readonly rootPath: string) {
-    this.process = spawn(process.execPath, [cliPath(), "--stdio"], {
+  constructor(
+    private readonly rootPath: string,
+    private readonly definition: LspServerDefinition,
+  ) {
+    const resolved = resolveServerCommand(definition, rootPath);
+    this.process = spawn(resolved.command, resolved.args, {
       cwd: rootPath,
       stdio: ["pipe", "pipe", "pipe"],
       env: { ...process.env, TSS_LOG: "-level off" },
@@ -224,7 +339,12 @@ class LspClient {
     this.versions.set(uri, version);
     if (version === 1) {
       this.notify("textDocument/didOpen", {
-        textDocument: { uri, languageId: languageId(filePath), version, text },
+        textDocument: {
+          uri,
+          languageId: this.definition.languageId(filePath),
+          version,
+          text,
+        },
       });
     } else {
       this.notify("textDocument/didChange", {
@@ -333,59 +453,74 @@ const sessions = new Map<string, Promise<LspClient>>();
 const idleTimers = new Map<string, NodeJS.Timeout>();
 const IDLE_MS = 5 * 60_000;
 
-function resetIdle(rootPath: string): void {
-  const existing = idleTimers.get(rootPath);
+function resetIdle(key: string): void {
+  const existing = idleTimers.get(key);
   if (existing) clearTimeout(existing);
   idleTimers.set(
-    rootPath,
+    key,
     setTimeout(() => {
-      const session = sessions.get(rootPath);
-      sessions.delete(rootPath);
-      idleTimers.delete(rootPath);
+      const session = sessions.get(key);
+      sessions.delete(key);
+      idleTimers.delete(key);
       void session?.then((client) => client.shutdown()).catch(() => undefined);
     }, IDLE_MS),
   );
 }
 
-export async function getLspClient(rootPath: string): Promise<LspClient> {
-  const existing = sessions.get(rootPath);
+export async function getLspClient(
+  rootPath: string,
+  definition: LspServerDefinition,
+): Promise<LspClient> {
+  const key = `${rootPath}::${definition.id}`;
+  const existing = sessions.get(key);
   if (existing) {
-    resetIdle(rootPath);
+    resetIdle(key);
     return existing;
   }
   const created = (async () => {
-    const client = new LspClient(rootPath);
+    const client = new LspClient(rootPath, definition);
     await client.initialize();
     return client;
   })();
-  sessions.set(rootPath, created);
-  resetIdle(rootPath);
+  sessions.set(key, created);
+  resetIdle(key);
   try {
     return await created;
   } catch (error) {
-    sessions.delete(rootPath);
+    sessions.delete(key);
     throw error;
   }
 }
 
 export function supportsLsp(filePath: string): boolean {
-  return LSP_EXTENSIONS.has(path.extname(filePath).toLowerCase());
+  return lspServerFor(filePath) !== null;
 }
 
 export async function lspDiagnostics(
   rootPath: string,
   filePath: string,
 ): Promise<{ supported: boolean; diagnostics: LspDiagnostic[]; reason?: string }> {
-  if (!supportsLsp(filePath)) {
+  const definition = lspServerFor(filePath);
+  if (!definition) {
     return {
       supported: false,
       diagnostics: [],
-      reason: "LSP diagnostics currently support TypeScript and JavaScript files.",
+      reason: "No LSP server is configured for this file type.",
     };
   }
-  const client = await getLspClient(rootPath);
-  const diagnostics = await client.diagnosticsFor(rootPath, filePath);
-  return { supported: true, diagnostics };
+  try {
+    const client = await getLspClient(rootPath, definition);
+    const diagnostics = await client.diagnosticsFor(rootPath, filePath);
+    return { supported: true, diagnostics };
+  } catch (error) {
+    return {
+      supported: false,
+      diagnostics: [],
+      reason: `${definition.name} is not available: ${
+        error instanceof Error ? error.message : "could not start the language server"
+      }. Install it from Settings → Development environment.`,
+    };
+  }
 }
 
 export async function lspHover(
@@ -394,9 +529,14 @@ export async function lspHover(
   line: number,
   character: number,
 ): Promise<LspHover | null> {
-  if (!supportsLsp(filePath)) return null;
-  const client = await getLspClient(rootPath);
-  return client.hover(rootPath, filePath, line, character);
+  const definition = lspServerFor(filePath);
+  if (!definition) return null;
+  try {
+    const client = await getLspClient(rootPath, definition);
+    return await client.hover(rootPath, filePath, line, character);
+  } catch {
+    return null;
+  }
 }
 
 export async function lspCompletion(
@@ -405,9 +545,14 @@ export async function lspCompletion(
   line: number,
   character: number,
 ): Promise<LspCompletionItem[]> {
-  if (!supportsLsp(filePath)) return [];
-  const client = await getLspClient(rootPath);
-  return client.completion(rootPath, filePath, line, character);
+  const definition = lspServerFor(filePath);
+  if (!definition) return [];
+  try {
+    const client = await getLspClient(rootPath, definition);
+    return await client.completion(rootPath, filePath, line, character);
+  } catch {
+    return [];
+  }
 }
 
 export async function shutdownLspSessions(): Promise<void> {

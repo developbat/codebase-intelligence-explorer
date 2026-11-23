@@ -55,6 +55,7 @@ import { formatProjectFile } from "./formatter";
 import { checkFileSyntax } from "./syntax";
 import {
   isLspAvailable,
+  lspServersStatus,
   lspCompletion,
   lspDiagnostics,
   lspHover,
@@ -705,9 +706,11 @@ app.post("/api/projects/:id/game-check", async (req, res) => {
 });
 
 app.get("/api/lsp/status", (_req, res) => {
+  const servers = lspServersStatus();
   res.json({
     available: isLspAvailable(),
-    languages: ["typescript", "javascript", "tsx", "jsx"],
+    servers,
+    languages: [...new Set(servers.flatMap((server) => server.extensions))],
   });
 });
 

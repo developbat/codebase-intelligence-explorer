@@ -3,7 +3,14 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { lspDiagnostics, lspHover, shutdownLspSessions } from "./lsp";
+import {
+  lspDiagnostics,
+  lspHover,
+  lspServerFor,
+  lspServersStatus,
+  shutdownLspSessions,
+  supportsLsp,
+} from "./lsp";
 
 test(
   "LSP reports TypeScript diagnostics and hover information",
@@ -29,3 +36,14 @@ test(
     }
   },
 );
+
+test("file extensions map to the right language server", () => {
+  assert.equal(lspServerFor("src/app.ts")?.id, "typescript");
+  assert.equal(lspServerFor("src/app.py")?.id, "pyright");
+  assert.equal(lspServerFor("src/main.go")?.id, "gopls");
+  assert.equal(lspServerFor("src/lib.rs")?.id, "rust-analyzer");
+  assert.equal(lspServerFor("src/index.php")?.id, "intelephense");
+  assert.equal(supportsLsp("README.md"), false);
+  const ids = lspServersStatus().map((server) => server.id);
+  assert.deepEqual(ids, ["typescript", "pyright", "rust-analyzer", "gopls", "intelephense"]);
+});

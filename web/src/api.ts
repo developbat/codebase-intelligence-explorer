@@ -746,7 +746,11 @@ export const api = {
 
   lsp: {
     status: () =>
-      request<{ available: boolean; languages: string[] }>("/api/lsp/status"),
+      request<{
+        available: boolean;
+        languages: string[];
+        servers: { id: string; name: string; available: boolean; extensions: string[] }[];
+      }>("/api/lsp/status"),
     diagnostics: (projectId: string, path: string) =>
       request<{ supported: boolean; diagnostics: LspDiagnostic[]; reason?: string }>(
         `/api/projects/${projectId}/lsp/diagnostics`,
