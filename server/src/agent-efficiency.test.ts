@@ -12,7 +12,9 @@ import {
 } from "./ai/loop";
 import {
   budgetExceeded,
+  impactContext,
   preferredVerificationCommand,
+  preferredVerificationCommands,
   readRangeCovered,
   reportsIncompleteWiring,
   reportsRemainingWork,
@@ -248,4 +250,35 @@ test("task budgets scale with effort and stop runaway usage", () => {
     budgetExceeded({ inputTokens: 0, outputTokens: 0, totalTokens: 10 }, 0.01, 80_000, 0.05),
     false,
   );
+});
+
+test("verification runs typecheck, tests and lint before build", () => {
+  const commands = preferredVerificationCommands({
+    typecheckCommands: ["npx tsc --noEmit"],
+    testCommands: ["npm test"],
+    lintCommands: ["npm run lint"],
+    buildCommands: ["npm run build"],
+  });
+  assert.deepEqual(commands, ["npx tsc --noEmit", "npm test", "npm run lint"]);
+  assert.deepEqual(
+    preferredVerificationCommands({ buildCommands: ["npm run build"] }),
+    ["npm run build"],
+  );
+});
+
+test("impact context includes callers and callees", () => {
+  const analysis = {
+    nodes: [
+      { id: "caller", kind: "function", label: "callerFn", filePath: "src/a.ts", startLine: 10 },
+      { id: "target", kind: "function", label: "targetFn", filePath: "src/b.ts", startLine: 20 },
+      { id: "callee", kind: "function", label: "calleeFn", filePath: "src/c.ts", startLine: 30 },
+    ],
+    edges: [
+      { kind: "CALLS", source: "caller", target: "target" },
+      { kind: "CALLS", source: "target", target: "callee" },
+    ],
+  } as unknown as import("../../shared/types").AnalysisResult;
+  const lines = impactContext(analysis, new Set(["target"]));
+  assert.ok(lines.some((line) => line.includes("callerFn") && line.includes("targetFn")));
+  assert.ok(lines.some((line) => line.includes("targetFn") && line.includes("calleeFn")));
 });

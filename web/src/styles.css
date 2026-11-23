@@ -18192,3 +18192,14 @@ button.canvas-stat {
   font-size: 9.5px;
   line-height: 1.45;
 }
+
+.studio-live-answer {
+  margin: 0 0 8px;
+  padding: 11px 13px;
+  border: 1px solid rgba(110, 168, 254, 0.26);
+  border-radius: 10px;
+  background: #0b121c;
+  color: #dbe8f7;
+  font-size: 12.5px;
+  line-height: 1.65;
+}

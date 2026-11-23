@@ -559,6 +559,7 @@ export function CodeStudio({
   const [chatLiveSteps, setChatLiveSteps] = useState<AiAgentStep[]>([]);
   const [chatLiveLogs, setChatLiveLogs] = useState<AiAgentLogEntry[]>([]);
   const [chatLivePlan, setChatLivePlan] = useState<AiAgentPlan | null>(null);
+  const [chatLiveAnswer, setChatLiveAnswer] = useState("");
   const [taskQueue, setTaskQueue] = useState<ProjectTaskQueue | null>(null);
   const [clarification, setClarification] = useState<{
     request: ClarificationRequest;
@@ -2193,6 +2194,7 @@ export function CodeStudio({
     setChatLiveSteps([]);
     setChatLiveLogs([]);
     setChatLivePlan(null);
+    setChatLiveAnswer("");
     chatLiveLogsRef.current = [];
     setError(null);
     setPermissionQueue([]);
@@ -2228,6 +2230,8 @@ export function CodeStudio({
         setModelNotice({ from: event.from, to: event.to, reason: event.reason });
       } else if (event.type === "task") {
         setTaskQueue(event.queue);
+      } else if (event.type === "token") {
+        setChatLiveAnswer((current) => current + event.text);
       } else if (event.type === "done") {
         holder.result = event.result;
         if (event.result.taskQueue) setTaskQueue(event.result.taskQueue);
@@ -2338,6 +2342,7 @@ export function CodeStudio({
     setChatLiveSteps([]);
     setChatLiveLogs([]);
     setChatLivePlan(null);
+    setChatLiveAnswer("");
     chatLiveLogsRef.current = [];
     setChatBusy(false);
   }
@@ -3288,6 +3293,11 @@ export function CodeStudio({
                   <i />
                 </div>
               </div>
+              {chatLiveAnswer ? (
+                <div className="studio-live-answer">
+                  <MarkdownText value={chatLiveAnswer} />
+                </div>
+              ) : null}
               {taskQueue && taskQueue.tasks.length > 0 ? (
                 <TaskQueueCard
                   queue={taskQueue}

@@ -1624,6 +1624,7 @@ export async function answerGeneralChat(
     model?: string;
     language?: string;
     history?: { role: "user" | "assistant"; content: string }[];
+    onToken?: (chunk: string) => void;
   } = {},
 ): Promise<AiAgentResult> {
   const config = await resolveProvider(options.provider, options.model);
@@ -1644,7 +1645,7 @@ export async function answerGeneralChat(
     projectId,
     config,
     messages,
-    { maxTokens: 900, temperature: 0.4 },
+    { maxTokens: 900, temperature: 0.4, onToken: options.onToken },
     "chat",
   );
   const costUsd = await estimateUsageCost(config.id, config.model, completion.tokenUsage).catch(
@@ -1762,10 +1763,37 @@ function stableActionKey(args: Record<string, unknown>): string {
 
 export function preferredVerificationCommand(
   tooling:
-    | { typecheckCommands?: string[]; buildCommands?: string[] }
+    | {
+        typecheckCommands?: string[];
+        buildCommands?: string[];
+        testCommands?: string[];
+        lintCommands?: string[];
+      }
     | undefined,
 ): string | undefined {
-  return tooling?.typecheckCommands?.[0] ?? tooling?.buildCommands?.[0];
+  return preferredVerificationCommands(tooling)[0];
+}
+
+export function preferredVerificationCommands(
+  tooling:
+    | {
+        typecheckCommands?: string[];
+        buildCommands?: string[];
+        testCommands?: string[];
+        lintCommands?: string[];
+      }
+    | undefined,
+): string[] {
+  const commands = [
+    ...(tooling?.typecheckCommands ?? []),
+    ...(tooling?.testCommands ?? []),
+    ...(tooling?.lintCommands ?? []),
+  ]
+    .map((command) => command.trim())
+    .filter(Boolean);
+  const unique = [...new Set(commands)];
+  const fallback = (tooling?.buildCommands ?? []).map((command) => command.trim()).filter(Boolean);
+  return (unique.length > 0 ? unique : fallback).slice(0, 3);
 }
 
 export function reportsIncompleteWiring(summary: string): boolean {
@@ -2061,6 +2089,45 @@ export function parseAgentReply(text: string): Record<string, unknown> {
   throw new Error("The model did not return a JSON or tool-call object.");
 }
 
+export function impactContext(
+  analysis: AnalysisResult,
+  symbolIds: Set<string>,
+  limit = 16,
+): string[] {
+  if (symbolIds.size === 0) return [];
+  const nodes = new Map(analysis.nodes.map((node) => [node.id, node]));
+  const describe = (id: string): string => {
+    const node = nodes.get(id);
+    if (!node) return id;
+    const label = node.metadata?.qualifiedName ?? node.label ?? id;
+    const location = node.filePath
+      ? `${node.filePath}${node.startLine ? `:${node.startLine}` : ""}`
+      : "";
+    return location ? `${label} (${location})` : label;
+  };
+  const lines: string[] = [];
+  const seen = new Set<string>();
+  for (const edge of analysis.edges) {
+    if (edge.kind !== "CALLS") continue;
+    if (symbolIds.has(edge.target)) {
+      const line = `caller ${describe(edge.source)} → ${describe(edge.target)}`;
+      if (!seen.has(line)) {
+        seen.add(line);
+        lines.push(line);
+      }
+    }
+    if (symbolIds.has(edge.source)) {
+      const line = `${describe(edge.source)} → callee ${describe(edge.target)}`;
+      if (!seen.has(line)) {
+        seen.add(line);
+        lines.push(line);
+      }
+    }
+    if (lines.length >= limit) break;
+  }
+  return lines;
+}
+
 export async function agentSeedContext(
   analysis: AnalysisResult,
   instruction: string,
@@ -2190,6 +2257,19 @@ export async function agentSeedContext(
     )
     .slice(0, 10)
     .map((symbol) => `${symbol.kind} ${symbol.qualifiedName} — ${symbol.filePath}:${symbol.startLine}`);
+  const impact = impactContext(
+    analysis,
+    new Set(
+      analysis.symbols
+        .filter(
+          (symbol) =>
+            tokens.some((token) => symbol.qualifiedName.toLowerCase().includes(token)) ||
+            (activeFile !== undefined && symbol.filePath === activeFile),
+        )
+        .slice(0, 12)
+        .map((symbol) => symbol.id),
+    ),
+  );
 
   const routes = analysis.nodes
     .filter((node) => node.kind === "route")
@@ -2375,6 +2455,7 @@ export async function agentSeedContext(
     editMap,
     `Relevant files (ranked by the instruction and current focus):\n${ranked.length ? ranked.join("\n") : "(none matched; use list_files and search_code)"}`,
     relevantSymbols.length ? `Relevant symbols:\n${relevantSymbols.join("\n")}` : "",
+    impact.length ? `Impact / reverse dependencies (callers and callees):\n${impact.join("\n")}` : "",
     routes.length ? `Routes (sample):\n${routes.join("\n")}` : "",
     changedFiles.size ? `Uncommitted Git changes:\n${[...changedFiles].slice(0, 20).join("\n")}` : "",
     git?.available ? `Git: ${git.branch ?? "unknown branch"} · ${git.files.length} changed file(s)` : "",
@@ -3317,7 +3398,8 @@ export async function runAgentTask(
       analysis.files.map((file) => ({ path: file.path })),
       analysis.frameworks ?? [],
     ));
-  const verificationCommand = preferredVerificationCommand(verificationTooling);
+  const verificationCommands = preferredVerificationCommands(verificationTooling);
+  const verificationCommand = verificationCommands[0];
   let lastVerification: {
     signature: string;
     ran: boolean;
@@ -3325,6 +3407,7 @@ export async function runAgentTask(
     command?: string;
     output: string;
     cached: boolean;
+    results?: { command: string; ok: boolean; output: string }[];
   } | null = null;
   let verificationAttempts = 0;
   const getLastVerification = () => lastVerification;
@@ -3352,13 +3435,13 @@ export async function runAgentTask(
     if (askMode || changedFiles.length === 0) {
       return { signature: "", ran: false, ok: false, output: "", cached: false };
     }
-    if (!verificationCommand) {
-      log("warn", "No verification command", "No typecheck/build command was detected for this project.");
+    if (verificationCommands.length === 0) {
+      log("warn", "No verification command", "No lint/typecheck/test/build command was detected for this project.");
       return {
         signature: "none",
         ran: false,
         ok: false,
-        output: "No typecheck/build command was detected for this project.",
+        output: "No lint/typecheck/test/build command was detected for this project.",
         cached: false,
       };
     }
@@ -3378,49 +3461,61 @@ export async function runAgentTask(
     if (lastVerification && lastVerification.signature === signature) {
       return { ...lastVerification, cached: true };
     }
-    const allowed = await requirePermission(
-      "command",
-      "verify_changes",
-      verificationCommand,
-      "Verify the changed files with the project typecheck/build command.",
-      { preview: verificationCommand },
-    );
-    if (!allowed) {
-      const denied = {
-        signature,
-        ran: false,
-        ok: false,
-        command: verificationCommand,
-        output: "Verification was skipped because the user denied the command.",
-        cached: false,
-      };
-      lastVerification = denied;
-      log("warn", "Verification skipped", "The user denied the verification command.");
-      return denied;
-    }
     verificationAttempts += 1;
-    log("info", "Verifying changes", verificationCommand);
-    const result = await runProjectCommand(analysis.rootPath, verificationCommand, undefined, {
-      timeoutMs: 120_000,
-      signal,
-    });
-    const output = `${result.stdout}${result.stderr ? `\n${result.stderr}` : ""}${
-      result.timedOut ? "\nVerification command timed out." : ""
-    }`.trim();
+    const results: { command: string; ok: boolean; output: string }[] = [];
+    let allOk = true;
+    for (const [commandIndex, command] of verificationCommands.entries()) {
+      const allowed = await requirePermission(
+        "command",
+        "verify_changes",
+        command,
+        "Verify the changed files with the project lint/typecheck/test command.",
+        { preview: command },
+      );
+      if (!allowed) {
+        const denied = {
+          signature,
+          ran: results.length > 0,
+          ok: false,
+          command: results.map((item) => item.command).join(" && ") || command,
+          output: "Verification stopped because the user denied a command.",
+          cached: false,
+          results,
+        };
+        lastVerification = denied;
+        log("warn", "Verification skipped", "The user denied the verification command.");
+        return denied;
+      }
+      log("info", "Verifying changes", command);
+      const result = await runProjectCommand(analysis.rootPath, command, undefined, {
+        timeoutMs: 120_000,
+        signal,
+      });
+      const output = `${result.stdout}${result.stderr ? `\n${result.stderr}` : ""}${
+        result.timedOut ? "\nVerification command timed out." : ""
+      }`.trim();
+      const ok = result.exitCode === 0;
+      results.push({ command, ok, output });
+      allOk = allOk && ok;
+      if (!ok) {
+        log("error", "Verification failed", `${command} · exit ${result.exitCode ?? "—"}`);
+        break;
+      }
+      log("success", "Verification passed", command);
+      if (commandIndex === verificationCommands.length - 1) break;
+    }
     const verification = {
       signature,
-      ran: true,
-      ok: result.exitCode === 0,
-      command: verificationCommand,
-      output,
+      ran: results.length > 0,
+      ok: allOk,
+      command: results.map((item) => item.command).join(" && "),
+      output: results
+        .map((item) => `$ ${item.command}\n${item.output}`.trim())
+        .join("\n\n"),
       cached: false,
+      results,
     };
     lastVerification = verification;
-    if (verification.ok) {
-      log("success", "Verification passed", verificationCommand);
-    } else {
-      log("error", "Verification failed", `${verificationCommand} · exit ${result.exitCode ?? "—"}`);
-    }
     return verification;
   };
 
@@ -6020,7 +6115,13 @@ export async function runAgentTask(
             content: `Task: ${instruction.trim()}\n\nTool observations:\n${digest}`,
           },
         ],
-        { maxTokens: 2500, temperature: 0.1, timeoutMs: 90_000, signal },
+        {
+          maxTokens: 2500,
+          temperature: 0.1,
+          timeoutMs: 90_000,
+          signal,
+          onToken: (chunk) => emit({ type: "token", text: chunk }),
+        },
         "agent-final",
       );
       if (finalCompletion.tokenUsage) {

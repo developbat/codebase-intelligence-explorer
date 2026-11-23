@@ -1179,6 +1179,7 @@ app.post("/api/projects/:id/ai/agent/stream", async (req, res) => {
         model: typeof req.body?.model === "string" ? req.body.model : undefined,
         language: typeof req.body?.language === "string" ? req.body.language : undefined,
         history,
+        onToken: (chunk) => write({ type: "token", text: chunk }),
       });
       write({ type: "done", result });
     } catch (error) {
@@ -1378,6 +1379,7 @@ app.post("/api/projects/:id/ai/loop/stream", async (req, res) => {
         model: typeof req.body?.model === "string" ? req.body.model : undefined,
         language: typeof req.body?.language === "string" ? req.body.language : undefined,
         history,
+        onToken: (chunk) => write({ type: "token", text: chunk }),
       });
       write({ type: "done", result });
     } catch (error) {

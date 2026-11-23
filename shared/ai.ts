@@ -687,5 +687,6 @@ export type AiAgentEvent =
       to: { provider: string; model: string };
       reason: string;
     }
+  | { type: "token"; text: string }
   | { type: "done"; result: AiAgentResult }
   | { type: "error"; message: string };
