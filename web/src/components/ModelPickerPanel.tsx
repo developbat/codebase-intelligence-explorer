@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Check, Cpu, Loader2, Search, Star } from "lucide-react";
 import type { AiProviderId, AiSettingsPublic } from "../../../shared/ai";
 import type { PricingReport } from "../../../shared/pricing";
@@ -25,6 +25,7 @@ export function ModelPickerPanel({
   const [providerFilter, setProviderFilter] = useState("all");
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const localScanRef = useRef(false);
 
   const { data: pricing } = useCachedResource<PricingReport>(
     "model-pricing",
@@ -56,6 +57,19 @@ export function ModelPickerPanel({
           a.provider.localeCompare(b.provider) || a.model.localeCompare(b.model),
       );
   }, [settings, query, providerFilter]);
+
+  useEffect(() => {
+    const local = settings?.providers.find((provider) => provider.id === "local");
+    if (!local || local.models.length > 0 || localScanRef.current) return;
+    localScanRef.current = true;
+    void api.ai
+      .models("local", true)
+      .then(async (result) => {
+        if (result.models.length === 0) return;
+        onSettingsSaved(await api.ai.settings());
+      })
+      .catch(() => undefined);
+  }, [settings, onSettingsSaved]);
 
   if (!settings) {
     return <div className="settings-empty">{t("Add a provider before choosing a model.")}</div>;

@@ -9,6 +9,7 @@ export type BuiltInAiProviderId =
   | "gemini"
   | "nvidia"
   | "xai"
+  | "local"
   | "custom";
 
 /** Built-in ids plus user-defined `custom:<slug>` ids. */
@@ -103,6 +104,15 @@ export const AI_PROVIDERS: AiProviderInfo[] = [
     models: ["grok-4", "grok-4-fast", "grok-3", "grok-3-mini", "grok-2-vision-1212"],
     docsUrl: "https://console.x.ai/",
     keyPlaceholder: "xai-…",
+  },
+  {
+    id: "local",
+    name: "Local (Ollama)",
+    kind: "openai",
+    baseUrl: "http://127.0.0.1:11434/v1",
+    models: [],
+    docsUrl: "https://ollama.com",
+    keyPlaceholder: "API key (optional)",
   },
   {
     id: "custom",

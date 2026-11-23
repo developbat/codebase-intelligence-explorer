@@ -443,7 +443,35 @@ export async function listProviderModels(
   if (!options.refresh && config.models.length > 0) return config.models;
   if (config.kind === "anthropic") return config.models;
 
-  const timeout = 20_000;
+  const timeout = 8_000;
+
+  if (provider === "local") {
+    const localTimeout = 2_500;
+    const models = new Set<string>();
+    const nativeBase = config.baseUrl.replace(/\/v1\/?$/, "");
+    for (const url of [`${nativeBase}/api/tags`, `${config.baseUrl}/models`]) {
+      try {
+        const response = await request(url, { method: "GET" }, localTimeout, "Local model server");
+        const payload = (await response.json()) as {
+          models?: { name?: string; model?: string }[];
+          data?: { id?: string }[];
+        };
+        for (const model of payload.models ?? []) {
+          const id = model.name ?? model.model;
+          if (id) models.add(id);
+        }
+        for (const model of payload.data ?? []) {
+          if (model.id) models.add(model.id);
+        }
+      } catch {
+        // Try the next local endpoint shape.
+      }
+    }
+    const unique = [...models].sort();
+    if (unique.length === 0) return config.models;
+    await saveProviderModels(provider, unique);
+    return unique;
+  }
 
   try {
     if (config.kind === "gemini") {

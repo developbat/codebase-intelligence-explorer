@@ -564,7 +564,11 @@ export function CodeStudio({
   const [modelCatalogProvider, setModelCatalogProvider] = useState<AiProviderId | null>(null);
   const [modelDraft, setModelDraft] = useState("");
   const configuredProviders = (aiSettings?.providers ?? []).filter(
-    (provider) => provider.hasKey || provider.id === "custom" || provider.custom,
+    (provider) =>
+      provider.hasKey ||
+      provider.id === "custom" ||
+      provider.id === "local" ||
+      provider.custom,
   );
   const providerDisplayName = (id: AiProviderId) =>
     aiSettings?.providers.find((provider) => provider.id === id)?.name ?? providerInfo(id).name;
@@ -672,6 +676,8 @@ export function CodeStudio({
     plan?: AiAgentPlan;
     planPath?: string;
     mode?: AiWorkspaceMode;
+    provider?: string;
+    model?: string;
   };
   type StudioChatTab = { id: string; title: string; createdAt: string; updatedAt: string };
   const [chatMessages, setChatMessages] = useState<StudioChatMessage[]>([]);
@@ -1094,13 +1100,17 @@ export function CodeStudio({
           JSON.stringify(
             chatMessages
               .slice(-40)
-              .map(({ role, content, evidence, tokenUsage, logs, plan }) => ({
+              .map(({ role, content, evidence, tokenUsage, logs, plan, planPath, mode, provider, model }) => ({
                 role,
                 content,
                 evidence,
                 tokenUsage,
                 logs: logs?.slice(-150),
                 plan,
+                planPath,
+                mode,
+                provider,
+                model,
               })),
           ),
         );
@@ -1207,6 +1217,12 @@ export function CodeStudio({
     setModelPickerOpen((value) => !value);
     setModelCatalog([]);
     setModelCatalogProvider(provider);
+    if (provider === "local") {
+      void api.ai
+        .models("local", true)
+        .then((result) => setModelCatalog(result.models))
+        .catch(() => undefined);
+    }
   }
 
   const quickCommands = useMemo(() => quickCommandsFor(analysis), [analysis]);
@@ -2228,6 +2244,8 @@ export function CodeStudio({
           content: sections.join("\n\n"),
           evidence: result.evidence.map((item) => ({ path: item.path, startLine: item.startLine })),
           tokenUsage: result.tokenUsage,
+          provider: active?.provider,
+          model: active?.model,
         },
       ]);
     } catch (requestError) {
@@ -2240,13 +2258,17 @@ export function CodeStudio({
   function serializeChatMessages(messages: StudioChatMessage[]) {
     return messages
       .slice(-40)
-      .map(({ role, content, evidence, tokenUsage, logs, plan }) => ({
+      .map(({ role, content, evidence, tokenUsage, logs, plan, planPath, mode, provider, model }) => ({
         role,
         content,
         evidence,
         tokenUsage,
         logs: logs?.slice(-150),
         plan,
+        planPath,
+        mode,
+        provider,
+        model,
       }));
   }
 
@@ -2555,6 +2577,8 @@ export function CodeStudio({
           plan: result.plan,
           planPath: result.planPath,
           mode: modeForRun,
+          provider: result.provider,
+          model: result.model,
         },
       ]);
       if (result.changedFiles.length > 0) {
@@ -3159,11 +3183,51 @@ export function CodeStudio({
                               setModelCatalogProvider(provider.id);
                               setModelDraft(provider.model);
                               setModelCatalog([]);
+                              if (provider.id === "local") {
+                                void loadModels(provider.id);
+                              }
                             }}
                           >
                             <span>{provider.name}</span>
                           </button>
                         ))}
+                      </div>
+                      <div className={`studio-model-picked-row ${modelChain.length === 0 ? "is-auto" : ""}`}>
+                        <span className="studio-model-picked-label">{t("Selected")}</span>
+                        {modelChain.length === 0 ? (
+                          <span className="studio-model-picked-auto">
+                            {t("Auto selection")}
+                          </span>
+                        ) : (
+                          modelChain.map((item, index) => (
+                            <span
+                              key={`${item.provider}::${item.model}`}
+                              className="studio-model-picked-chip"
+                              title={`${item.provider}/${item.model}`}
+                            >
+                              <b>{index + 1}</b>
+                              <span>
+                                {item.provider}/{item.model}
+                              </span>
+                              <button
+                                onClick={() => void removeModelFromChain(index)}
+                                disabled={chainBusy}
+                                aria-label={t("Remove")}
+                              >
+                                <X size={9} />
+                              </button>
+                            </span>
+                          ))
+                        )}
+                        {modelChain.length > 0 ? (
+                          <button
+                            className="studio-model-picked-clear"
+                            onClick={() => void saveModelChain([])}
+                            disabled={chainBusy}
+                          >
+                            {t("Auto")}
+                          </button>
+                        ) : null}
                       </div>
                       <div className="studio-model-body">
                         <div className="studio-model-main-column">
@@ -3273,6 +3337,10 @@ export function CodeStudio({
                                   {model}
                                 </button>
                               ))}
+                            </div>
+                          ) : pickerProvider === "local" ? (
+                            <div className="studio-model-empty">
+                              {t("Start Ollama and pull a model; downloaded local models appear here automatically.")}
                             </div>
                           ) : (
                             <div className="studio-model-empty">
@@ -3392,7 +3460,11 @@ export function CodeStudio({
               <div key={index} className={`studio-workflow-message ${workflowMessage.role}`}>
                 <div className="studio-workflow-role">
                   {workflowMessage.role === "user" ? <User size={11} /> : <Bot size={11} />}
-                  <span>{workflowMessage.role === "user" ? t("You") : active?.model ?? t("Agent")}</span>
+                  <span>
+                    {workflowMessage.role === "user"
+                      ? t("You")
+                      : workflowMessage.model ?? t("Agent")}
+                  </span>
                   {workflowMessage.mode ? (
                     <span className={`studio-mode-badge is-${workflowMessage.mode}`}>
                       {workflowMessage.mode === "ask"

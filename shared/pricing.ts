@@ -60,6 +60,17 @@ export function findModelPrice(
 ): ModelPricing | undefined {
   const wantedProvider = provider.trim().toLowerCase();
   const wantedModel = model.trim().toLowerCase();
+  if (wantedProvider === "local") {
+    return {
+      provider: "local",
+      model: wantedModel,
+      inputPerMillion: 0,
+      outputPerMillion: 0,
+      currency: "USD",
+      source: "local",
+      updatedAt: "",
+    };
+  }
   const canonicalWanted = canonicalModel(model);
   return (
     prices.find(
