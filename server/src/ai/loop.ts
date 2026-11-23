@@ -1204,9 +1204,23 @@ export async function runProjectLoop(
       queue = await saveQueue(analysis.rootPath, queue);
       emit({ type: "task", queue, task: queue.tasks.find((item) => item.id === task.id) });
     }
-    const finalTask = queue.tasks.find((item) => item.id === task.id);
+    let finalTask = queue.tasks.find((item) => item.id === task.id);
     if (finalTask && (finalTask.status === "failed" || finalTask.status === "blocked")) {
-      queue = blockDependentsOf(queue, finalTask.id);
+      if (!finalTask.notes?.trim()) {
+        const reason =
+          result.error?.trim() ||
+          result.summary?.trim() ||
+          (result.stoppedReason === "max_steps"
+            ? "The step limit was reached before the task could finish."
+            : `Stopped (${result.stoppedReason}).`);
+        queue = markTask(queue, task.id, {
+          notes: reason.slice(0, 800),
+        });
+        finalTask = queue.tasks.find((item) => item.id === task.id);
+      }
+      if (finalTask) {
+        queue = blockDependentsOf(queue, finalTask.id);
+      }
       queue = await saveQueue(analysis.rootPath, queue);
       emit({ type: "task", queue });
     }

@@ -20116,3 +20116,26 @@ button.canvas-stat {
   border-color: rgba(251, 113, 133, 0.28);
   color: #fecdd3;
 }
+
+.studio-continue-dismiss {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 24px;
+  height: 24px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: #8ba8ce;
+  cursor: pointer;
+}
+
+.studio-continue-dismiss:hover {
+  background: rgba(148, 163, 184, 0.1);
+  color: #eaf3ff;
+}
+
+.studio-continue.is-global .studio-continue-info small {
+  max-width: 640px;
+}

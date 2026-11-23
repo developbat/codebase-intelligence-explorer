@@ -12,6 +12,7 @@ export const tr: Dictionary = {
   "New project": "Yeni proje",
   "Rescan": "Yeniden tara",
   "Read-only": "Salt okunur",
+  "Stopped without a detailed error. Check the task trace below.": "Ayrıntılı hata kaydı yok. Aşağıdaki görev izini kontrol et.",
   "Run {path} with your user permissions? Review the script first if you did not write it.": "{path} betiği kullanıcı izinlerinle çalıştırılsın mı? Kendin yazmadıysan önce betiği incele.",
   "Could not run this script.": "Bu betik çalıştırılamadı.",
   "Run script": "Betiği çalıştır",

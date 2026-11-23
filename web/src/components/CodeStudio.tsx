@@ -697,6 +697,7 @@ export function CodeStudio({
   const [chatLivePlan, setChatLivePlan] = useState<AiAgentPlan | null>(null);
   const [chatLiveAnswer, setChatLiveAnswer] = useState("");
   const [taskQueue, setTaskQueue] = useState<ProjectTaskQueue | null>(null);
+  const [dismissedQueueAt, setDismissedQueueAt] = useState<string | null>(null);
   const [clarification, setClarification] = useState<{
     request: ClarificationRequest;
     original: string;
@@ -2356,6 +2357,7 @@ export function CodeStudio({
     setChatInput("");
     setChatError(null);
     setChatRetryQuestion(null);
+    setTaskQueue(null);
     chatHydratedRef.current = true;
   }
 
@@ -2490,7 +2492,8 @@ export function CodeStudio({
     const liveSteps: AiAgentStep[] = [];
     const holder: { result: AiAgentResult | null } = { result: null };
     const useTaskLoop = true;
-    if (useTaskLoop) setTaskQueue(null);
+    setTaskQueue(null);
+    setDismissedQueueAt(null);
 
     const handleEvent = (event: AiAgentEvent) => {
       if (event.type === "step") {
@@ -3449,14 +3452,6 @@ export function CodeStudio({
                 /(?:error 410|end of life|no longer available|model .* unavailable)/i.test(
                   workflowMessage.content,
                 );
-              const failedTasks =
-                workflowMessage.taskQueue?.tasks.filter(
-                  (task) => task.status === "failed" || task.status === "blocked",
-                ) ?? [];
-              const canContinue =
-                workflowMessage.role === "assistant" &&
-                Boolean(workflowMessage.taskQueue) &&
-                (failedTasks.length > 0 || workflowMessage.taskQueue?.status === "stopped");
               return (
               <div key={index} className={`studio-workflow-message ${workflowMessage.role}`}>
                 <div className="studio-workflow-role">
@@ -3700,59 +3695,6 @@ export function CodeStudio({
                     ) : null}
                   </details>
                 ) : null}
-                {canContinue && workflowMessage.taskQueue ? (
-                  <div className="studio-continue">
-                    <div className="studio-continue-info">
-                      <strong>{t("Task stopped")}</strong>
-                      <span>
-                        {workflowMessage.taskQueue.tasks.filter((task) => task.status === "done").length}/
-                        {workflowMessage.taskQueue.tasks.length} {t("done")}
-                        {failedTasks.length > 0
-                          ? ` · ${failedTasks.length} ${t("blocked or failed")}`
-                          : ""}
-                      </span>
-                      {failedTasks.length > 0 ? (
-                        <small>
-                          {failedTasks
-                            .slice(0, 2)
-                            .map((task) => `${task.id} · ${task.title}`)
-                            .join(" · ")}
-                        </small>
-                      ) : null}
-                    </div>
-                    <div className="studio-continue-actions">
-                      <button
-                        className="ghost-button"
-                        disabled={chatBusy || !active}
-                        onClick={() => {
-                          void askProject(workflowMessage.taskQueue!.goal, false, {
-                            retryFailed: true,
-                            skipClarify: true,
-                            workspaceMode: "build",
-                          });
-                        }}
-                      >
-                        <Play size={11} /> {t("Continue")}
-                        {active ? ` · ${active.model}` : ""}
-                      </button>
-                      <button
-                        className="primary-button"
-                        disabled={chatBusy || !active}
-                        onClick={() => {
-                          setPendingContinue({ goal: workflowMessage.taskQueue!.goal });
-                          setModelPickerOpen(true);
-                          setModelCatalog([]);
-                          if (active) {
-                            setModelCatalogProvider(active.provider);
-                            void loadModels(active.provider);
-                          }
-                        }}
-                      >
-                        <RefreshCw size={11} /> {t("Choose model & continue")}
-                      </button>
-                    </div>
-                  </div>
-                ) : null}
               </div>
               );
             })
@@ -3846,56 +3788,71 @@ export function CodeStudio({
           </div>
         ) : null}
 
-        {!chatBusy &&
-        taskQueue &&
-        (taskQueue.status === "stopped" ||
-          taskQueue.tasks.some(
+        {(() => {
+          if (!taskQueue || chatBusy || dismissedQueueAt === taskQueue.updatedAt) return null;
+          const failed = taskQueue.tasks.filter(
             (task) => task.status === "failed" || task.status === "blocked",
-          )) ? (
-          <div className="studio-continue is-global">
-            <div className="studio-continue-info">
-              <strong>{t("Task stopped")}</strong>
-              <span>
-                {taskQueue.tasks.filter((task) => task.status === "done").length}/
-                {taskQueue.tasks.length} {t("done")} ·{" "}
-                {taskQueue.tasks.filter((task) => task.status === "failed" || task.status === "blocked").length}{" "}
-                {t("blocked or failed")}
-              </span>
-              <small>{taskQueue.goal}</small>
+          );
+          if (failed.length === 0 && taskQueue.status !== "stopped") return null;
+          const firstFailure = failed[0];
+          const reason =
+            firstFailure?.notes ||
+            firstFailure?.resultSummary ||
+            firstFailure?.verification?.output ||
+            t("Stopped without a detailed error. Check the task trace below.");
+          return (
+            <div className="studio-continue is-global">
+              <div className="studio-continue-info">
+                <strong>{t("Task stopped")}</strong>
+                <span>
+                  {taskQueue.tasks.filter((task) => task.status === "done").length}/
+                  {taskQueue.tasks.length} {t("done")} · {failed.length}{" "}
+                  {t("blocked or failed")}
+                </span>
+                <small title={taskQueue.goal}>{reason.slice(0, 260)}</small>
+              </div>
+              <div className="studio-continue-actions">
+                <button
+                  className="ghost-button"
+                  disabled={!active}
+                  onClick={() => {
+                    void askProject(taskQueue.goal, false, {
+                      retryFailed: true,
+                      skipClarify: true,
+                      workspaceMode: "build",
+                    });
+                  }}
+                >
+                  <Play size={11} /> {t("Continue")}
+                  {active ? ` · ${active.model}` : ""}
+                </button>
+                <button
+                  className="primary-button"
+                  disabled={!active}
+                  onClick={() => {
+                    setPendingContinue({ goal: taskQueue.goal });
+                    setModelPickerOpen(true);
+                    setModelCatalog([]);
+                    if (active) {
+                      setModelCatalogProvider(active.provider);
+                      void loadModels(active.provider);
+                    }
+                  }}
+                >
+                  <RefreshCw size={11} /> {t("Choose model & continue")}
+                </button>
+                <button
+                  className="studio-continue-dismiss"
+                  onClick={() => setDismissedQueueAt(taskQueue.updatedAt)}
+                  aria-label={t("Dismiss")}
+                  title={t("Dismiss")}
+                >
+                  <X size={11} />
+                </button>
+              </div>
             </div>
-            <div className="studio-continue-actions">
-              <button
-                className="ghost-button"
-                disabled={!active}
-                onClick={() => {
-                  void askProject(taskQueue.goal, false, {
-                    retryFailed: true,
-                    skipClarify: true,
-                    workspaceMode: "build",
-                  });
-                }}
-              >
-                <Play size={11} /> {t("Continue")}
-                {active ? ` · ${active.model}` : ""}
-              </button>
-              <button
-                className="primary-button"
-                disabled={!active}
-                onClick={() => {
-                  setPendingContinue({ goal: taskQueue.goal });
-                  setModelPickerOpen(true);
-                  setModelCatalog([]);
-                  if (active) {
-                    setModelCatalogProvider(active.provider);
-                    void loadModels(active.provider);
-                  }
-                }}
-              >
-                <RefreshCw size={11} /> {t("Choose model & continue")}
-              </button>
-            </div>
-          </div>
-        ) : null}
+          );
+        })()}
 
         {chatBusy ? (
           <div className="studio-run-status" role="status" aria-live="polite">
