@@ -15,6 +15,7 @@ import type {
   ProjectTaskRole,
 } from "../../../shared/tasks";
 import { loadAnalysis } from "../store";
+import { readSourceFile } from "../editor";
 import {
   appendTaskContext,
   createQueue,
@@ -44,6 +45,41 @@ import {
 const MAX_PLANNED_TASKS = 12;
 const DEFAULT_MAX_TASKS = 12;
 const DEFAULT_MAX_MINUTES = 45;
+
+function parseReviewReply(text: string): { verdict: "ok" | "issues"; summary: string; issues: string[] } {
+  const candidate = text.match(/\{[\s\S]*\}/)?.[0];
+  if (candidate) {
+    try {
+      const raw = JSON.parse(candidate) as {
+        verdict?: unknown;
+        summary?: unknown;
+        issues?: unknown;
+      };
+      const issues = Array.isArray(raw.issues)
+        ? raw.issues.filter((item): item is string => typeof item === "string").slice(0, 6)
+        : [];
+      return {
+        verdict: raw.verdict === "ok" || (issues.length === 0 && raw.verdict !== "issues") ? "ok" : "issues",
+        summary:
+          typeof raw.summary === "string" && raw.summary.trim()
+            ? raw.summary.trim().slice(0, 500)
+            : issues.length > 0
+              ? "Reviewer reported issues."
+              : "Reviewer found no blocking issues.",
+        issues,
+      };
+    } catch {
+      // Fall through to the text interpretation below.
+    }
+  }
+  const clean = text.trim().replace(/\s+/g, " ");
+  const looksBad = /\b(issue|error|broken|missing|incorrect|bug|should|must|risk)\b/i.test(clean);
+  return {
+    verdict: looksBad ? "issues" : "ok",
+    summary: clean.slice(0, 500) || "Reviewer returned no findings.",
+    issues: looksBad ? [clean.slice(0, 300)] : [],
+  };
+}
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -925,6 +961,119 @@ export async function runProjectLoop(
       attemptCost === undefined
         ? task.costUsd
         : Number(((task.costUsd ?? 0) + attemptCost).toFixed(6));
+
+    let review: ProjectTask["review"] | undefined;
+    let reviewUsage: AiTokenUsage | undefined;
+    let reviewCost: number | undefined;
+    if (
+      status === "done" &&
+      settings?.reviewEdits !== false &&
+      workspaceMode === "build" &&
+      current.effort !== "simple" &&
+      result.changedFiles.length > 0
+    ) {
+      const spent = (task.tokenUsage?.totalTokens ?? 0) + (result.tokenUsage?.totalTokens ?? 0);
+      if (tokenBudget - spent > 20_000) {
+        const reviewer = await resolveAgentRole("reviewer", {
+          provider: options.provider,
+          model: options.model,
+        }).catch(() => taskConfig);
+        const reviewConfig = reviewer.id === "local" ? taskConfig : reviewer;
+        const files: { path: string; content: string }[] = [];
+        let chars = 0;
+        for (const filePath of result.changedFiles.slice(0, 4)) {
+          // eslint-disable-next-line no-await-in-loop
+          const file = await readSourceFile(analysis.rootPath, filePath).catch(() => null);
+          if (!file) continue;
+          const content = file.content.slice(0, 3_000);
+          files.push({ path: filePath, content });
+          chars += content.length;
+          if (chars >= 12_000) break;
+        }
+        if (files.length > 0) {
+          try {
+            const completion = await chat(
+              reviewConfig,
+              [
+                {
+                  role: "system",
+                  content:
+                    'You are a strict senior code reviewer. Review only the changed files shown. Reply with compact JSON only: {"verdict":"ok"|"issues","issues":["short issue"],"summary":"one sentence"}. Do not rewrite code. Flag broken syntax, missing UI wiring, or clearly wrong behavior; otherwise return ok.',
+                },
+                {
+                  role: "user",
+                  content: `Task: ${current.title}\n${current.detail}\n\nChanged files:\n${files
+                    .map((file) => `--- ${file.path} ---\n${file.content}`)
+                    .join("\n\n")}`,
+                },
+              ],
+              {
+                maxTokens: 700,
+                temperature: 0,
+                timeoutMs: 60_000,
+                onUsage: (usage) => {
+                  reviewUsage = usage;
+                },
+              },
+            );
+            const parsed = parseReviewReply(completion);
+            review = {
+              ...parsed,
+              provider: reviewConfig.id,
+              model: reviewConfig.model,
+              checkedFiles: files.map((file) => file.path),
+              tokenUsage: reviewUsage,
+            };
+            reviewCost = await estimateUsageCost(
+              reviewConfig.id,
+              reviewConfig.model,
+              reviewUsage,
+            ).catch(() => undefined);
+            if (reviewUsage) {
+              await recordUsage({
+                projectId,
+                provider: reviewConfig.id,
+                model: reviewConfig.model,
+                kind: "agent-review",
+                inputTokens: reviewUsage.inputTokens,
+                outputTokens: reviewUsage.outputTokens,
+                totalTokens: reviewUsage.totalTokens,
+                costUsd: reviewCost,
+              }).catch(() => undefined);
+            }
+            emit({
+              type: "log",
+              entry: {
+                id: `log-${Date.now()}-review`,
+                at: nowIso(),
+                level: review.verdict === "ok" ? "success" : "warn",
+                label: "Reviewer pass",
+                detail: review.summary,
+              },
+            });
+            await appendTaskContext(
+              analysis.rootPath,
+              `Review · ${task.id}`,
+              `${reviewConfig.id}/${reviewConfig.model} · ${review.verdict}\n${review.summary}${
+                review.issues.length > 0 ? `\n${review.issues.join("\n")}` : ""
+              }`,
+            );
+          } catch (error) {
+            emit({
+              type: "log",
+              entry: {
+                id: `log-${Date.now()}-review-skip`,
+                at: nowIso(),
+                level: "warn",
+                label: "Reviewer pass skipped",
+                detail: error instanceof Error ? error.message.slice(0, 200) : "review failed",
+              },
+            });
+          }
+        }
+      }
+    }
+
     const answerNote =
       inspectionAnswer &&
       result.stoppedReason !== "finished" &&
@@ -938,9 +1087,14 @@ export async function runProjectLoop(
       notes: answerNote,
       changedFiles: result.changedFiles,
       commands: result.ranCommands,
-      tokenUsage: addUsage(task.tokenUsage ?? emptyUsage(), result.tokenUsage),
-      costUsd: totalCost,
+      tokenUsage: addUsage(
+        addUsage(task.tokenUsage ?? emptyUsage(), result.tokenUsage),
+        reviewUsage,
+      ),
+      costUsd:
+        reviewCost === undefined ? totalCost : Number(((totalCost ?? 0) + reviewCost).toFixed(6)),
       verification: taskVerification ?? (verification ? { command: verification } : undefined),
+      review,
     });
     queue = await saveQueue(analysis.rootPath, queue);
     await appendTaskContext(

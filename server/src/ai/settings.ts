@@ -51,6 +51,7 @@ interface StoredSettings {
   fallback: AiFallbackSettings;
   disabledProviders: string[];
   localModelsDir: string;
+  reviewEdits: boolean;
 }
 
 export const AI_AGENT_ROLES: AiAgentRole[] = ["main", "planner", "fast", "reviewer"];
@@ -145,6 +146,7 @@ function defaults(): StoredSettings {
     fallback: { chain: [] },
     disabledProviders: [],
     localModelsDir: path.join(getDataDir(), "local-models"),
+    reviewEdits: true,
   };
 }
 
@@ -250,6 +252,7 @@ async function loadStored(): Promise<StoredSettings> {
         typeof parsed.localModelsDir === "string" && parsed.localModelsDir.trim()
           ? parsed.localModelsDir.trim()
           : base.localModelsDir,
+      reviewEdits: parsed.reviewEdits !== false,
     };
   } catch {
     return base;
@@ -325,6 +328,7 @@ export async function getPublicSettings(): Promise<AiSettingsPublic> {
     autoSwitchModels: stored.autoSwitchModels !== false,
     fallback: stored.fallback,
     localModelsDir: stored.localModelsDir,
+    reviewEdits: stored.reviewEdits !== false,
   };
 }
 
@@ -496,6 +500,10 @@ export async function updateAiSettings(input: AiSettingsInput): Promise<AiSettin
   if (input.localModelsDir !== undefined) {
     const dir = input.localModelsDir.trim();
     if (dir) stored.localModelsDir = dir;
+  }
+
+  if (input.reviewEdits !== undefined) {
+    stored.reviewEdits = input.reviewEdits === true;
   }
 
   if (input.agentRoles) {

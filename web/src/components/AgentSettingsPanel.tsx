@@ -226,6 +226,40 @@ export function AgentSettingsPanel({ settings, onSaved }: AgentSettingsPanelProp
         </div>
       </div>
 
+      <label className="agent-review-toggle">
+        <input
+          type="checkbox"
+          checked={settings?.reviewEdits !== false}
+          disabled={!settings || busy !== null}
+          onChange={(event) => {
+            const value = event.target.checked;
+            void api.ai
+              .updateSettings({ reviewEdits: value })
+              .then((next) => {
+                onSaved(next);
+                setMessage({
+                  ok: true,
+                  text: value
+                    ? t("Edited files will get a second reviewer pass.")
+                    : t("Reviewer pass disabled for edits."),
+                });
+              })
+              .catch((error) =>
+                setMessage({
+                  ok: false,
+                  text: error instanceof Error ? error.message : t("Could not save the review setting."),
+                }),
+              );
+          }}
+        />
+        <span>
+          <strong>{t("Review edited files with the reviewer model")}</strong>
+          <small>
+            {t("One short extra model call after a task changes files. It reports issues but does not rewrite code.")}
+          </small>
+        </span>
+      </label>
+
       <div className="agent-settings-note">
         <Sparkles size={12} />
         <span>

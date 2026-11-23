@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { diffLines } from "diff";
-import { FileText, History, Loader2, RotateCcw, Save, X } from "lucide-react";
+import { FileText, History, Loader2, Play, RotateCcw, Save, X } from "lucide-react";
 import type {
   AiPromptDefinition,
   AiPromptVersionContent,
@@ -27,7 +27,15 @@ export function PromptManagerDialog({
   const [selectedId, setSelectedId] = useState<string>("");
   const [system, setSystem] = useState("");
   const [scope, setScope] = useState<"project" | "global">(projectId ? "project" : "global");
-  const [busy, setBusy] = useState<"load" | "save" | "reset" | null>(null);
+  const [busy, setBusy] = useState<"load" | "save" | "reset" | "test" | null>(null);
+  const [testMessage, setTestMessage] = useState("");
+  const [testResult, setTestResult] = useState<{
+    provider: string;
+    model: string;
+    latencyMs: number;
+    text: string;
+    tokenUsage?: { inputTokens: number; outputTokens: number; totalTokens: number };
+  } | null>(null);
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
   const [showPreview, setShowPreview] = useState(false);
   const [showDiff, setShowDiff] = useState(false);
@@ -79,6 +87,7 @@ export function PromptManagerDialog({
     setHistoryOpen(false);
     setHistoryVersion(null);
     setMessage(null);
+    setTestResult(null);
   }
 
   function changeScope(next: "project" | "global") {
@@ -146,6 +155,37 @@ export function PromptManagerDialog({
     };
     return system.replace(/\{\{([a-zA-Z0-9_]+)\}\}/g, (_match, name: string) => samples[name] ?? `<${name}>`);
   }, [system, t]);
+
+  async function testPrompt() {
+    if (!selected) return;
+    setBusy("test");
+    setMessage(null);
+    setTestResult(null);
+    try {
+      const result = await api.ai.testPrompt(selected.id, {
+        projectId,
+        system,
+        message:
+          testMessage.trim() ||
+          "Reply in one short sentence confirming that you received these instructions.",
+      });
+      setTestResult(result);
+      setMessage({
+        ok: true,
+        text: t("Prompt test completed · {model} · {latency} ms", {
+          model: result.model,
+          latency: result.latencyMs,
+        }),
+      });
+    } catch (error) {
+      setMessage({
+        ok: false,
+        text: error instanceof Error ? error.message : t("Could not test the prompt."),
+      });
+    } finally {
+      setBusy(null);
+    }
+  }
 
   async function save() {
     if (!selected) return;
@@ -316,6 +356,31 @@ export function PromptManagerDialog({
                   </div>
                 ) : null}
 
+                <div className="prompt-test-box">
+                  <input
+                    value={testMessage}
+                    onChange={(event) => setTestMessage(event.target.value)}
+                    placeholder={t("Optional test message for the model")}
+                    spellCheck={false}
+                  />
+                  {testResult ? (
+                    <div className="prompt-test-result">
+                      <div>
+                        <strong>
+                          {testResult.provider}/{testResult.model}
+                        </strong>
+                        <span>
+                          {testResult.latencyMs} ms
+                          {testResult.tokenUsage
+                            ? ` · ${testResult.tokenUsage.totalTokens} ${t("tokens")}`
+                            : ""}
+                        </span>
+                      </div>
+                      <p>{testResult.text}</p>
+                    </div>
+                  ) : null}
+                </div>
+
                 <div className="prompt-actions">
                   <button
                     className="ghost-button"
@@ -344,6 +409,10 @@ export function PromptManagerDialog({
                   >
                     <History size={12} /> {t("History")}
                     {history.length > 0 ? ` (${history.length})` : ""}
+                  </button>
+                  <button className="ghost-button" onClick={testPrompt} disabled={busy !== null || !system.trim()}>
+                    {busy === "test" ? <Loader2 size={12} className="spin" /> : <Play size={12} />}
+                    {t("Test with model")}
                   </button>
                   <button className="ghost-button" onClick={reset} disabled={busy !== null}>
                     {busy === "reset" ? <Loader2 size={12} className="spin" /> : <RotateCcw size={12} />}

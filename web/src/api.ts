@@ -897,6 +897,23 @@ export const api = {
         },
       ),
 
+    testPrompt: (
+      id: string,
+      input: { projectId?: string; system?: string; message?: string; variables?: Record<string, string> },
+    ) =>
+      request<{
+        ok: boolean;
+        provider: string;
+        model: string;
+        latencyMs: number;
+        text: string;
+        tokenUsage?: { inputTokens: number; outputTokens: number; totalTokens: number };
+        preview: string;
+      }>(`/api/prompts/${encodeURIComponent(id)}/test`, {
+        method: "POST",
+        body: JSON.stringify(input),
+      }),
+
     models: (provider: AiProviderId, refresh = false) =>
       request<{ models: string[] }>(
         `/api/ai/models?provider=${encodeURIComponent(provider)}${refresh ? "&refresh=1" : ""}`,

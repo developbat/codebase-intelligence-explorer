@@ -249,6 +249,7 @@ export interface AiSettingsPublic {
   autoSwitchModels: boolean;
   fallback: AiFallbackSettings;
   localModelsDir: string;
+  reviewEdits: boolean;
 }
 
 export interface AiCustomProviderInput {
@@ -278,6 +279,7 @@ export interface AiSettingsInput {
   autoSwitchModels?: boolean;
   fallback?: Partial<AiFallbackSettings>;
   localModelsDir?: string;
+  reviewEdits?: boolean;
 }
 
 export interface AiUsage {

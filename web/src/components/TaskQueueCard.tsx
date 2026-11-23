@@ -195,6 +195,26 @@ export function TaskQueueCard({
                       : ""}
                   </small>
                   {task.notes ? <p className="task-queue-note">{task.notes}</p> : null}
+                  {task.review ? (
+                    <div className={`task-queue-review is-${task.review.verdict}`}>
+                      <strong>
+                        {task.review.verdict === "ok"
+                          ? t("Reviewer: no blocking issues")
+                          : t("Reviewer found issues")}
+                        <span>
+                          {task.review.provider}/{task.review.model}
+                        </span>
+                      </strong>
+                      <span>{task.review.summary}</span>
+                      {task.review.issues.length > 0 ? (
+                        <ul>
+                          {task.review.issues.slice(0, 4).map((issue) => (
+                            <li key={issue}>{issue}</li>
+                          ))}
+                        </ul>
+                      ) : null}
+                    </div>
+                  ) : null}
                   {task.resultSummary ? <p>{task.resultSummary}</p> : null}
                   {task.verification?.command ? (
                     <span className={`task-queue-verify ${task.verification.ok ? "is-ok" : "is-failed"}`}>

@@ -17,7 +17,7 @@ import {
   summarizeProject,
   summarizeScope,
 } from "./ai/service";
-import { listProviderModels, testProvider } from "./ai/providers";
+import { chat, listProviderModels, testProvider } from "./ai/providers";
 import { discoverLocalModelDirs, localModelStatus, pullLocalModel, startLocalServer } from "./localModels";
 import { autoConfigureAgents } from "./ai/agents";
 import { clearModelCatalog, getModelCatalog, importModelCatalog } from "./ai/catalog";
@@ -43,7 +43,7 @@ import { checkGraphic } from "./graphicCheck";
 import { getProjectTaskQueue, planProjectTasks, runProjectLoop } from "./ai/loop";
 import { loadQueue, removeTask, reorderTasks, saveQueue, updateTask } from "./tasks";
 import type { ProjectTask } from "../../shared/tasks";
-import { getPublicSettings, updateAiSettings } from "./ai/settings";
+import { getPublicSettings, resolveAgentRole, updateAiSettings } from "./ai/settings";
 import { getPrompt, getPromptVersion, listPrompts, renderPrompt, resetPrompt, savePrompt } from "./ai/prompts";
 import { resolvePermission } from "./ai/permissions";
 import { analyzeIntent } from "./ai/intent";
@@ -396,6 +396,7 @@ app.put("/api/ai/settings", async (req, res) => {
       providerEnabled,
       localModelsDir:
         typeof body.localModelsDir === "string" ? body.localModelsDir : undefined,
+      reviewEdits: typeof body.reviewEdits === "boolean" ? body.reviewEdits : undefined,
     });
     res.json(settings);
   } catch (error) {
@@ -455,6 +456,59 @@ app.post("/api/prompts/:id/preview", async (req, res) => {
         ? (req.body.variables as Record<string, string>)
         : {};
     res.json({ ...prompt, preview: renderPrompt(prompt.system, variables) });
+  } catch (error) {
+    handleError(res, error, 400);
+  }
+});
+
+app.post("/api/prompts/:id/test", async (req, res) => {
+  try {
+    const projectId = typeof req.body?.projectId === "string" ? req.body.projectId : undefined;
+    const prompt = await getPrompt(req.params.id, projectId);
+    const system =
+      typeof req.body?.system === "string" && req.body.system.trim()
+        ? req.body.system
+        : prompt.system;
+    const variables =
+      req.body?.variables && typeof req.body.variables === "object"
+        ? (req.body.variables as Record<string, string>)
+        : {};
+    const rendered = renderPrompt(system, {
+      tools: "[tool catalog omitted for this prompt test]",
+      language: "Write every human-readable value in Turkish.",
+      ...variables,
+    });
+    const config = await resolveAgentRole("main");
+    const message =
+      typeof req.body?.message === "string" && req.body.message.trim()
+        ? req.body.message.trim().slice(0, 2_000)
+        : "Reply in one short sentence confirming that you received these instructions.";
+    let usage: { inputTokens: number; outputTokens: number; totalTokens: number } | undefined;
+    const started = Date.now();
+    const text = await chat(
+      config,
+      [
+        { role: "system", content: rendered },
+        { role: "user", content: message },
+      ],
+      {
+        maxTokens: 220,
+        temperature: 0,
+        timeoutMs: 45_000,
+        onUsage: (next) => {
+          usage = next;
+        },
+      },
+    );
+    res.json({
+      ok: true,
+      provider: config.id,
+      model: config.model,
+      latencyMs: Date.now() - started,
+      text,
+      tokenUsage: usage,
+      preview: rendered,
+    });
   } catch (error) {
     handleError(res, error, 400);
   }

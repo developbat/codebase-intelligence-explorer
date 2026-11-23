@@ -2865,17 +2865,17 @@ export function CodeStudio({
           </button>
         ) : null}
         <div className="studio-side-tabs">
-          <button className={sidebarTab === "files" ? "is-active" : ""} onClick={() => setSidebarTab("files")}>
-            <Folder size={12} /> {t("Files")}
-          </button>
           <button className={sidebarTab === "chat" ? "is-active" : ""} onClick={() => setSidebarTab("chat")}>
             <MessageSquare size={12} /> {t("Chats")}
           </button>
-          <button className={sidebarTab === "tools" ? "is-active" : ""} onClick={() => setSidebarTab("tools")}>
-            <ListChecks size={12} /> {t("Tools")}
-          </button>
           <button className={sidebarTab === "project" ? "is-active" : ""} onClick={() => setSidebarTab("project")}>
             <Info size={12} /> {t("Details")}
+          </button>
+          <button className={sidebarTab === "files" ? "is-active" : ""} onClick={() => setSidebarTab("files")}>
+            <Folder size={12} /> {t("Files")}
+          </button>
+          <button className={sidebarTab === "tools" ? "is-active" : ""} onClick={() => setSidebarTab("tools")}>
+            <ListChecks size={12} /> {t("Tools")}
           </button>
         </div>
 
@@ -2971,19 +2971,6 @@ export function CodeStudio({
             <button className="studio-side-chat-new" onClick={createChatTab} disabled={chatBusy}>
               <Plus size={11} /> {t("New chat")}
             </button>
-            <div className="studio-side-chat-preview">
-              <span>{t("Active chat")}</span>
-              {chatMessages.length === 0 ? (
-                <em>{t("No messages yet.")}</em>
-              ) : (
-                chatMessages.slice(-8).map((message, index) => (
-                  <div key={index} className={`is-${message.role}`}>
-                    <strong>{message.role === "user" ? t("You") : t("Agent")}</strong>
-                    <p>{message.content.replace(/\s+/g, " ").slice(0, 220)}</p>
-                  </div>
-                ))
-              )}
-            </div>
           </div>
         ) : sidebarTab === "tools" ? (
           <div className="studio-side-tools">

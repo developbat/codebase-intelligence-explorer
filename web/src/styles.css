@@ -19945,3 +19945,134 @@ button.canvas-stat {
 .studio-continue.is-global {
   margin: 0 12px 5px;
 }
+
+.agent-review-toggle {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  padding: 7px 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(148, 163, 184, 0.03);
+  cursor: pointer;
+}
+
+.agent-review-toggle input {
+  margin-top: 2px;
+}
+
+.agent-review-toggle span {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.agent-review-toggle strong {
+  font-size: 9.5px;
+}
+
+.agent-review-toggle small {
+  color: #8ba8ce;
+  font-size: 8.5px;
+  line-height: 1.4;
+}
+
+.task-queue-review {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 4px 0;
+  padding: 5px 7px;
+  border-left: 2px solid rgba(52, 211, 153, 0.55);
+  border-radius: 4px;
+  background: rgba(16, 185, 129, 0.05);
+}
+
+.task-queue-review.is-issues {
+  border-left-color: rgba(251, 191, 36, 0.65);
+  background: rgba(251, 191, 36, 0.05);
+}
+
+.task-queue-review strong {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: #a7f3d0;
+  font-size: 8.5px;
+}
+
+.task-queue-review.is-issues strong {
+  color: #fcd34d;
+}
+
+.task-queue-review strong span {
+  color: #7f9bbd;
+  font-family: var(--mono);
+  font-size: 7.5px;
+}
+
+.task-queue-review > span,
+.task-queue-review li {
+  color: #9fb6d2;
+  font-size: 8.5px;
+  line-height: 1.4;
+}
+
+.task-queue-review ul {
+  margin: 0;
+  padding-left: 13px;
+}
+
+.prompt-test-box {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-top: 6px;
+}
+
+.prompt-test-box > input {
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #0b121c;
+  color: #eaf3ff;
+  font-size: 9px;
+}
+
+.prompt-test-result {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 6px 8px;
+  border: 1px solid rgba(52, 211, 153, 0.22);
+  border-radius: 7px;
+  background: rgba(16, 185, 129, 0.04);
+}
+
+.prompt-test-result > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.prompt-test-result strong {
+  color: #a7f3d0;
+  font-family: var(--mono);
+  font-size: 8.5px;
+}
+
+.prompt-test-result span {
+  color: #8ba8ce;
+  font-size: 8px;
+}
+
+.prompt-test-result p {
+  margin: 0;
+  color: #d7e6fb;
+  font-size: 9px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+}

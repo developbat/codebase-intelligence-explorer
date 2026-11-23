@@ -40,6 +40,19 @@ export interface ProjectTask {
     ok?: boolean;
     output?: string;
   };
+  review?: {
+    verdict: "ok" | "issues";
+    summary: string;
+    issues: string[];
+    provider: string;
+    model: string;
+    checkedFiles: string[];
+    tokenUsage?: {
+      inputTokens: number;
+      outputTokens: number;
+      totalTokens: number;
+    };
+  };
   createdAt: string;
   updatedAt: string;
   startedAt?: string;
