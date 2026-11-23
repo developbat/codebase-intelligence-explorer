@@ -9,6 +9,7 @@ import {
   Library,
   RefreshCw,
   Smartphone,
+  ScrollText,
   Settings2,
   ShieldCheck,
   Wrench,
@@ -20,6 +21,7 @@ import { useI18n } from "../i18n";
 import { api } from "../api";
 import { AiSettingsDialog } from "./AiSettingsDialog";
 import { UsageDialog } from "./UsageDialog";
+import { ReportsPanel } from "./ReportsPanel";
 import { PromptManagerDialog } from "./PromptManagerDialog";
 import { SkillsPanel } from "./SkillsPanel";
 import { AgentSettingsPanel } from "./AgentSettingsPanel";
@@ -38,6 +40,7 @@ export type SettingsTab =
   | "devices"
   | "editor"
   | "usage"
+  | "reports"
   | "prompts"
   | "skills"
   | "tools";
@@ -76,6 +79,7 @@ const TABS: { id: SettingsTab; label: string; icon: typeof Settings2 }[] = [
   { id: "devices", label: "Devices", icon: Smartphone },
   { id: "editor", label: "Editor & tests", icon: Code2 },
   { id: "usage", label: "Usage", icon: BarChart3 },
+  { id: "reports", label: "Reports", icon: ScrollText },
   { id: "prompts", label: "Prompts", icon: FileText },
   { id: "skills", label: "Skills", icon: Sparkles },
   { id: "tools", label: "Tools", icon: Wrench },
@@ -400,6 +404,14 @@ export function SettingsScreen({
                 />
               ) : (
                 <div className="settings-empty">{t("Open a project to see usage.")}</div>
+              )
+            ) : null}
+
+            {tab === "reports" ? (
+              projectId ? (
+                <ReportsPanel projectId={projectId} />
+              ) : (
+                <div className="settings-empty">{t("Open a project to see reports.")}</div>
               )
             ) : null}
 

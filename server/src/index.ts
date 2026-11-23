@@ -1541,13 +1541,27 @@ app.patch("/api/projects/:id/tasks/:taskId", async (req, res) => {
     }
     if (["simple", "standard", "hard"].includes(req.body?.effort)) patch.effort = req.body.effort;
     if (["main", "fast", "planner", "reviewer"].includes(req.body?.role)) patch.role = req.body.role;
-    if (["pending", "failed", "blocked"].includes(req.body?.status)) {
+    if (["pending", "failed", "blocked", "done"].includes(req.body?.status)) {
       patch.status = req.body.status;
       if (req.body.status === "pending") {
         patch.completedAt = undefined;
         patch.attempts = 0;
         patch.notes = req.body?.notes ?? undefined;
       }
+      if (req.body.status === "done") {
+        patch.completedAt = new Date().toISOString();
+        patch.notes =
+          typeof req.body?.notes === "string" && req.body.notes.trim()
+            ? req.body.notes.trim().slice(0, 1_000)
+            : "Marked complete manually.";
+      }
+    }
+    if (Array.isArray(req.body?.changedFiles)) {
+      patch.changedFiles = req.body.changedFiles
+        .filter((file: unknown): file is string => typeof file === "string")
+        .map((file: string) => file.trim())
+        .filter(Boolean)
+        .slice(0, 200);
     }
     if (Number(req.body?.tokenBudget) > 0) patch.tokenBudget = Number(req.body.tokenBudget);
     if (Number(req.body?.costBudgetUsd) > 0) patch.costBudgetUsd = Number(req.body.costBudgetUsd);
@@ -1557,7 +1571,13 @@ app.patch("/api/projects/:id/tasks/:taskId", async (req, res) => {
         .filter((id: string) => queue.tasks.some((task) => task.id === id));
     }
     const updated = updateTask(queue, req.params.taskId, patch);
-    res.json({ queue: await saveQueue(analysis.rootPath, updated) });
+    const nextQueue = {
+      ...updated,
+      status: updated.tasks.every((task) => task.status === "done")
+        ? ("completed" as const)
+        : updated.status,
+    };
+    res.json({ queue: await saveQueue(analysis.rootPath, nextQueue) });
   } catch (error) {
     handleError(res, error, 400);
   }

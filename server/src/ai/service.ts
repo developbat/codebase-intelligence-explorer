@@ -3939,6 +3939,7 @@ export async function runAgentTask(
   let missingSelectors: MissingSelector[] = [];
   let browserCheckCalls = 0;
   let remainingWorkRejected = false;
+  let transientRetries = 0;
   let budgetWarned = false;
   let budgetWarning: string | undefined;
   let planPath: string | undefined;
@@ -4062,6 +4063,23 @@ export async function runAgentTask(
       }
       consecutiveFailures += 1;
       const message = requestError instanceof Error ? requestError.message : "The model request failed.";
+      const transient =
+        /fetch failed|econnreset|etimedout|timed out|timeout|network|socket|429|rate limit|502|503|504|overloaded|temporarily unavailable|service unavailable|connection reset/i.test(
+          message,
+        );
+      if (transient && transientRetries < 3) {
+        transientRetries += 1;
+        const delay = [2_000, 5_000, 10_000][transientRetries - 1] ?? 10_000;
+        log(
+          "warn",
+          `Transient model error · retry ${transientRetries}/3`,
+          `${message.slice(0, 180)} · waiting ${Math.round(delay / 1_000)}s`,
+        );
+        // A failed socket request should not consume the task's step budget.
+        modelTurns = Math.max(0, modelTurns - 1);
+        await new Promise((resolve) => setTimeout(resolve, delay));
+        continue;
+      }
       const isEmpty = /empty response/i.test(message);
       const unavailable =
         /error 410\b|end of life|no longer available|model .* not found|does not exist|model_not_found/i.test(
@@ -4103,6 +4121,7 @@ export async function runAgentTask(
       continue;
     }
     consecutiveFailures = 0;
+    transientRetries = 0;
     log("info", "Plan received", `${reply.length} characters`);
 
     const cleanReply = stripToolCallMarkup(reply);

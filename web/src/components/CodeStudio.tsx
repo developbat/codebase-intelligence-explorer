@@ -3842,6 +3842,13 @@ export function CodeStudio({
                   <RefreshCw size={11} /> {t("Choose model & continue")}
                 </button>
                 <button
+                  className="ghost-button"
+                  onClick={() => openSettings("reports")}
+                  title={t("Open the task report")}
+                >
+                  <ListChecks size={11} /> {t("Reports")}
+                </button>
+                <button
                   className="studio-continue-dismiss"
                   onClick={() => setDismissedQueueAt(taskQueue.updatedAt)}
                   aria-label={t("Dismiss")}

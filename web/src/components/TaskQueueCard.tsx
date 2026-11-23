@@ -238,6 +238,19 @@ export function TaskQueueCard({
                       >
                         <ChevronDown size={11} />
                       </button>
+                      {task.status === "failed" || task.status === "blocked" ? (
+                        <button
+                          onClick={() =>
+                            void onUpdateTask?.(task.id, {
+                              status: "done",
+                              notes: t("Marked complete manually."),
+                            })
+                          }
+                          title={t("Mark done")}
+                        >
+                          <CheckCircle2 size={11} />
+                        </button>
+                      ) : null}
                       <button onClick={() => beginEdit(task)} title={t("Edit task")}>
                         <Pencil size={11} />
                       </button>

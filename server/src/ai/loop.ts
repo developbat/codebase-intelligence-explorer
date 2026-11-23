@@ -16,6 +16,7 @@ import type {
 } from "../../../shared/tasks";
 import { loadAnalysis } from "../store";
 import { readSourceFile } from "../editor";
+import { checkFileSyntax } from "../syntax";
 import {
   appendTaskContext,
   createQueue,
@@ -1195,8 +1196,8 @@ export async function runProjectLoop(
           model: alternate?.model ?? task.model,
           resultSummary: undefined,
           verification: undefined,
-          changedFiles: [],
-          commands: [],
+          changedFiles: [...new Set([...(task.changedFiles ?? []), ...result.changedFiles])],
+          commands: [...new Set([...(task.commands ?? []), ...result.ranCommands])],
           notes: alternate
             ? `Retrying with ${alternate.provider}/${alternate.model} after the previous attempt failed.`
             : "Retrying after the previous attempt failed.",
@@ -1218,6 +1219,38 @@ export async function runProjectLoop(
           notes: reason.slice(0, 800),
         });
         finalTask = queue.tasks.find((item) => item.id === task.id);
+      }
+      if (
+        finalTask &&
+        finalTask.status === "failed" &&
+        result.stoppedReason === "error" &&
+        finalTask.attempts > 1 &&
+        finalTask.changedFiles.length > 0
+      ) {
+        // A transient provider failure must not erase work that was already
+        // written in an earlier attempt. If the current files still parse, keep
+        // the task as done with an explicit verification note.
+        const syntax = await Promise.all(
+          finalTask.changedFiles.slice(0, 8).map(async (filePath) => {
+            const checked = await checkFileSyntax(analysis, filePath).catch(() => null);
+            return checked;
+          }),
+        );
+        const failures = syntax.filter((item) => item && item.supported && !item.ok);
+        if (failures.length === 0) {
+          queue = markTask(queue, task.id, {
+            status: "done",
+            completedAt: nowIso(),
+            notes:
+              "Work was written in an earlier attempt. A later model request failed, so the task was auto-completed after syntax checks passed. Run the project verification command before shipping.",
+          });
+          finalTask = queue.tasks.find((item) => item.id === task.id);
+          await appendTaskContext(
+            analysis.rootPath,
+            `Auto-completed · ${task.id}`,
+            "The agent wrote the files, then a later model request failed. Syntax checks pass; verification is still recommended.",
+          );
+        }
       }
       if (finalTask) {
         queue = blockDependentsOf(queue, finalTask.id);
