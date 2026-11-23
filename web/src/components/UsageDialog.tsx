@@ -198,7 +198,7 @@ export function UsageDialog({
               </div>
               {priceRows.length === 0 ? (
                 <div className="usage-empty">
-                  {t("No price tariff found; usage is shown as free.")}
+                  {t("No price tariff found; cost is unknown.")}
                 </div>
               ) : (
                 <table className="usage-table usage-price-table">
@@ -226,7 +226,7 @@ export function UsageDialog({
               )}
               <small className="usage-price-note">
                 {t(
-                  "Prices are USD per 1M tokens. “free” means no tariff was found for that model. Provider catalogs differ; OpenRouter pricing is matched to configured provider models when possible.",
+                  "Prices are USD per 1M tokens. “—” means no tariff was found for that model. Provider catalogs differ; OpenRouter pricing is matched to configured provider models when possible.",
                 )}
                 {pricing?.updatedAt
                   ? ` ${t("Updated")}: ${new Date(pricing.updatedAt).toLocaleString()}`

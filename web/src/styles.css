@@ -18611,7 +18611,7 @@ button.canvas-stat {
 
 .studio-composer-input-wrap > textarea {
   width: 100%;
-  min-height: 138px;
+  min-height: 112px;
   max-height: 380px;
   padding: 14px 16px 54px;
   border: 1px solid rgba(139, 168, 206, 0.26);
@@ -18885,4 +18885,195 @@ button.canvas-stat {
   margin-top: 6px;
   color: #9fb6d2;
   font-size: 9px;
+}
+
+/* Long answers collapse to a 3-line status, expandable on demand */
+.studio-answer-body {
+  position: relative;
+  overflow: hidden;
+}
+
+.studio-answer-body.is-collapsed {
+  max-height: 4.8em;
+}
+
+.studio-answer-body.is-collapsed::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 1.6em;
+  background: linear-gradient(180deg, transparent, #0b121c 85%);
+  pointer-events: none;
+}
+
+.studio-answer-toggle {
+  align-self: flex-start;
+  margin-top: 4px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #8fb7e8;
+  font-size: 9.5px;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.studio-answer-toggle:hover {
+  color: #d6e8ff;
+}
+
+/* Top model picker: provider tabs + selected order */
+.studio-model-provider-tabs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  overflow-x: auto;
+  padding: 7px 10px 8px;
+  border-bottom: 1px solid var(--line);
+}
+
+.studio-model-provider-tabs button {
+  flex: none;
+  height: 27px;
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: #8ba8ce;
+  font-size: 9.5px;
+  cursor: pointer;
+}
+
+.studio-model-provider-tabs button.is-active {
+  border-color: rgba(110, 168, 254, 0.36);
+  background: rgba(59, 130, 246, 0.12);
+  color: #d6e8ff;
+}
+
+.studio-model-chain-section {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+
+.studio-model-chain-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.studio-model-chain-empty {
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: rgba(148, 163, 184, 0.04);
+  color: #7f9bbd;
+  font-size: 9px;
+}
+
+.studio-model-chain {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.studio-model-chain > div {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 7px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+}
+
+.studio-model-chain-index {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: rgba(59, 130, 246, 0.12);
+  color: #9fc4f5;
+  font-family: var(--mono);
+  font-size: 8px;
+}
+
+.studio-model-chain > div > div:nth-child(2) {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  flex: 1;
+}
+
+.studio-model-chain strong {
+  color: #dcecff;
+  font-size: 9.5px;
+}
+
+.studio-model-chain code {
+  overflow: hidden;
+  color: #8fa9c9;
+  font-family: var(--mono);
+  font-size: 8.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.studio-model-chain-actions {
+  display: flex;
+  gap: 3px;
+}
+
+.studio-model-chain-actions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 21px;
+  height: 21px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: transparent;
+  color: #8ba8ce;
+  cursor: pointer;
+}
+
+.studio-model-chain-actions button:hover:not(:disabled) {
+  border-color: rgba(110, 168, 254, 0.5);
+  color: #e3f0ff;
+}
+
+.studio-model-chain-actions button:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+.studio-model-add-chain {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 26px;
+  padding: 0 8px;
+  border: 1px dashed rgba(110, 168, 254, 0.34);
+  border-radius: 7px;
+  background: transparent;
+  color: #9fc4f5;
+  font-size: 9px;
+  cursor: pointer;
+}
+
+.studio-model-add-chain:hover:not(:disabled) {
+  border-color: rgba(110, 168, 254, 0.6);
+  background: rgba(59, 130, 246, 0.08);
+}
+
+.studio-model-body {
+  grid-template-columns: minmax(0, 1fr);
 }

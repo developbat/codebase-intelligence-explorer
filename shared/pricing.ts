@@ -26,7 +26,7 @@ export interface PricingReport {
 }
 
 export function formatUsd(value: number | undefined): string {
-  if (value === undefined || !Number.isFinite(value)) return "free";
+  if (value === undefined || !Number.isFinite(value)) return "—";
   if (value === 0) return "free";
   if (value < 0.01) return `$${value.toFixed(4)}`;
   if (value < 1) return `$${value.toFixed(3)}`;
@@ -43,6 +43,16 @@ const PROVIDER_PREFIX: Record<string, string> = {
   openrouter: "openrouter",
 };
 
+function canonicalModel(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/^[^/]+\//, "")
+    .replace(/[-_\s]+/g, ".")
+    .replace(/\.+/g, ".")
+    .replace(/^\.|\.$/g, "");
+}
+
 export function findModelPrice(
   prices: ModelPricing[],
   provider: string,
@@ -50,6 +60,7 @@ export function findModelPrice(
 ): ModelPricing | undefined {
   const wantedProvider = provider.trim().toLowerCase();
   const wantedModel = model.trim().toLowerCase();
+  const canonicalWanted = canonicalModel(model);
   return (
     prices.find(
       (price) =>
@@ -61,6 +72,11 @@ export function findModelPrice(
         price.provider.toLowerCase() === wantedProvider &&
         ((price.matchedModel ?? "").toLowerCase() === wantedModel ||
           (price.matchedModel ?? "").toLowerCase().endsWith(`/${wantedModel}`)),
+    ) ??
+    prices.find(
+      (price) =>
+        canonicalModel(price.model) === canonicalWanted ||
+        canonicalModel(price.matchedModel ?? "") === canonicalWanted,
     ) ??
     prices.find((price) => {
       if (price.provider.toLowerCase() !== "openrouter") return false;

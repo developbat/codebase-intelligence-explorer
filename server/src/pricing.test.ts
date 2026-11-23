@@ -7,6 +7,15 @@ import { findPrice, usageCost } from "./ai/pricing";
 const prices: ModelPricing[] = [
   {
     provider: "openrouter",
+    model: "anthropic/claude-sonnet-4.5",
+    inputPerMillion: 3,
+    outputPerMillion: 15,
+    currency: "USD",
+    source: "openrouter",
+    updatedAt: "",
+  },
+  {
+    provider: "openrouter",
     model: "deepseek/deepseek-chat",
     inputPerMillion: 0.25,
     outputPerMillion: 1,
@@ -41,9 +50,16 @@ test("pricing maps provider models and computes per-million cost", () => {
   assert.equal(usageCost({ inputTokens: 100, outputTokens: 100, totalTokens: 200 }, undefined), undefined);
 });
 
-test("free/unknown prices display as free", () => {
-  assert.equal(formatUsd(undefined), "free");
+test("unknown prices are not shown as free", () => {
+  assert.equal(formatUsd(undefined), "—");
   assert.equal(formatUsd(0), "free");
   assert.equal(formatUsd(0.0004), "$0.0004");
   assert.equal(formatUsd(1.234), "$1.23");
+});
+
+test("hyphen and dot model names match the same tariff", () => {
+  const price = findPrice(prices, "anthropic", "claude-sonnet-4-5");
+  assert.ok(price);
+  assert.equal(price.inputPerMillion, 3);
+  assert.equal(price.outputPerMillion, 15);
 });

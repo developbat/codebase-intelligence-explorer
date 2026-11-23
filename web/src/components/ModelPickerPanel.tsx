@@ -91,7 +91,7 @@ export function ModelPickerPanel({
           </h3>
           <p>
             {t(
-              "Choose the default provider and model. Prices are USD per 1M tokens; free means no tariff was found.",
+              "Choose the default provider and model. Prices are USD per 1M tokens; “—” means no tariff was found.",
             )}
           </p>
         </div>
