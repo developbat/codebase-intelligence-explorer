@@ -17,8 +17,9 @@ import {
   XCircle,
 } from "lucide-react";
 import type { AiProviderId, AiSettingsPublic } from "../../../shared/ai";
-import { providerInfo } from "../../../shared/ai";
+import { isKeylessProvider, providerInfo } from "../../../shared/ai";
 import { api } from "../api";
+import { LocalModelsPanel } from "./LocalModelsPanel";
 import { useI18n } from "../i18n";
 
 interface AiSettingsDialogProps {
@@ -46,6 +47,7 @@ export function AiSettingsDialog({
   const [baseUrl, setBaseUrl] = useState("");
   const [model, setModel] = useState("");
   const [makeDefault, setMakeDefault] = useState(false);
+  const [providerEnabled, setProviderEnabled] = useState(true);
   const [busy, setBusy] = useState<"save" | "test" | "models" | null>(null);
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
   const [models, setModels] = useState<string[]>([]);
@@ -95,6 +97,7 @@ export function AiSettingsDialog({
     setClearKey(false);
     setShowKey(false);
     setModels(current?.models ?? providerInfo(provider).models);
+    setProviderEnabled(current?.enabled !== false);
   }, [open, provider, settings, adding, editingCustomId]);
 
   useEffect(() => {
@@ -151,6 +154,7 @@ export function AiSettingsDialog({
       clearKey,
       baseUrl,
       model,
+      providerEnabled: { provider, enabled: providerEnabled },
       ...(makeDefault ? { defaultProvider: provider, defaultModel: model } : {}),
     });
     onSaved(next);
@@ -163,7 +167,22 @@ export function AiSettingsDialog({
     setBusy("save");
     setMessage(null);
     try {
-      await persistBuiltIn();
+      const next = await persistBuiltIn();
+      const rolesAreDefault = next.agentRoles.every(
+        (role) =>
+          role.provider === next.defaultProvider && role.model === next.defaultModel,
+      );
+      if (rolesAreDefault) {
+        const auto = await api.ai.autoConfigureAgents().catch(() => null);
+        if (auto) {
+          onSaved(auto.settings);
+          setMessage({
+            ok: true,
+            text: t("Provider saved. Agent workers were auto-assigned."),
+          });
+          return;
+        }
+      }
       setMessage({ ok: true, text: t("Settings saved.") });
     } catch (error) {
       setMessage({ ok: false, text: error instanceof Error ? error.message : t("Could not save settings.") });
@@ -345,6 +364,7 @@ export function AiSettingsDialog({
 
         <div className="ai-settings-layout">
           <div className="ai-provider-list">
+            <LocalModelsPanel onSaved={onSaved} />
             <button className="ai-provider ai-provider-add" onClick={startAdd}>
               <span className="ai-provider-icon">
                 <Plus size={14} />
@@ -377,7 +397,14 @@ export function AiSettingsDialog({
                 <span className="ai-provider-main">
                   <span className="ai-provider-name">{item.name}</span>
                   <span className={`ai-provider-state ${item.hasKey || item.custom ? "is-ready" : ""}`}>
-                    {item.keyHint ?? (item.custom ? t("No key (optional)") : t("Not configured"))}
+                    {!item.enabled
+                      ? t("Disabled")
+                      : item.keyHint ??
+                        (item.custom
+                          ? t("No key (optional)")
+                          : isKeylessProvider(item.id)
+                            ? t("No key needed")
+                            : t("Not configured"))}
                   </span>
                 </span>
                 {settings?.defaultProvider === item.id ? (
@@ -538,6 +565,12 @@ export function AiSettingsDialog({
                   ) : null}
                 </div>
 
+                {isKeylessProvider(provider) ? (
+                  <div className="ai-field-note">
+                    {t("This provider runs without an API key. Add a key only if your endpoint requires one.")}
+                  </div>
+                ) : (
+                  <>
                 <label className="field-label">
                   <KeyRound size={12} /> {t("API key")}
                   {state?.hasKey ? <span className="field-hint">{state.keyHint}</span> : null}
@@ -573,6 +606,8 @@ export function AiSettingsDialog({
                     {t("Remove the saved key")}
                   </label>
                 ) : null}
+                  </>
+                )}
 
                 <label className="field-label">{t("Base URL")}</label>
                 <input
@@ -614,6 +649,15 @@ export function AiSettingsDialog({
                       })}`
                     : ` · ${t("saved/default list")}`}
                 </div>
+
+                <label className="checkbox-row">
+                  <input
+                    type="checkbox"
+                    checked={providerEnabled}
+                    onChange={(event) => setProviderEnabled(event.target.checked)}
+                  />
+                  {t("Use this provider for automatic model and worker selection")}
+                </label>
 
                 <label className="checkbox-row">
                   <input

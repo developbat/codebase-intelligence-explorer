@@ -74,6 +74,7 @@ import { diffLines } from "diff";
 import {
   AlertTriangle,
   Bot,
+  Check,
   CheckCheck,
   Database,
   Download,
@@ -565,10 +566,11 @@ export function CodeStudio({
   const [modelDraft, setModelDraft] = useState("");
   const configuredProviders = (aiSettings?.providers ?? []).filter(
     (provider) =>
-      provider.hasKey ||
-      provider.id === "custom" ||
-      provider.id === "local" ||
-      provider.custom,
+      provider.enabled !== false &&
+      (provider.hasKey ||
+        provider.id === "custom" ||
+        provider.id === "local" ||
+        provider.custom),
   );
   const providerDisplayName = (id: AiProviderId) =>
     aiSettings?.providers.find((provider) => provider.id === id)?.name ?? providerInfo(id).name;
@@ -1168,41 +1170,40 @@ export function CodeStudio({
     setChainBusy(true);
     try {
       const updated = await api.ai.updateSettings({ fallback: { chain: next } });
-      onSettingsSaved(updated);
+      const auto =
+        aiSettings?.autoSwitchModels !== false
+          ? await api.ai.autoConfigureAgents().catch(() => null)
+          : null;
+      onSettingsSaved(auto?.settings ?? updated);
     } finally {
       setChainBusy(false);
     }
   }
 
-  async function addModelToChain() {
-    const provider = pickerProvider ?? modelCatalogProvider ?? active?.provider;
-    if (!provider) return;
-    const model =
-      modelDraft.trim() ||
-      aiSettings?.providers.find((item) => item.id === provider)?.model ||
-      "";
-    if (!model) return;
-    if (modelChain.some((item) => item.provider === provider && item.model === model)) return;
-    await saveModelChain([...modelChain, { provider, model }]);
+  function isModelSelected(provider: AiProviderId | null | undefined, model: string): boolean {
+    if (!provider) return false;
+    return modelChain.some((item) => item.provider === provider && item.model === model);
   }
 
-  async function moveModelInChain(index: number, direction: -1 | 1) {
-    const target = index + direction;
-    if (target < 0 || target >= modelChain.length) return;
-    const next = [...modelChain];
-    [next[index], next[target]] = [next[target], next[index]];
-    await saveModelChain(next);
+  async function toggleModelInChain(provider: AiProviderId, model: string) {
+    if (!model) return;
+    const exists = modelChain.some((item) => item.provider === provider && item.model === model);
+    await saveModelChain(
+      exists
+        ? modelChain.filter((item) => !(item.provider === provider && item.model === model))
+        : [...modelChain, { provider, model }],
+    );
   }
 
   async function removeModelFromChain(index: number) {
     await saveModelChain(modelChain.filter((_, itemIndex) => itemIndex !== index));
   }
 
-  async function loadModels(provider: AiProviderId) {
+  async function loadModels(provider: AiProviderId, refresh = false) {
     setModelCatalogBusy(true);
     setModelCatalogProvider(provider);
     try {
-      const response = await api.ai.models(provider);
+      const response = await api.ai.models(provider, refresh);
       setModelCatalog(response.models);
     } catch {
       setModelCatalog([]);
@@ -1217,12 +1218,7 @@ export function CodeStudio({
     setModelPickerOpen((value) => !value);
     setModelCatalog([]);
     setModelCatalogProvider(provider);
-    if (provider === "local") {
-      void api.ai
-        .models("local", true)
-        .then((result) => setModelCatalog(result.models))
-        .catch(() => undefined);
-    }
+    if (provider) void loadModels(provider);
   }
 
   const quickCommands = useMemo(() => quickCommandsFor(analysis), [analysis]);
@@ -3183,9 +3179,7 @@ export function CodeStudio({
                               setModelCatalogProvider(provider.id);
                               setModelDraft(provider.model);
                               setModelCatalog([]);
-                              if (provider.id === "local") {
-                                void loadModels(provider.id);
-                              }
+                              void loadModels(provider.id);
                             }}
                           >
                             <span>{provider.name}</span>
@@ -3229,126 +3223,87 @@ export function CodeStudio({
                           </button>
                         ) : null}
                       </div>
-                      <div className="studio-model-body">
-                        <div className="studio-model-main-column">
-                          <div className="studio-model-selected">
-                            <span>{t("Selected provider")}</span>
-                            <strong>{pickerProvider ? providerDisplayName(pickerProvider) : t("No provider")}</strong>
-                            <small>{pickerProvider}</small>
-                          </div>
-                          <span className="studio-model-section-label">{t("Model id")}</span>
-                          <div className="studio-model-input-row">
-                            <input
-                              value={modelDraft}
-                              onChange={(event) => setModelDraft(event.target.value)}
-                              placeholder={t("Model id")}
-                              spellCheck={false}
-                            />
-                            <button
-                              onClick={() => {
-                                const provider = modelCatalogProvider ?? active?.provider;
-                                if (provider) selectCodeModel(provider, modelDraft);
-                              }}
-                            >
-                              {t("Use")}
-                            </button>
-                          </div>
-                          <div className="studio-model-fetch-row">
-                            <button
-                              onClick={() => {
-                                const provider = modelCatalogProvider ?? active?.provider;
-                                if (provider) void loadModels(provider);
-                              }}
-                              disabled={modelCatalogBusy}
-                            >
-                              {modelCatalogBusy ? <Loader2 size={12} className="spin" /> : null}
-                              {t("Fetch models")}
-                            </button>
-                          </div>
-                          <div className="studio-model-chain-section">
-                            <div className="studio-model-chain-head">
-                              <span className="studio-model-section-label">{t("Selected models (order)")}</span>
-                              <button
-                                className="ghost-button"
-                                onClick={() => void saveModelChain([])}
-                                disabled={chainBusy || modelChain.length === 0}
-                              >
-                                {t("Auto")}
-                              </button>
-                            </div>
-                            {modelChain.length === 0 ? (
-                              <div className="studio-model-chain-empty">
-                                {t("Auto selection is active. Add models to define a custom order.")}
-                              </div>
-                            ) : (
-                              <div className="studio-model-chain">
-                                {modelChain.map((item, index) => (
-                                  <div key={`${item.provider}::${item.model}`}>
-                                    <span className="studio-model-chain-index">{index + 1}</span>
-                                    <div>
-                                      <strong>{item.provider}</strong>
-                                      <code>{item.model}</code>
-                                    </div>
-                                    <div className="studio-model-chain-actions">
-                                      <button
-                                        onClick={() => void moveModelInChain(index, -1)}
-                                        disabled={chainBusy || index === 0}
-                                        title={t("Move up")}
-                                      >
-                                        <ChevronUp size={10} />
-                                      </button>
-                                      <button
-                                        onClick={() => void moveModelInChain(index, 1)}
-                                        disabled={chainBusy || index === modelChain.length - 1}
-                                        title={t("Move down")}
-                                      >
-                                        <ChevronDown size={10} />
-                                      </button>
-                                      <button
-                                        onClick={() => void removeModelFromChain(index)}
-                                        disabled={chainBusy}
-                                        title={t("Remove")}
-                                      >
-                                        <Trash2 size={10} />
-                                      </button>
-                                    </div>
-                                  </div>
-                                ))}
-                              </div>
-                            )}
-                            <button
-                              className="studio-model-add-chain"
-                              onClick={() => void addModelToChain()}
-                              disabled={chainBusy || !pickerProvider}
-                            >
-                              <Plus size={10} /> {t("Add current model to order")}
-                            </button>
-                          </div>
-                          <span className="studio-model-section-label">{t("Available models")}</span>
-                          {modelCatalog.length > 0 ? (
-                            <div className="studio-model-catalog">
-                              {modelCatalog.slice(0, 80).map((model) => (
-                                <button
-                                  key={model}
-                                  className={model === modelDraft ? "is-active" : ""}
-                                  onClick={() => setModelDraft(model)}
-                                  title={model}
-                                >
-                                  {model}
-                                </button>
-                              ))}
-                            </div>
-                          ) : pickerProvider === "local" ? (
-                            <div className="studio-model-empty">
-                              {t("Start Ollama and pull a model; downloaded local models appear here automatically.")}
-                            </div>
-                          ) : (
-                            <div className="studio-model-empty">
-                              {t("Fetch the provider model list or type a model id.")}
-                            </div>
-                          )}
+                      <div className="studio-model-list-head">
+                        <span className="studio-model-section-label">{t("Available models")}</span>
+                        <div>
+                          <button
+                            className="ghost-button"
+                            onClick={() => {
+                              const provider = modelCatalogProvider ?? active?.provider;
+                              if (provider) void loadModels(provider, true);
+                            }}
+                            disabled={modelCatalogBusy}
+                            title={t("Refresh model list")}
+                          >
+                            {modelCatalogBusy ? <Loader2 size={11} className="spin" /> : <RefreshCw size={11} />}
+                          </button>
                         </div>
                       </div>
+                      {modelCatalog.length > 0 ? (
+                        <div className="studio-model-rows">
+                          {modelCatalog.slice(0, 120).map((model) => {
+                            const provider = pickerProvider;
+                            const selected = isModelSelected(provider, model);
+                            const isActive =
+                              active?.provider === provider && active?.model === model;
+                            return (
+                              <div
+                                key={model}
+                                className={`studio-model-row ${selected ? "is-selected" : ""} ${isActive ? "is-active" : ""}`}
+                              >
+                                <button
+                                  className="studio-model-row-toggle"
+                                  onClick={() => {
+                                    if (provider) void toggleModelInChain(provider, model);
+                                  }}
+                                  title={selected ? t("Remove from selected models") : t("Add to selected models")}
+                                >
+                                  <span className="studio-model-row-check">
+                                    {selected ? <Check size={10} /> : <Plus size={10} />}
+                                  </span>
+                                  <span className="studio-model-row-name">{model}</span>
+                                </button>
+                                <button
+                                  className="studio-model-row-use"
+                                  onClick={() => provider && selectCodeModel(provider, model)}
+                                  disabled={isActive}
+                                >
+                                  {isActive ? <Check size={10} /> : null}
+                                  {isActive ? t("Active") : t("Use")}
+                                </button>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      ) : pickerProvider === "local" ? (
+                        <div className="studio-model-empty">
+                          {t("Start Ollama and pull a model; downloaded local models appear here automatically.")}
+                        </div>
+                      ) : (
+                        <div className="studio-model-empty">
+                          {t("Fetch the provider model list or type a model id.")}
+                        </div>
+                      )}
+                      <details className="studio-model-advanced">
+                        <summary>{t("Advanced: enter a model id")}</summary>
+                        <div className="studio-model-input-row">
+                          <input
+                            value={modelDraft}
+                            onChange={(event) => setModelDraft(event.target.value)}
+                            placeholder={t("Model id")}
+                            spellCheck={false}
+                          />
+                          <button
+                            onClick={() => {
+                              const provider = modelCatalogProvider ?? active?.provider;
+                              if (provider && modelDraft.trim()) void toggleModelInChain(provider, modelDraft.trim());
+                            }}
+                            disabled={!modelDraft.trim()}
+                          >
+                            {t("Add to selected")}
+                          </button>
+                        </div>
+                      </details>
                     </div>
                   </>
                 ) : null}

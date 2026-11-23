@@ -69,9 +69,9 @@ interface SettingsScreenProps {
 
 const TABS: { id: SettingsTab; label: string; icon: typeof Settings2 }[] = [
   { id: "general", label: "General", icon: Globe2 },
-  { id: "models", label: "Models", icon: Cpu },
-  { id: "model-picker", label: "Model picker", icon: Sparkles },
-  { id: "agents", label: "Agents", icon: Bot },
+  { id: "models", label: "Model providers", icon: Cpu },
+  { id: "model-picker", label: "Model selection", icon: Sparkles },
+  { id: "agents", label: "Agent workers", icon: Bot },
   { id: "catalog", label: "Model catalog", icon: Library },
   { id: "devices", label: "Devices", icon: Smartphone },
   { id: "editor", label: "Editor & tests", icon: Code2 },

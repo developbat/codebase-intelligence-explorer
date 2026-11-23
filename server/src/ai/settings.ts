@@ -13,6 +13,7 @@ import type {
 import {
   AI_PROVIDERS,
   CUSTOM_PROVIDER_PREFIX,
+  isKeylessProvider,
   providerInfo,
 } from "../../../shared/ai";
 import { getDataDir } from "../store";
@@ -48,6 +49,8 @@ interface StoredSettings {
   modelHealth: AiModelHealthSettings;
   autoSwitchModels: boolean;
   fallback: AiFallbackSettings;
+  disabledProviders: string[];
+  localModelsDir: string;
 }
 
 export const AI_AGENT_ROLES: AiAgentRole[] = ["main", "planner", "fast", "reviewer"];
@@ -126,7 +129,9 @@ function defaults(): StoredSettings {
       model: provider.models[0] ?? "",
     };
   }
-  const first = AI_PROVIDERS[0];
+  // Start on the keyless free provider so a new install can chat before
+  // adding any account. Users with keys can switch in Model selection.
+  const first = AI_PROVIDERS.find((provider) => provider.id === "free") ?? AI_PROVIDERS[0];
   const main = { provider: first.id, model: first.models[0] ?? "" };
   return {
     version: 3,
@@ -138,6 +143,8 @@ function defaults(): StoredSettings {
     modelHealth: DEFAULT_MODEL_HEALTH,
     autoSwitchModels: true,
     fallback: { chain: [] },
+    disabledProviders: [],
+    localModelsDir: path.join(getDataDir(), "local-models"),
   };
 }
 
@@ -236,6 +243,13 @@ async function loadStored(): Promise<StoredSettings> {
       modelHealth: normalizeModelHealth(parsed.modelHealth),
       autoSwitchModels: parsed.autoSwitchModels !== false,
       fallback: normalizeFallback(parsed.fallback),
+      disabledProviders: Array.isArray(parsed.disabledProviders)
+        ? parsed.disabledProviders.filter((id): id is string => typeof id === "string")
+        : [],
+      localModelsDir:
+        typeof parsed.localModelsDir === "string" && parsed.localModelsDir.trim()
+          ? parsed.localModelsDir.trim()
+          : base.localModelsDir,
     };
   } catch {
     return base;
@@ -263,9 +277,11 @@ export async function getPublicSettings(): Promise<AiSettingsPublic> {
       model: config?.model ?? provider.models[0] ?? "",
       models: config?.models?.length ? config.models : provider.models,
       custom: false,
-      modelListUrl: undefined,
+      modelListUrl:
+        provider.id === "free" ? "https://text.pollinations.ai/models" : undefined,
       modelsUpdatedAt: config?.modelsUpdatedAt,
-      hasKey: Boolean(key),
+      hasKey: Boolean(key) || isKeylessProvider(provider.id),
+      enabled: !stored.disabledProviders.includes(provider.id),
       keyHint: key ? `••••${key.slice(-4)}` : undefined,
     };
   });
@@ -279,7 +295,8 @@ export async function getPublicSettings(): Promise<AiSettingsPublic> {
     custom: true,
     modelListUrl: provider.modelListUrl,
     modelsUpdatedAt: provider.modelsUpdatedAt,
-    hasKey: Boolean(provider.apiKey),
+    hasKey: Boolean(provider.apiKey) || isKeylessProvider(provider.id),
+    enabled: !stored.disabledProviders.includes(provider.id),
     keyHint: provider.apiKey ? `••••${provider.apiKey.slice(-4)}` : undefined,
   }));
   const providers = [...builtIns, ...custom];
@@ -307,6 +324,7 @@ export async function getPublicSettings(): Promise<AiSettingsPublic> {
     modelHealth: stored.modelHealth,
     autoSwitchModels: stored.autoSwitchModels !== false,
     fallback: stored.fallback,
+    localModelsDir: stored.localModelsDir,
   };
 }
 
@@ -463,8 +481,21 @@ export async function updateAiSettings(input: AiSettingsInput): Promise<AiSettin
     stored.autoSwitchModels = input.autoSwitchModels === true;
   }
 
+  if (input.providerEnabled) {
+    const { provider: targetProvider, enabled } = input.providerEnabled;
+    if (!isKnownProvider(targetProvider)) throw new Error("Unknown AI provider.");
+    stored.disabledProviders = enabled
+      ? stored.disabledProviders.filter((id) => id !== targetProvider)
+      : [...new Set([...stored.disabledProviders, targetProvider])];
+  }
+
   if (input.fallback) {
     stored.fallback = normalizeFallback({ ...stored.fallback, ...input.fallback });
+  }
+
+  if (input.localModelsDir !== undefined) {
+    const dir = input.localModelsDir.trim();
+    if (dir) stored.localModelsDir = dir;
   }
 
   if (input.agentRoles) {
@@ -513,7 +544,7 @@ export async function resolveProvider(
   }
   const config = stored.providers[id];
   const apiKey = config?.apiKey ?? "";
-  if (!apiKey && id !== "custom") {
+  if (!apiKey && id !== "custom" && !isKeylessProvider(id)) {
     throw new Error(`${info.name} is not configured. Add an API key in AI settings.`);
   }
   return {

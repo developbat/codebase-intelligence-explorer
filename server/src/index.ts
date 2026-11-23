@@ -18,6 +18,7 @@ import {
   summarizeScope,
 } from "./ai/service";
 import { listProviderModels, testProvider } from "./ai/providers";
+import { discoverLocalModelDirs, localModelStatus, pullLocalModel, startLocalServer } from "./localModels";
 import { autoConfigureAgents } from "./ai/agents";
 import { clearModelCatalog, getModelCatalog, importModelCatalog } from "./ai/catalog";
 import { getModelHealthReport } from "./ai/modelStats";
@@ -114,7 +115,12 @@ import {
 import { searchCode } from "./search";
 import { subscribeProjectEvents } from "./watcher";
 import { isWithin } from "./scanner";
-import { AI_PROVIDERS, CUSTOM_PROVIDER_PREFIX, type AiProviderId } from "../../shared/ai";
+import {
+  AI_PROVIDERS,
+  CUSTOM_PROVIDER_PREFIX,
+  type AiProviderId,
+  type AiSettingsInput,
+} from "../../shared/ai";
 
 function isProviderId(value: string): value is AiProviderId {
   return (
@@ -219,6 +225,39 @@ app.get("/api/ai/model-health", async (_req, res) => {
   }
 });
 
+app.get("/api/ai/local/status", async (_req, res) => {
+  try {
+    res.json(await localModelStatus());
+  } catch (error) {
+    handleError(res, error, 400);
+  }
+});
+
+app.get("/api/ai/local/discover", async (_req, res) => {
+  try {
+    res.json({ dirs: await discoverLocalModelDirs() });
+  } catch (error) {
+    handleError(res, error, 400);
+  }
+});
+
+app.post("/api/ai/local/start", async (_req, res) => {
+  try {
+    res.json(await startLocalServer());
+  } catch (error) {
+    handleError(res, error, 400);
+  }
+});
+
+app.post("/api/ai/local/pull", async (req, res) => {
+  try {
+    const model = typeof req.body?.model === "string" ? req.body.model : "";
+    res.json(await pullLocalModel(model));
+  } catch (error) {
+    handleError(res, error, 400);
+  }
+});
+
 app.get("/api/ai/catalog", async (_req, res) => {
   try {
     res.json({ catalog: await getModelCatalog() });
@@ -289,6 +328,46 @@ app.put("/api/ai/settings", async (req, res) => {
               typeof rawCustom.modelListUrl === "string" ? rawCustom.modelListUrl : undefined,
           }
         : undefined;
+    const rawFallback = body.fallback;
+    const fallback: AiSettingsInput["fallback"] =
+      rawFallback && typeof rawFallback === "object"
+        ? {
+            chain: Array.isArray(rawFallback.chain)
+              ? rawFallback.chain
+                  .filter(
+                    (item: unknown): item is { provider: string; model: string } =>
+                      Boolean(
+                        item &&
+                          typeof item === "object" &&
+                          typeof (item as { provider?: unknown }).provider === "string" &&
+                          typeof (item as { model?: unknown }).model === "string",
+                      ),
+                  )
+                  .map((item: { provider: string; model: string }) => ({
+                    provider: item.provider,
+                    model: item.model,
+                  }))
+              : undefined,
+            maxInputPricePerMillion:
+              typeof rawFallback.maxInputPricePerMillion === "number"
+                ? rawFallback.maxInputPricePerMillion
+                : undefined,
+            maxOutputPricePerMillion:
+              typeof rawFallback.maxOutputPricePerMillion === "number"
+                ? rawFallback.maxOutputPricePerMillion
+                : undefined,
+          }
+        : undefined;
+    const rawProviderEnabled = body.providerEnabled;
+    const providerEnabled: AiSettingsInput["providerEnabled"] =
+      rawProviderEnabled &&
+      typeof rawProviderEnabled === "object" &&
+      typeof rawProviderEnabled.provider === "string"
+        ? {
+            provider: rawProviderEnabled.provider as AiProviderId,
+            enabled: rawProviderEnabled.enabled !== false,
+          }
+        : undefined;
     const settings = await updateAiSettings({
       provider,
       defaultProvider,
@@ -297,11 +376,26 @@ app.put("/api/ai/settings", async (req, res) => {
       clearKey: Boolean(body.clearKey),
       baseUrl: typeof body.baseUrl === "string" ? body.baseUrl : undefined,
       model: typeof body.model === "string" ? body.model : undefined,
+      models: Array.isArray(body.models)
+        ? body.models.filter((model: unknown): model is string => typeof model === "string")
+        : undefined,
       customProvider,
       removeProviderId:
         typeof body.removeProviderId === "string" ? body.removeProviderId : undefined,
       autoSwitchModels:
         typeof body.autoSwitchModels === "boolean" ? body.autoSwitchModels : undefined,
+      fallback,
+      agentRoles:
+        body.agentRoles && typeof body.agentRoles === "object"
+          ? (body.agentRoles as AiSettingsInput["agentRoles"])
+          : undefined,
+      modelHealth:
+        body.modelHealth && typeof body.modelHealth === "object"
+          ? (body.modelHealth as AiSettingsInput["modelHealth"])
+          : undefined,
+      providerEnabled,
+      localModelsDir:
+        typeof body.localModelsDir === "string" ? body.localModelsDir : undefined,
     });
     res.json(settings);
   } catch (error) {

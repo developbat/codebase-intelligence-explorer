@@ -793,6 +793,38 @@ export const api = {
 
     modelHealth: () => request<ModelHealthReport>("/api/ai/model-health"),
 
+    localModels: () =>
+      request<{
+        installed: boolean;
+        running: boolean;
+        models: string[];
+        diskModels: string[];
+        baseUrl: string;
+        modelsDir: string;
+        fromDisk: boolean;
+        error?: string;
+      }>("/api/ai/local/status"),
+    discoverLocalModels: () =>
+      request<{ dirs: { dir: string; models: string[]; sizeBytes: number }[] }>(
+        "/api/ai/local/discover",
+      ),
+    startLocalModels: () =>
+      request<{
+        installed: boolean;
+        running: boolean;
+        models: string[];
+        diskModels: string[];
+        baseUrl: string;
+        modelsDir: string;
+        fromDisk: boolean;
+        error?: string;
+      }>("/api/ai/local/start", { method: "POST", body: "{}" }),
+    pullLocalModel: (model: string) =>
+      request<{ ok: boolean; model: string; output: string }>("/api/ai/local/pull", {
+        method: "POST",
+        body: JSON.stringify({ model }),
+      }),
+
     pricing: () => request<PricingReport>("/api/ai/pricing"),
 
     refreshPricing: () =>

@@ -10,6 +10,7 @@ export type BuiltInAiProviderId =
   | "nvidia"
   | "xai"
   | "local"
+  | "free"
   | "custom";
 
 /** Built-in ids plus user-defined `custom:<slug>` ids. */
@@ -29,6 +30,13 @@ export interface AiProviderInfo {
   keyPlaceholder: string;
   custom?: boolean;
   modelListUrl?: string;
+}
+
+/** Providers that work without an API key. */
+export const KEYLESS_PROVIDERS = new Set<string>(["local", "free"]);
+
+export function isKeylessProvider(id: string): boolean {
+  return KEYLESS_PROVIDERS.has(id);
 }
 
 export const AI_PROVIDERS: AiProviderInfo[] = [
@@ -106,6 +114,15 @@ export const AI_PROVIDERS: AiProviderInfo[] = [
     keyPlaceholder: "xai-…",
   },
   {
+    id: "free",
+    name: "Free (Pollinations)",
+    kind: "openai",
+    baseUrl: "https://text.pollinations.ai/openai",
+    models: ["openai-fast"],
+    docsUrl: "https://pollinations.ai",
+    keyPlaceholder: "No API key needed",
+  },
+  {
     id: "local",
     name: "Local (Ollama)",
     kind: "openai",
@@ -172,6 +189,8 @@ export interface AiProviderState {
   modelListUrl?: string;
   modelsUpdatedAt?: string;
   hasKey: boolean;
+  /** Provider participates in automatic model/worker selection. */
+  enabled: boolean;
   keyHint?: string;
 }
 
@@ -229,6 +248,7 @@ export interface AiSettingsPublic {
   modelHealth: AiModelHealthSettings;
   autoSwitchModels: boolean;
   fallback: AiFallbackSettings;
+  localModelsDir: string;
 }
 
 export interface AiCustomProviderInput {
@@ -253,9 +273,11 @@ export interface AiSettingsInput {
   customProvider?: AiCustomProviderInput;
   removeProviderId?: string;
   agentRoles?: Partial<Record<AiAgentRole, AiAgentRoleConfig>>;
+  providerEnabled?: { provider: AiProviderId; enabled: boolean };
   modelHealth?: Partial<AiModelHealthSettings>;
   autoSwitchModels?: boolean;
   fallback?: Partial<AiFallbackSettings>;
+  localModelsDir?: string;
 }
 
 export interface AiUsage {

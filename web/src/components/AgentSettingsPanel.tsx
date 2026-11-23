@@ -22,7 +22,6 @@ import type {
   AiSettingsPublic,
 } from "../../../shared/ai";
 import { api } from "../api";
-import { FallbackSettingsPanel } from "./FallbackSettingsPanel";
 import { useI18n } from "../i18n";
 import { readCache, writeCache } from "../lib/resourceCache";
 
@@ -111,7 +110,9 @@ export function AgentSettingsPanel({ settings, onSaved }: AgentSettingsPanelProp
   const providers = useMemo(
     () =>
       (settings?.providers ?? []).filter(
-        (provider) => provider.hasKey || provider.custom || provider.id === settings?.defaultProvider,
+        (provider) =>
+          provider.enabled !== false &&
+          (provider.hasKey || provider.custom || provider.id === settings?.defaultProvider),
       ),
     [settings],
   );
@@ -189,25 +190,47 @@ export function AgentSettingsPanel({ settings, onSaved }: AgentSettingsPanelProp
       <div className="agent-settings-head">
         <div>
           <strong>
-            <Bot size={14} /> {t("Agent roles")}
+            <Bot size={14} /> {t("Agent workers")}
           </strong>
           <span>
             {t(
-              "The task loop splits work between these roles. Each role can use a different provider and model.",
+              "Workers are the roles that execute tasks. When Auto is on, saving selected models fills these roles automatically. Use Auto-assign workers to rebuild them, or edit a role manually.",
             )}
           </span>
         </div>
         <button className="ghost-button" onClick={() => void autoPick()} disabled={busy !== null}>
           {busy === "auto" ? <Loader2 size={12} className="spin" /> : <RefreshCw size={12} />}
-          {t("Auto-pick models")}
+          {t("Auto-assign workers")}
         </button>
+      </div>
+
+      <div className="agent-selected-models">
+        <div>
+          <strong>{t("Selected models")}</strong>
+          <span>
+            {t("These are chosen in Model selection. The first is the default; the order is the fallback chain.")}
+          </span>
+        </div>
+        <div className="agent-selected-model-chips">
+          {(settings?.fallback?.chain ?? []).length === 0 ? (
+            <span className="agent-selected-auto">{t("Auto selection")}</span>
+          ) : (
+            (settings?.fallback?.chain ?? []).map((item, index) => (
+              <span key={`${item.provider}::${item.model}`}>
+                <b>{index + 1}</b>
+                <code>{item.model}</code>
+                <small>{item.provider}</small>
+              </span>
+            ))
+          )}
+        </div>
       </div>
 
       <div className="agent-settings-note">
         <Sparkles size={12} />
         <span>
           {t(
-            "Auto-pick uses cached model lists and the imported JSON catalog when available. It does not fetch providers on every run; use Update model list in Models to refresh.",
+            "Auto-assign uses enabled providers, your selected fallback chain and local/free models for simple work. Use Model providers to add keys, and Model selection to choose the active model.",
           )}
         </span>
       </div>
@@ -312,8 +335,6 @@ export function AgentSettingsPanel({ settings, onSaved }: AgentSettingsPanelProp
         })}
       </div>
 
-      <FallbackSettingsPanel settings={settings} onSaved={onSaved} />
-
       {message ? (
         <div className={`ai-test-result ${message.ok ? "is-ok" : "is-error"}`}>
           {message.ok ? <CheckCircle2 size={13} /> : <AlertTriangle size={13} />}
@@ -340,7 +361,9 @@ export function AgentSettingsPanel({ settings, onSaved }: AgentSettingsPanelProp
         </div>
       ) : null}
 
-      <div className="agent-health-panel">
+      <details className="agent-advanced">
+        <summary>{t("Advanced: model health and fallbacks")}</summary>
+        <div className="agent-health-panel">
         <div className="agent-health-head">
           <strong>{t("Model health")}</strong>
           <button className="ghost-button" onClick={() => void loadHealth()} disabled={healthBusy}>
@@ -446,7 +469,8 @@ export function AgentSettingsPanel({ settings, onSaved }: AgentSettingsPanelProp
             ))
           )}
         </div>
-      </div>
+        </div>
+      </details>
 
       <div className="agent-settings-actions">
         <span>

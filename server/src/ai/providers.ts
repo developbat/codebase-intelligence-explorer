@@ -1,5 +1,6 @@
 import type { AiProviderId, AiTestResult, AiTokenUsage } from "../../../shared/ai";
 import { resolveProvider, saveProviderModels, type ResolvedProvider } from "./settings";
+import { localModelStatus } from "../localModels";
 
 export interface ChatMessage {
   role: "system" | "user" | "assistant";
@@ -467,13 +468,38 @@ export async function listProviderModels(
         // Try the next local endpoint shape.
       }
     }
-    const unique = [...models].sort();
+    let unique = [...models].sort();
+    if (unique.length === 0) {
+      // The server may be stopped; show models that are already on disk.
+      const disk = await localModelStatus().catch(() => null);
+      unique = disk?.diskModels ?? [];
+    }
     if (unique.length === 0) return config.models;
     await saveProviderModels(provider, unique);
     return unique;
   }
 
   try {
+    if (provider === "free") {
+      const response = await request(
+        "https://text.pollinations.ai/models",
+        { method: "GET" },
+        timeout,
+        config.name,
+      );
+      const payload = (await response.json()) as
+        | { name?: string; tier?: string }[]
+        | { models?: { name?: string }[] };
+      const entries = Array.isArray(payload) ? payload : payload.models ?? [];
+      const models = entries
+        .filter((model) => !("tier" in model) || !model.tier || model.tier === "anonymous")
+        .map((model) => model.name ?? "")
+        .filter(Boolean);
+      if (models.length === 0) return config.models;
+      const unique = [...new Set(models)].sort();
+      await saveProviderModels(provider, unique);
+      return unique;
+    }
     if (config.kind === "gemini") {
       const response = await request(
         `${config.baseUrl}/v1beta/models?key=${encodeURIComponent(config.apiKey)}`,

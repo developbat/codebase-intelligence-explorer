@@ -6,6 +6,7 @@ import type {
   AiProviderState,
 } from "../../../shared/ai";
 import type { CatalogModel, ModelCatalog } from "../../../shared/catalog";
+import { localModelStatus } from "../localModels";
 import { getPublicSettings, updateAiSettings } from "./settings";
 import { getModelCatalog } from "./catalog";
 import { findPrice, getPricingReport } from "./pricing";
@@ -82,12 +83,24 @@ export async function autoConfigureAgents(): Promise<AiAgentAutoResult> {
   const settings = await getPublicSettings();
   const catalog = await getModelCatalog().catch(() => null);
   const health = await modelHealthByProviderModel();
-  const providers = settings.providers.filter((provider) => provider.hasKey || provider.custom);
+  const pricing = await getPricingReport().catch(() => null);
+  const localStatus = await localModelStatus().catch(() => null);
+  const localRunning = Boolean(localStatus?.running);
+  const providers = settings.providers.filter(
+    (provider) =>
+      (provider.hasKey || provider.custom || provider.id === "local") &&
+      provider.enabled !== false,
+  );
   if (providers.length === 0) {
     throw new Error("Add an API key to at least one provider before auto-selecting agents.");
   }
 
   const warnings: string[] = [];
+  if (providers.some((provider) => provider.id === "local") && !localRunning) {
+    warnings.push(
+      "The local model server is not running, so automatic assignment skips local models. Start it in Model providers → Local models.",
+    );
+  }
   const catalogs = new Map<string, string[]>(
     providers.map((provider) => [
       provider.id,
@@ -97,7 +110,7 @@ export async function autoConfigureAgents(): Promise<AiAgentAutoResult> {
   const hasFreshCatalog = providers.some((provider) => Boolean(provider.modelsUpdatedAt));
   if (!hasFreshCatalog) {
     warnings.push(
-      "Using the saved/default model lists. Use Update model list in Models when you want fresh catalogs.",
+      "Using the saved/default model lists. Use Update model list in Model providers when you want fresh catalogs.",
     );
   }
   if (catalog) {
@@ -107,7 +120,20 @@ export async function autoConfigureAgents(): Promise<AiAgentAutoResult> {
   } else {
     warnings.push("No imported model catalog. Fast/main routing uses name heuristics only.");
   }
-  const main = pickMain(providers, settings.defaultProvider, settings.defaultModel);
+  const configuredChain = (settings.fallback?.chain ?? []).filter((item) => {
+    const provider = providers.find((candidate) => candidate.id === item.provider);
+    return Boolean(
+      provider && provider.enabled !== false && (item.provider !== "local" || localRunning),
+    );
+  });
+  const chainMain = configuredChain[0];
+  const main = chainMain
+    ? {
+        provider:
+          providers.find((provider) => provider.id === chainMain.provider) ?? providers[0],
+        model: chainMain.model,
+      }
+    : pickMain(providers, settings.defaultProvider, settings.defaultModel);
   if (!main.model) throw new Error("The main provider has no model. Add a model in Models.");
   const mainHealth = health.get(healthKey(main.provider.id, main.model));
   if (mainHealth && isModelUnhealthy(mainHealth, settings.modelHealth)) {
@@ -121,6 +147,7 @@ export async function autoConfigureAgents(): Promise<AiAgentAutoResult> {
   let fastModel = main.model;
   let fastBest = Number.NEGATIVE_INFINITY;
   for (const provider of providers) {
+    if (provider.id === "local" && !localRunning) continue;
     const models = catalogs.get(provider.id) ?? [];
     for (const model of models) {
       if (!model) continue;
@@ -133,6 +160,23 @@ export async function autoConfigureAgents(): Promise<AiAgentAutoResult> {
         ),
       );
       if (provider.id === main.provider.id) score += 5;
+      if (provider.id === settings.defaultProvider) score += 70;
+      if (provider.id === "local") score += 100;
+      if (
+        configuredChain.some(
+          (item) => item.provider === provider.id && item.model === model,
+        )
+      ) {
+        score += 30;
+      }
+      const price = pricing ? findPrice(pricing.prices, provider.id, model) : undefined;
+      if (
+        price &&
+        price.inputPerMillion === 0 &&
+        price.outputPerMillion === 0
+      ) {
+        score += 60;
+      }
       if (score > fastBest) {
         fastBest = score;
         fastProvider = provider;
@@ -151,17 +195,26 @@ export async function autoConfigureAgents(): Promise<AiAgentAutoResult> {
     plannerAgent && providerIds.has(plannerAgent.provider)
       ? { provider: plannerAgent.provider, model: plannerAgent.model, reason: "Catalog planner preset" }
       : { provider: main.provider.id, model: main.model, reason: "Planning uses the main model" };
+  const chainReviewer = configuredChain[1];
   const reviewerPick =
-    reviewerAgent && providerIds.has(reviewerAgent.provider)
-      ? { provider: reviewerAgent.provider, model: reviewerAgent.model, reason: "Catalog reviewer preset" }
-      : { provider: main.provider.id, model: main.model, reason: "Review uses the main model" };
+    chainReviewer && providerIds.has(chainReviewer.provider)
+      ? {
+          provider: chainReviewer.provider,
+          model: chainReviewer.model,
+          reason: "Second model in the selected fallback chain",
+        }
+      : reviewerAgent && providerIds.has(reviewerAgent.provider)
+        ? { provider: reviewerAgent.provider, model: reviewerAgent.model, reason: "Catalog reviewer preset" }
+        : { provider: main.provider.id, model: main.model, reason: "Review uses the main model" };
 
   const picks: AiAgentAutoPick[] = [
     {
       role: "main",
       provider: main.provider.id,
       model: main.model,
-      reason: "Current default provider/model",
+      reason: configuredChain[0]
+        ? "First model in the selected fallback chain"
+        : "Current default provider/model",
     },
     {
       role: "planner",
@@ -230,7 +283,10 @@ export async function pickAlternateAgentModel(exclude?: {
       .filter((item) => !(item.provider === exclude?.provider && item.model === exclude?.model))
       .filter((item) =>
         settings.providers.some(
-          (provider) => provider.id === item.provider && (provider.hasKey || provider.custom),
+          (provider) =>
+            provider.id === item.provider &&
+            (provider.hasKey || provider.custom || provider.id === "local") &&
+            provider.enabled !== false,
         ),
       )
       .map((item) => ({
@@ -243,7 +299,10 @@ export async function pickAlternateAgentModel(exclude?: {
   }
 
   const configured = settings.providers.filter(
-    (provider) => (provider.hasKey || provider.custom) && provider.id !== exclude?.provider,
+    (provider) =>
+      (provider.hasKey || provider.custom || provider.id === "local") &&
+      provider.enabled !== false &&
+      provider.id !== exclude?.provider,
   );
   // Coding fallbacks should stay cheap and fast first. Reviewer/planner models
   // are often the most expensive ones and should be a last resort.
