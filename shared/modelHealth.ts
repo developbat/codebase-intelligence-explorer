@@ -10,6 +10,17 @@ export interface ModelHealth {
   lastUnavailableAt?: string;
 }
 
+export interface ModelFallbackEvent {
+  at: string;
+  fromProvider: string;
+  fromModel: string;
+  toProvider: string;
+  toModel: string;
+  reason: string;
+}
+
 export interface ModelHealthReport {
   models: ModelHealth[];
+  fallbacks: ModelFallbackEvent[];
+  updatedAt?: string;
 }

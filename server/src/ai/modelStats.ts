@@ -1,13 +1,18 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import type { AiModelHealthSettings } from "../../../shared/ai";
-import type { ModelHealth } from "../../../shared/modelHealth";
+import type {
+  ModelFallbackEvent,
+  ModelHealth,
+  ModelHealthReport,
+} from "../../../shared/modelHealth";
 import { getDataDir } from "../store";
 
 interface ModelStatsFile {
   version: 1;
   updatedAt: string;
   models: Record<string, ModelHealth>;
+  fallbacks: ModelFallbackEvent[];
 }
 
 function statsPath(): string {
@@ -25,9 +30,10 @@ async function readStats(): Promise<ModelStatsFile> {
       version: 1,
       updatedAt: parsed.updatedAt ?? new Date().toISOString(),
       models: parsed.models && typeof parsed.models === "object" ? parsed.models : {},
+      fallbacks: Array.isArray(parsed.fallbacks) ? parsed.fallbacks : [],
     };
   } catch {
-    return { version: 1, updatedAt: new Date().toISOString(), models: {} };
+    return { version: 1, updatedAt: new Date().toISOString(), models: {}, fallbacks: [] };
   }
 }
 
@@ -83,6 +89,30 @@ export async function recordModelOutcome(
 
 export async function getModelHealth(): Promise<Record<string, ModelHealth>> {
   return (await readStats()).models;
+}
+
+export async function recordModelFallback(
+  event: Omit<ModelFallbackEvent, "at"> & { at?: string },
+): Promise<void> {
+  const file = await readStats();
+  const at = event.at ?? new Date().toISOString();
+  file.fallbacks = [{ ...event, at }, ...file.fallbacks].slice(0, 50);
+  file.updatedAt = at;
+  await writeStats(file);
+}
+
+export async function getModelHealthReport(): Promise<ModelHealthReport> {
+  const file = await readStats();
+  return {
+    models: Object.values(file.models).sort(
+      (a, b) =>
+        b.protocolFailures - a.protocolFailures ||
+        b.emptyFailures - a.emptyFailures ||
+        a.provider.localeCompare(b.provider),
+    ),
+    fallbacks: file.fallbacks,
+    updatedAt: file.updatedAt,
+  };
 }
 
 const DEFAULT_HEALTH_SETTINGS: AiModelHealthSettings = {

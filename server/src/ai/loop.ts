@@ -27,7 +27,11 @@ import { chat, type ChatMessage } from "./providers";
 import { recordUsage } from "./usage";
 import { getPublicSettings, resolveAgentRole, resolveProvider } from "./settings";
 import { pickAlternateAgentModel } from "./agents";
-import { healthKey, modelHealthByProviderModel } from "./modelStats";
+import {
+  healthKey,
+  modelHealthByProviderModel,
+  recordModelFallback,
+} from "./modelStats";
 import { estimateUsageCost } from "./pricing";
 import { formatUsd } from "../../../shared/pricing";
 import {
@@ -626,6 +630,13 @@ export async function runProjectLoop(
           to: { provider: switched.id, model: switched.model },
           reason: "The selected model is unavailable (end of life or removed).",
         });
+        await recordModelFallback({
+          fromProvider: from.provider,
+          fromModel: from.model,
+          toProvider: switched.id,
+          toModel: switched.model,
+          reason: "The selected model is unavailable (end of life or removed).",
+        }).catch(() => undefined);
         main = switched;
         options.provider = alternate.provider;
         options.model = alternate.model;
@@ -990,12 +1001,20 @@ export async function runProjectLoop(
           model: taskConfig.model,
         }).catch(() => null);
         if (alternate) {
+          const reason = `The task failed with ${taskConfig.id}/${taskConfig.model}; retrying with a working model.`;
           emit({
             type: "model",
             from: { provider: taskConfig.id, model: taskConfig.model },
             to: { provider: alternate.provider, model: alternate.model },
-            reason: `The task failed with ${taskConfig.id}/${taskConfig.model}; retrying with a working model.`,
+            reason,
           });
+          await recordModelFallback({
+            fromProvider: taskConfig.id,
+            fromModel: taskConfig.model,
+            toProvider: alternate.provider,
+            toModel: alternate.model,
+            reason,
+          }).catch(() => undefined);
           options.provider = alternate.provider;
           options.model = alternate.model;
         }

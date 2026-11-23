@@ -9,7 +9,11 @@ import {
   Sparkles,
   Zap,
 } from "lucide-react";
-import type { ModelHealth } from "../../../shared/modelHealth";
+import type {
+  ModelFallbackEvent,
+  ModelHealth,
+  ModelHealthReport,
+} from "../../../shared/modelHealth";
 import type {
   AiAgentAutoResult,
   AiAgentRole,
@@ -58,6 +62,7 @@ export function AgentSettingsPanel({ settings, onSaved }: AgentSettingsPanelProp
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
   const [autoResult, setAutoResult] = useState<AiAgentAutoResult | null>(null);
   const [health, setHealth] = useState<ModelHealth[]>([]);
+  const [fallbacks, setFallbacks] = useState<ModelFallbackEvent[]>([]);
   const [healthBusy, setHealthBusy] = useState(false);
   const [healthSettings, setHealthSettings] = useState({
     protocolFailureLimit: 2,
@@ -70,18 +75,21 @@ export function AgentSettingsPanel({ settings, onSaved }: AgentSettingsPanelProp
     try {
       const response = await api.ai.modelHealth();
       setHealth(response.models);
-      writeCache("model-health", response.models);
+      setFallbacks(response.fallbacks ?? []);
+      writeCache("model-health", response);
     } catch {
       setHealth([]);
+      setFallbacks([]);
     } finally {
       setHealthBusy(false);
     }
   }
 
   useEffect(() => {
-    const cached = readCache<ModelHealth[]>("model-health", 30_000);
+    const cached = readCache<ModelHealthReport>("model-health", 30_000);
     if (cached?.value && !cached.stale) {
-      setHealth(cached.value);
+      setHealth(cached.value.models);
+      setFallbacks(cached.value.fallbacks ?? []);
       return;
     }
     void loadHealth();
@@ -282,11 +290,18 @@ export function AgentSettingsPanel({ settings, onSaved }: AgentSettingsPanelProp
                   return (
                     <small
                       className={
-                        healthEntry.protocolFailures >= 2 ? "agent-health-bad" : "agent-health-good"
+                        healthEntry.unavailable ||
+                        healthEntry.protocolFailures >= healthSettings.protocolFailureLimit ||
+                        healthEntry.emptyFailures >= healthSettings.emptyFailureLimit
+                          ? "agent-health-bad"
+                          : "agent-health-good"
                       }
                     >
                       {healthEntry.successCount}✓ · {healthEntry.protocolFailures} {t("protocol failures")} ·{" "}
                       {healthEntry.emptyFailures} {t("empty responses")}
+                      {healthEntry.lastFailureAt
+                        ? ` · ${t("last failure")} ${new Date(healthEntry.lastFailureAt).toLocaleString()}`
+                        : ""}
                     </small>
                   );
                 })()}
@@ -394,11 +409,40 @@ export function AgentSettingsPanel({ settings, onSaved }: AgentSettingsPanelProp
                 <small>
                   {item.successCount}✓ · {item.protocolFailures} {t("protocol")} · {item.emptyFailures}{" "}
                   {t("empty")}
+                  {item.lastFailureAt
+                    ? ` · ${t("last failure")} ${new Date(item.lastFailureAt).toLocaleString()}`
+                    : ""}
+                  {item.unavailable ? ` · ${t("unavailable")}` : ""}
                 </small>
               </div>
             ))}
           </div>
         )}
+        <div className="agent-fallback-list">
+          <div className="agent-health-head">
+            <strong>{t("Recent model fallbacks")}</strong>
+            <small>{fallbacks.length > 0 ? `${fallbacks.length} ${t("events")}` : ""}</small>
+          </div>
+          {fallbacks.length === 0 ? (
+            <p>{t("No model fallbacks recorded yet.")}</p>
+          ) : (
+            fallbacks.slice(0, 10).map((event) => (
+              <div key={`${event.at}-${event.fromModel}-${event.toModel}`}>
+                <span>
+                  <code>
+                    {event.fromProvider}/{event.fromModel}
+                  </code>
+                  <b>→</b>
+                  <code>
+                    {event.toProvider}/{event.toModel}
+                  </code>
+                </span>
+                <small>{new Date(event.at).toLocaleString()}</small>
+                <small>{event.reason}</small>
+              </div>
+            ))
+          )}
+        </div>
       </div>
 
       <div className="agent-settings-actions">

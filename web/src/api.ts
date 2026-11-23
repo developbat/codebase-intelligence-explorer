@@ -65,7 +65,7 @@ import type {
   GraphicRequest,
   GraphicResult,
 } from "../../shared/graphics";
-import type { ModelHealth } from "../../shared/modelHealth";
+import type { ModelHealthReport } from "../../shared/modelHealth";
 import type {
   MobileBootResult,
   MobileCheckOptions,
@@ -791,7 +791,7 @@ export const api = {
 
     catalog: () => request<{ catalog: ModelCatalog | null }>("/api/ai/catalog"),
 
-    modelHealth: () => request<{ models: ModelHealth[] }>("/api/ai/model-health"),
+    modelHealth: () => request<ModelHealthReport>("/api/ai/model-health"),
 
     pricing: () => request<PricingReport>("/api/ai/pricing"),
 
