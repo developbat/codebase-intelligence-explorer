@@ -41,6 +41,7 @@ import { isWithin } from "../scanner";
 import { formatProjectFile } from "../formatter";
 import { detectProjectProfile } from "../projectProfile";
 import { checkFileSyntax } from "../syntax";
+import { lspCompletion, lspDiagnostics, lspHover } from "../lsp";
 import { queryCsvFile, querySqliteFile } from "../dataQuery";
 import { runBrowserCheck } from "../browserCheck";
 import type { BrowserCheckStep } from "../../../shared/browserCheck";
@@ -1692,6 +1693,8 @@ const READ_ONLY_ACTIONS = new Set([
   "read_symbol",
   "find_in_file",
   "diagnostics",
+  "lsp_hover",
+  "lsp_completion",
   "list_items",
   "count_matches",
   "json_query",
@@ -2800,6 +2803,8 @@ export function agentToolCatalog(
     '{"action":"read_symbol","args":{"name":"UserService"}}',
     '{"action":"find_in_file","args":{"path":"src/app.ts","query":"login","contextLines":2,"limit":10}}',
     '{"action":"diagnostics","args":{"path":"src/app.ts"}}',
+    '{"action":"lsp_hover","args":{"path":"src/app.ts","line":42,"character":10}}',
+    '{"action":"lsp_completion","args":{"path":"src/app.ts","line":42,"character":10}}',
     '{"action":"list_items","args":{"path":"data/items.html","limit":100}}',
     '{"action":"count_matches","args":{"path":"src","query":"TODO","limit":20}}',
     '{"action":"json_query","args":{"path":"package.json","pointer":"scripts"}}',
@@ -4038,6 +4043,8 @@ export async function runAgentTask(
       "read_symbol",
       "find_in_file",
       "diagnostics",
+      "lsp_hover",
+      "lsp_completion",
       "list_items",
       "count_matches",
       "json_query",
@@ -4097,6 +4104,8 @@ export async function runAgentTask(
         read_symbol: "Reading the enclosing symbol…",
         find_in_file: "Searching inside file…",
         diagnostics: "Checking file diagnostics…",
+        lsp_hover: "Reading LSP hover…",
+        lsp_completion: "Reading LSP completions…",
         list_items: "Extracting list items…",
         count_matches: "Counting matches…",
         json_query: "Inspecting JSON…",
@@ -4735,19 +4744,67 @@ export async function runAgentTask(
         const filePath = normalizeAgentPath(analysis.rootPath, args.path);
         if (!filePath) throw new Error("A file path is required.");
         if (isSecretAgentPath(filePath)) throw new Error("Reading environment, key or Git internals files is denied.");
-        const result = await checkFileSyntax(analysis, filePath);
-        observation = result.supported
-          ? `Diagnostics: ${result.filePath} — ${result.ok ? "OK" : "FAILED"}${
-              result.command ? `\nCommand: ${result.command}` : ""
-            }\n${(result.output || "No diagnostics reported.").slice(0, 3_000)}`
-          : `Diagnostics unavailable for ${result.filePath}: ${result.output}`;
-        evidence.push({ path: result.filePath, label: "Diagnostics" });
-        log(
-          result.supported && !result.ok ? "warn" : "info",
-          result.supported ? "Diagnostics checked" : "Diagnostics unavailable",
-          result.filePath,
+        const lsp = await lspDiagnostics(analysis.rootPath, filePath).catch(() => null);
+        if (lsp?.supported) {
+          const issues = lsp.diagnostics.filter(
+            (item) => item.severity === "error" || item.severity === "warning",
+          );
+          observation = `LSP diagnostics: ${filePath} — ${lsp.diagnostics.length} issue(s)${
+            issues.length > 0
+              ? `\n${issues
+                  .slice(0, 60)
+                  .map(
+                    (item) =>
+                      `- ${item.line}:${item.character} ${item.severity}${item.code ? ` [${item.code}]` : ""} ${item.message}`,
+                  )
+                  .join("\n")}`
+              : "\nNo errors or warnings."
+          }`;
+          ok = !lsp.diagnostics.some((item) => item.severity === "error");
+        } else {
+          const result = await checkFileSyntax(analysis, filePath);
+          observation = result.supported
+            ? `Diagnostics: ${result.filePath} — ${result.ok ? "OK" : "FAILED"}${
+                result.command ? `\nCommand: ${result.command}` : ""
+              }\n${(result.output || "No diagnostics reported.").slice(0, 3_000)}`
+            : `Diagnostics unavailable for ${result.filePath}: ${result.output}`;
+          ok = result.supported ? result.ok : true;
+        }
+        evidence.push({ path: filePath, label: "Diagnostics" });
+        log(ok ? "info" : "warn", ok ? "Diagnostics checked" : "Diagnostics failed", filePath);
+      } else if (action === "lsp_hover") {
+        const filePath = normalizeAgentPath(analysis.rootPath, args.path);
+        if (!filePath) throw new Error("A file path is required.");
+        if (isSecretAgentPath(filePath)) throw new Error("Reading environment, key or Git internals files is denied.");
+        const hover = await lspHover(
+          analysis.rootPath,
+          filePath,
+          Math.max(1, Number(args.line) || 1),
+          Math.max(1, Number(args.character) || 1),
         );
-        ok = result.supported ? result.ok : true;
+        observation = hover?.contents?.trim() || `No LSP hover information at ${filePath}:${args.line ?? 1}.`;
+        evidence.push({ path: filePath, label: "LSP hover" });
+        log(hover ? "info" : "warn", hover ? "LSP hover read" : "LSP hover empty", filePath);
+        ok = true;
+      } else if (action === "lsp_completion") {
+        const filePath = normalizeAgentPath(analysis.rootPath, args.path);
+        if (!filePath) throw new Error("A file path is required.");
+        if (isSecretAgentPath(filePath)) throw new Error("Reading environment, key or Git internals files is denied.");
+        const items = await lspCompletion(
+          analysis.rootPath,
+          filePath,
+          Math.max(1, Number(args.line) || 1),
+          Math.max(1, Number(args.character) || 1),
+        );
+        observation = items.length > 0
+          ? `LSP completions at ${filePath}:${args.line ?? 1}:\n${items
+              .slice(0, 40)
+              .map((item) => `- ${item.label}${item.detail ? ` — ${item.detail}` : ""}`)
+              .join("\n")}`
+          : `No LSP completions at ${filePath}:${args.line ?? 1}.`;
+        evidence.push({ path: filePath, label: "LSP completion" });
+        log(items.length > 0 ? "info" : "warn", "LSP completions read", `${items.length} items`);
+        ok = true;
       } else if (action === "find_in_file") {
         const filePath = normalizeAgentPath(analysis.rootPath, args.path);
         const query = String(args.query ?? "").trim();
@@ -6063,16 +6120,24 @@ export async function runAgentTask(
       ["write_file", "replace_in_file", "replace_many", "rename_path", "delete_file", "format_file"].includes(action)
     ) {
       const diagnostics = await Promise.all(
-        changedFiles.slice(0, 6).map((filePath) =>
-          checkFileSyntax(analysis, filePath).catch(() => null),
-        ),
+        changedFiles.slice(0, 6).map(async (filePath) => {
+          const syntax = await checkFileSyntax(analysis, filePath).catch(() => null);
+          return syntax
+            ? {
+                file: syntax.filePath,
+                supported: syntax.supported,
+                ok: syntax.ok,
+                output: syntax.output,
+              }
+            : null;
+        }),
       );
       syntaxFailures = diagnostics
         .filter(
           (item): item is NonNullable<typeof item> =>
             Boolean(item && item.supported && !item.ok),
         )
-        .map((item) => ({ file: item.filePath, output: item.output }));
+        .map((item) => ({ file: item.file, output: item.output }));
       if (syntaxFailures.length > 0) {
         observation = `${observation}\n\nSyntax diagnostics failed:\n${syntaxFailures
           .map((item) => `- ${item.file}: ${item.output.slice(0, 500)}`)
@@ -6085,6 +6150,10 @@ export async function runAgentTask(
         ? 3_200
         : step.action === "diagnostics"
           ? 3_500
+          : step.action === "lsp_hover"
+            ? 2_500
+            : step.action === "lsp_completion"
+              ? 2_500
         : step.action === "read_symbol"
           ? 6_000
         : step.action === "web_fetch"

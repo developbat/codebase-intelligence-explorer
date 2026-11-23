@@ -50,6 +50,7 @@ import type {
   AiUnresolvedAnalysis,
 } from "../../shared/ai";
 import type { ProjectTask, ProjectTaskQueue } from "../../shared/tasks";
+import type { LspCompletionItem, LspDiagnostic, LspHover } from "../../shared/lsp";
 import type {
   CatalogImportResult,
   ModelCatalog,
@@ -727,6 +728,26 @@ export const api = {
         reader.releaseLock();
       }
     },
+  },
+
+  lsp: {
+    status: () =>
+      request<{ available: boolean; languages: string[] }>("/api/lsp/status"),
+    diagnostics: (projectId: string, path: string) =>
+      request<{ supported: boolean; diagnostics: LspDiagnostic[]; reason?: string }>(
+        `/api/projects/${projectId}/lsp/diagnostics`,
+        { method: "POST", body: JSON.stringify({ path }) },
+      ),
+    hover: (projectId: string, path: string, line: number, character: number) =>
+      request<{ hover: LspHover | null }>(`/api/projects/${projectId}/lsp/hover`, {
+        method: "POST",
+        body: JSON.stringify({ path, line, character }),
+      }),
+    completion: (projectId: string, path: string, line: number, character: number) =>
+      request<{ items: LspCompletionItem[] }>(
+        `/api/projects/${projectId}/lsp/completion`,
+        { method: "POST", body: JSON.stringify({ path, line, character }) },
+      ),
   },
 
   plans: {

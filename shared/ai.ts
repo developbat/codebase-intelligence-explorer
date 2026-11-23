@@ -522,6 +522,8 @@ export type AiAgentAction =
   | "read_symbol"
   | "find_in_file"
   | "diagnostics"
+  | "lsp_hover"
+  | "lsp_completion"
   | "list_items"
   | "count_matches"
   | "json_query"

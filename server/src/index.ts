@@ -53,6 +53,13 @@ import { getProjectUsage } from "./ai/usage";
 import { buildChangeReport } from "./changes";
 import { formatProjectFile } from "./formatter";
 import { checkFileSyntax } from "./syntax";
+import {
+  isLspAvailable,
+  lspCompletion,
+  lspDiagnostics,
+  lspHover,
+  shutdownLspSessions,
+} from "./lsp";
 import { scanDuplications } from "./duplication";
 import {
   getProjectIndexStatus,
@@ -662,6 +669,69 @@ app.post("/api/projects/:id/game-check", async (req, res) => {
         timeoutMs: Number(req.body?.timeoutMs) || undefined,
       }),
     );
+  } catch (error) {
+    handleError(res, error, 400);
+  }
+});
+
+app.get("/api/lsp/status", (_req, res) => {
+  res.json({
+    available: isLspAvailable(),
+    languages: ["typescript", "javascript", "tsx", "jsx"],
+  });
+});
+
+app.post("/api/projects/:id/lsp/diagnostics", async (req, res) => {
+  try {
+    const analysis = await loadAnalysis(req.params.id);
+    const filePath = typeof req.body?.path === "string" ? req.body.path : "";
+    if (!filePath) {
+      res.status(400).json({ error: "A file path is required." });
+      return;
+    }
+    res.json(await lspDiagnostics(analysis.rootPath, filePath));
+  } catch (error) {
+    handleError(res, error, 400);
+  }
+});
+
+app.post("/api/projects/:id/lsp/hover", async (req, res) => {
+  try {
+    const analysis = await loadAnalysis(req.params.id);
+    const filePath = typeof req.body?.path === "string" ? req.body.path : "";
+    if (!filePath) {
+      res.status(400).json({ error: "A file path is required." });
+      return;
+    }
+    res.json({
+      hover: await lspHover(
+        analysis.rootPath,
+        filePath,
+        Number(req.body?.line) || 1,
+        Number(req.body?.character) || 1,
+      ),
+    });
+  } catch (error) {
+    handleError(res, error, 400);
+  }
+});
+
+app.post("/api/projects/:id/lsp/completion", async (req, res) => {
+  try {
+    const analysis = await loadAnalysis(req.params.id);
+    const filePath = typeof req.body?.path === "string" ? req.body.path : "";
+    if (!filePath) {
+      res.status(400).json({ error: "A file path is required." });
+      return;
+    }
+    res.json({
+      items: await lspCompletion(
+        analysis.rootPath,
+        filePath,
+        Number(req.body?.line) || 1,
+        Number(req.body?.character) || 1,
+      ),
+    });
   } catch (error) {
     handleError(res, error, 400);
   }
@@ -2345,3 +2415,9 @@ app.listen(PORT, "127.0.0.1", () => {
   const mode = SERVE_WEB ? "production UI" : "API";
   console.log(`Codebase Intelligence Explorer (${mode}) → http://127.0.0.1:${PORT}`);
 });
+
+for (const signal of ["SIGINT", "SIGTERM"] as const) {
+  process.once(signal, () => {
+    void shutdownLspSessions().finally(() => process.exit(0));
+  });
+}

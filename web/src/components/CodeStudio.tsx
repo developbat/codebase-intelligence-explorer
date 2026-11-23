@@ -67,7 +67,9 @@ import { wast } from "@codemirror/legacy-modes/mode/wast";
 import { webIDL } from "@codemirror/legacy-modes/mode/webidl";
 import { xQuery } from "@codemirror/legacy-modes/mode/xquery";
 import { oneDark } from "@codemirror/theme-one-dark";
-import { EditorView } from "@codemirror/view";
+import { EditorView, hoverTooltip } from "@codemirror/view";
+import { autocompletion, type CompletionContext } from "@codemirror/autocomplete";
+import { linter, lintGutter } from "@codemirror/lint";
 import { diffLines } from "diff";
 import {
   AlertTriangle,
@@ -420,6 +422,101 @@ function StudioTree({
   );
 }
 
+function isLspEditorPath(filePath: string): boolean {
+  return /\.(?:ts|tsx|js|jsx|mjs|cjs|mts|cts)$/i.test(filePath);
+}
+
+function lspPosition(view: EditorView, lineNumber: number, character: number): number {
+  const line = view.state.doc.line(
+    Math.min(Math.max(1, lineNumber), view.state.doc.lines),
+  );
+  return Math.min(view.state.doc.length, line.from + Math.max(0, character - 1));
+}
+
+function lspCompletionType(kind?: number): string {
+  const types: Record<number, string> = {
+    2: "method",
+    3: "function",
+    4: "constructor",
+    5: "field",
+    6: "variable",
+    7: "class",
+    8: "interface",
+    9: "module",
+    10: "property",
+    13: "enum",
+    14: "keyword",
+    15: "snippet",
+    21: "constant",
+  };
+  return kind ? types[kind] ?? "text" : "text";
+}
+
+function lspEditorExtensions(projectId: string, filePath: string) {
+  if (!isLspEditorPath(filePath)) return [];
+  const hover = hoverTooltip(
+    async (view, pos) => {
+      const line = view.state.doc.lineAt(pos);
+      const result = await api.lsp
+        .hover(projectId, filePath, line.number, pos - line.from + 1)
+        .catch(() => null);
+      if (!result?.hover?.contents) return null;
+      return {
+        pos,
+        create() {
+          const dom = document.createElement("div");
+          dom.className = "cm-lsp-hover";
+          dom.textContent = result.hover?.contents ?? "";
+          return { dom };
+        },
+      };
+    },
+    { hoverTime: 350 },
+  );
+  const completion = autocompletion({
+    override: [
+      async (context: CompletionContext) => {
+        const line = context.state.doc.lineAt(context.pos);
+        const result = await api.lsp
+          .completion(projectId, filePath, line.number, context.pos - line.from + 1)
+          .catch(() => null);
+        if (!result?.items?.length) return null;
+        const word = context.matchBefore(/[\w$]*/);
+        return {
+          from: word?.from ?? context.pos,
+          options: result.items.map((item) => ({
+            label: item.label,
+            detail: item.detail,
+            info: item.documentation,
+            type: lspCompletionType(item.kind),
+            apply: item.insertText ?? item.label,
+          })),
+        };
+      },
+    ],
+  });
+  const diagnostics = linter(
+    async (view) => {
+      const result = await api.lsp.diagnostics(projectId, filePath).catch(() => null);
+      if (!result?.supported) return [];
+      return result.diagnostics.map((item) => ({
+        from: lspPosition(view, item.line, item.character),
+        to: lspPosition(view, item.endLine, item.endCharacter),
+        severity:
+          item.severity === "error"
+            ? ("error" as const)
+            : item.severity === "warning"
+              ? ("warning" as const)
+              : ("info" as const),
+        message: item.message,
+        source: item.source,
+      }));
+    },
+    { delay: 800 },
+  );
+  return [hover, completion, lintGutter(), diagnostics];
+}
+
 export function CodeStudio({
   analysis,
   aiSettings,
@@ -485,6 +582,10 @@ export function CodeStudio({
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [openTabs, setOpenTabs] = useState<string[]>([]);
   const [activeFile, setActiveFile] = useState<string | null>(null);
+  const lspExtensions = useMemo(
+    () => (activeFile ? lspEditorExtensions(analysis.id, activeFile) : []),
+    [analysis.id, activeFile],
+  );
   const [contents, setContents] = useState<Record<string, string>>({});
   const [savedContents, setSavedContents] = useState<Record<string, string>>({});
   const [fileLoading, setFileLoading] = useState(false);
@@ -4657,7 +4758,7 @@ export function CodeStudio({
                   value={activeContent}
                   height="100%"
                   theme={oneDark}
-                  extensions={languageExtension(activeFile)}
+                  extensions={[languageExtension(activeFile), lspExtensions]}
                   onCreateEditor={(view) => {
                     editorViewRef.current = view;
                   }}
