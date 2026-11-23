@@ -553,11 +553,6 @@ export function CodeStudio({
   onInitialPromptConsumed,
 }: CodeStudioProps) {
   const { t, locale } = useI18n();
-  const [codeProvider, setCodeProvider] = useState<{ provider: AiProviderId; model: string } | null>(() => {
-    const provider = localStorage.getItem("cie:code-provider") as AiProviderId | null;
-    const model = localStorage.getItem("cie:code-model") ?? "";
-    return provider ? { provider, model } : null;
-  });
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
   const [chainBusy, setChainBusy] = useState(false);
   const [modelCatalog, setModelCatalog] = useState<string[]>([]);
@@ -575,9 +570,17 @@ export function CodeStudio({
   const providerDisplayName = (id: AiProviderId) =>
     aiSettings?.providers.find((provider) => provider.id === id)?.name ?? providerInfo(id).name;
   const fallbackProvider = activeProvider(aiSettings);
+  const modelChain = aiSettings?.fallback?.chain ?? [];
+  // Settings are the single source of truth: the first selected model is the
+  // active model, then the saved default, then the first configured provider.
+  const settingsActive = modelChain[0]
+    ? { provider: modelChain[0].provider as AiProviderId, model: modelChain[0].model }
+    : aiSettings
+      ? { provider: aiSettings.defaultProvider, model: aiSettings.defaultModel }
+      : null;
   const codeModel =
-    codeProvider && configuredProviders.some((provider) => provider.id === codeProvider.provider)
-      ? codeProvider
+    settingsActive && configuredProviders.some((provider) => provider.id === settingsActive.provider)
+      ? settingsActive
       : fallbackProvider
         ? { provider: fallbackProvider.provider, model: fallbackProvider.model }
         : null;
@@ -1148,28 +1151,48 @@ export function CodeStudio({
     );
   }, [activeChatId, chatMessages]);
 
-  useEffect(() => {
-    if (codeModel) return;
-    if (!fallbackProvider) return;
-    setCodeProvider({ provider: fallbackProvider.provider, model: fallbackProvider.model });
-  }, [codeModel, fallbackProvider]);
-
-  function selectCodeModel(provider: AiProviderId, model: string) {
-    const next = { provider, model: model.trim() || (aiSettings?.providers.find((item) => item.id === provider)?.model ?? "") };
-    setCodeProvider(next);
-    localStorage.setItem("cie:code-provider", next.provider);
-    localStorage.setItem("cie:code-model", next.model);
-    setModelPickerOpen(false);
-    setModelCatalog([]);
-    setModelCatalogProvider(null);
+  async function selectCodeModel(provider: AiProviderId, model: string) {
+    const next = {
+      provider,
+      model:
+        model.trim() ||
+        aiSettings?.providers.find((item) => item.id === provider)?.model ||
+        "",
+    };
+    if (!next.model) return;
+    setChainBusy(true);
+    try {
+      const rest = modelChain.filter(
+        (item) => !(item.provider === next.provider && item.model === next.model),
+      );
+      const updated = await api.ai.updateSettings({
+        defaultProvider: next.provider,
+        defaultModel: next.model,
+        fallback: { chain: [next, ...rest] },
+      });
+      const auto =
+        aiSettings?.autoSwitchModels !== false
+          ? await api.ai.autoConfigureAgents().catch(() => null)
+          : null;
+      onSettingsSaved(auto?.settings ?? updated);
+    } finally {
+      setChainBusy(false);
+      setModelPickerOpen(false);
+      setModelCatalog([]);
+      setModelCatalogProvider(null);
+    }
   }
-
-  const modelChain = aiSettings?.fallback?.chain ?? [];
 
   async function saveModelChain(next: { provider: string; model: string }[]) {
     setChainBusy(true);
     try {
-      const updated = await api.ai.updateSettings({ fallback: { chain: next } });
+      const first = next[0];
+      const updated = await api.ai.updateSettings({
+        fallback: { chain: next },
+        ...(first
+          ? { defaultProvider: first.provider as AiProviderId, defaultModel: first.model }
+          : {}),
+      });
       const auto =
         aiSettings?.autoSwitchModels !== false
           ? await api.ai.autoConfigureAgents().catch(() => null)

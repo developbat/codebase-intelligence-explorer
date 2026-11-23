@@ -85,7 +85,13 @@ export function ModelPickerPanel({
     setBusyKey("chain");
     setMessage(null);
     try {
-      const updated = await api.ai.updateSettings({ fallback: { chain: next } });
+      const first = next[0];
+      const updated = await api.ai.updateSettings({
+        fallback: { chain: next },
+        ...(first
+          ? { defaultProvider: first.provider as AiProviderId, defaultModel: first.model }
+          : {}),
+      });
       // Keep worker roles in sync so selected models are actually used.
       const auto = settings?.autoSwitchModels !== false ? await api.ai.autoConfigureAgents().catch(() => null) : null;
       onSettingsSaved(auto?.settings ?? updated);
@@ -119,9 +125,13 @@ export function ModelPickerPanel({
     setBusyKey(key);
     setMessage(null);
     try {
+      const rest = chain.filter(
+        (item) => !(item.provider === row.provider && item.model === row.model),
+      );
       const next = await api.ai.updateSettings({
         defaultProvider: row.provider as AiProviderId,
         defaultModel: row.model,
+        fallback: { chain: [{ provider: row.provider, model: row.model }, ...rest] },
       });
       const auto = settings?.autoSwitchModels !== false ? await api.ai.autoConfigureAgents().catch(() => null) : null;
       onSettingsSaved(auto?.settings ?? next);
@@ -222,7 +232,9 @@ export function ModelPickerPanel({
         ) : (
           rows.map((row) => {
             const price = pricing ? findModelPrice(pricing.prices, row.provider, row.model) : undefined;
-            const active = row.provider === defaultProvider && row.model === defaultModel;
+            const active =
+              row.provider === (chain[0]?.provider ?? defaultProvider) &&
+              row.model === (chain[0]?.model ?? defaultModel);
             const key = `${row.provider}::${row.model}`;
             return (
               <div key={key} className={`model-picker-row ${active ? "is-active" : ""}`}>
