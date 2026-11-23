@@ -9,6 +9,7 @@ import type {
   AiProviderId,
   AiSettingsInput,
   AiSettingsPublic,
+  AiTaskBudgetMode,
 } from "../../../shared/ai";
 import {
   AI_PROVIDERS,
@@ -52,6 +53,7 @@ interface StoredSettings {
   disabledProviders: string[];
   localModelsDir: string;
   reviewEdits: boolean;
+  taskBudgetMode: AiTaskBudgetMode;
 }
 
 export const AI_AGENT_ROLES: AiAgentRole[] = ["main", "planner", "fast", "reviewer"];
@@ -147,6 +149,7 @@ function defaults(): StoredSettings {
     disabledProviders: [],
     localModelsDir: path.join(getDataDir(), "local-models"),
     reviewEdits: true,
+    taskBudgetMode: "off",
   };
 }
 
@@ -253,6 +256,10 @@ async function loadStored(): Promise<StoredSettings> {
           ? parsed.localModelsDir.trim()
           : base.localModelsDir,
       reviewEdits: parsed.reviewEdits !== false,
+      taskBudgetMode:
+        parsed.taskBudgetMode === "stop" || parsed.taskBudgetMode === "warn"
+          ? parsed.taskBudgetMode
+          : "off",
     };
   } catch {
     return base;
@@ -329,6 +336,7 @@ export async function getPublicSettings(): Promise<AiSettingsPublic> {
     fallback: stored.fallback,
     localModelsDir: stored.localModelsDir,
     reviewEdits: stored.reviewEdits !== false,
+    taskBudgetMode: stored.taskBudgetMode ?? "off",
   };
 }
 
@@ -504,6 +512,13 @@ export async function updateAiSettings(input: AiSettingsInput): Promise<AiSettin
 
   if (input.reviewEdits !== undefined) {
     stored.reviewEdits = input.reviewEdits === true;
+  }
+
+  if (input.taskBudgetMode !== undefined) {
+    stored.taskBudgetMode =
+      input.taskBudgetMode === "stop" || input.taskBudgetMode === "warn"
+        ? input.taskBudgetMode
+        : "off";
   }
 
   if (input.agentRoles) {

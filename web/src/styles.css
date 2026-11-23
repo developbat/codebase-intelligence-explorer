@@ -20139,3 +20139,36 @@ button.canvas-stat {
 .studio-continue.is-global .studio-continue-info small {
   max-width: 640px;
 }
+
+.agent-budget-mode {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 9px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: rgba(148, 163, 184, 0.03);
+}
+
+.agent-budget-mode > div {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.agent-budget-mode strong {
+  font-size: 9.5px;
+}
+
+.agent-budget-mode small {
+  color: #8ba8ce;
+  font-size: 8.5px;
+  line-height: 1.4;
+}
+
+.agent-budget-mode select {
+  flex: none;
+  width: 170px;
+}

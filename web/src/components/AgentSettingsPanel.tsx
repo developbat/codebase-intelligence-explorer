@@ -226,6 +226,47 @@ export function AgentSettingsPanel({ settings, onSaved }: AgentSettingsPanelProp
         </div>
       </div>
 
+      <div className="agent-budget-mode">
+        <div>
+          <strong>{t("Task budget behavior")}</strong>
+          <small>
+            {t("Usage is always recorded and reported. Choose whether a budget should only warn or stop the run.")}
+          </small>
+        </div>
+        <select
+          className="settings-select"
+          value={settings?.taskBudgetMode ?? "off"}
+          disabled={!settings || busy !== null}
+          onChange={(event) => {
+            const mode = event.target.value as "off" | "warn" | "stop";
+            void api.ai
+              .updateSettings({ taskBudgetMode: mode })
+              .then((next) => {
+                onSaved(next);
+                setMessage({
+                  ok: true,
+                  text:
+                    mode === "off"
+                      ? t("Task budgets are off; runs continue to completion.")
+                      : mode === "warn"
+                        ? t("Task budgets warn but do not stop the run.")
+                        : t("Task budgets stop the run at the limit."),
+                });
+              })
+              .catch((error) =>
+                setMessage({
+                  ok: false,
+                  text: error instanceof Error ? error.message : t("Could not save the budget mode."),
+                }),
+              );
+          }}
+        >
+          <option value="off">{t("Off — run to completion")}</option>
+          <option value="warn">{t("Warn only")}</option>
+          <option value="stop">{t("Stop at the limit")}</option>
+        </select>
+      </div>
+
       <label className="agent-review-toggle">
         <input
           type="checkbox"

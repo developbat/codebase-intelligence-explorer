@@ -853,6 +853,7 @@ export async function runProjectLoop(
           forceWrite,
           tokenBudget,
           costBudgetUsd,
+          budgetMode: settings?.taskBudgetMode ?? "off",
           startingUsage: current.tokenUsage,
           intent: options.intent,
           history: options.history?.slice(-8),

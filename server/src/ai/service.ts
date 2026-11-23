@@ -3359,6 +3359,7 @@ export async function runAgentTask(
     forceWrite?: boolean;
     tokenBudget?: number;
     costBudgetUsd?: number;
+    budgetMode?: "off" | "warn" | "stop";
     startingUsage?: AiTokenUsage;
     intent?: IntentAnalysis;
   } = {},
@@ -3938,7 +3939,10 @@ export async function runAgentTask(
   let missingSelectors: MissingSelector[] = [];
   let browserCheckCalls = 0;
   let remainingWorkRejected = false;
+  let budgetWarned = false;
+  let budgetWarning: string | undefined;
   let planPath: string | undefined;
+  const budgetMode = options.budgetMode ?? "stop";
 
   for (let index = 1; ; index += 1) {
     if (signal?.aborted) {
@@ -3946,7 +3950,10 @@ export async function runAgentTask(
       summary = "Stopped by the user.";
       break;
     }
-    if (options.tokenBudget || options.costBudgetUsd !== undefined) {
+    if (
+      budgetMode !== "off" &&
+      (options.tokenBudget || options.costBudgetUsd !== undefined)
+    ) {
       const cumulativeUsage: AiTokenUsage = {
         inputTokens: tokenTotal.inputTokens + startingUsage.inputTokens,
         outputTokens: tokenTotal.outputTokens + startingUsage.outputTokens,
@@ -3956,14 +3963,22 @@ export async function runAgentTask(
         () => undefined,
       );
       if (budgetExceeded(cumulativeUsage, costSoFar, options.tokenBudget, options.costBudgetUsd)) {
-        stoppedReason = "budget";
-        summary = `Task budget exceeded: ${cumulativeUsage.totalTokens.toLocaleString()} tokens${
+        const message = `Task budget exceeded: ${cumulativeUsage.totalTokens.toLocaleString()} tokens${
           options.tokenBudget ? ` of ${options.tokenBudget.toLocaleString()}` : ""
         }${costSoFar !== undefined ? ` · $${costSoFar.toFixed(4)}` : ""}${
           options.costBudgetUsd !== undefined ? ` of $${options.costBudgetUsd.toFixed(4)}` : ""
-        }. Stopped before the next model call to avoid further cost.`;
-        log("warn", "Task budget exceeded", summary.slice(0, 180));
-        break;
+        }.`;
+        if (budgetMode === "stop") {
+          stoppedReason = "budget";
+          summary = `${message} Stopped before the next model call to avoid further cost.`;
+          log("warn", "Task budget exceeded", summary.slice(0, 180));
+          break;
+        }
+        if (!budgetWarned) {
+          budgetWarned = true;
+          budgetWarning = message;
+          log("warn", "Task budget exceeded · continuing", message);
+        }
       }
     }
     // A native multi-call reply is one model turn; queued actions do not
@@ -6558,6 +6573,10 @@ export async function runAgentTask(
     summary =
       cleaned ||
       "The agent could not produce a clean final answer because the model returned provider tool-call markup. Check the tool steps and retry or switch models.";
+  }
+
+  if (budgetWarning && summary.trim()) {
+    summary = `${summary}\n\n**Budget warning:** ${budgetWarning} The task continued because task budget enforcement is set to warn.`;
   }
 
   if (stoppedReason === "finished" && summary.trim()) {

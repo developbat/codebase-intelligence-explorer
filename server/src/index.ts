@@ -397,6 +397,10 @@ app.put("/api/ai/settings", async (req, res) => {
       localModelsDir:
         typeof body.localModelsDir === "string" ? body.localModelsDir : undefined,
       reviewEdits: typeof body.reviewEdits === "boolean" ? body.reviewEdits : undefined,
+      taskBudgetMode:
+        body.taskBudgetMode === "stop" || body.taskBudgetMode === "warn" || body.taskBudgetMode === "off"
+          ? body.taskBudgetMode
+          : undefined,
     });
     res.json(settings);
   } catch (error) {

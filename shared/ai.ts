@@ -250,6 +250,7 @@ export interface AiSettingsPublic {
   fallback: AiFallbackSettings;
   localModelsDir: string;
   reviewEdits: boolean;
+  taskBudgetMode: AiTaskBudgetMode;
 }
 
 export interface AiCustomProviderInput {
@@ -280,6 +281,7 @@ export interface AiSettingsInput {
   fallback?: Partial<AiFallbackSettings>;
   localModelsDir?: string;
   reviewEdits?: boolean;
+  taskBudgetMode?: AiTaskBudgetMode;
 }
 
 export interface AiUsage {
@@ -564,6 +566,8 @@ export interface AiTestResult {
   latencyMs: number;
   message: string;
 }
+
+export type AiTaskBudgetMode = "off" | "warn" | "stop";
 
 export type AiAgentAction =
   | "list_files"
