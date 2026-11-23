@@ -521,6 +521,7 @@ export type AiAgentAction =
   | "read_file"
   | "read_symbol"
   | "find_in_file"
+  | "diagnostics"
   | "list_items"
   | "count_matches"
   | "json_query"

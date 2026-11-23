@@ -40,6 +40,7 @@ import { getDataDir, loadAnalysis } from "../store";
 import { isWithin } from "../scanner";
 import { formatProjectFile } from "../formatter";
 import { detectProjectProfile } from "../projectProfile";
+import { checkFileSyntax } from "../syntax";
 import { queryCsvFile, querySqliteFile } from "../dataQuery";
 import { runBrowserCheck } from "../browserCheck";
 import type { BrowserCheckStep } from "../../../shared/browserCheck";
@@ -1690,6 +1691,7 @@ const READ_ONLY_ACTIONS = new Set([
   "read_file",
   "read_symbol",
   "find_in_file",
+  "diagnostics",
   "list_items",
   "count_matches",
   "json_query",
@@ -2797,6 +2799,7 @@ export function agentToolCatalog(
     '{"action":"read_symbol","args":{"path":"src/app.ts","line":142}}',
     '{"action":"read_symbol","args":{"name":"UserService"}}',
     '{"action":"find_in_file","args":{"path":"src/app.ts","query":"login","contextLines":2,"limit":10}}',
+    '{"action":"diagnostics","args":{"path":"src/app.ts"}}',
     '{"action":"list_items","args":{"path":"data/items.html","limit":100}}',
     '{"action":"count_matches","args":{"path":"src","query":"TODO","limit":20}}',
     '{"action":"json_query","args":{"path":"package.json","pointer":"scripts"}}',
@@ -3789,6 +3792,8 @@ export async function runAgentTask(
   let planningNudges = 0;
   let selectorNudges = 0;
   let wiringNudges = 0;
+  let syntaxNudges = 0;
+  let syntaxFailures: { file: string; output: string }[] = [];
   let missingSelectors: MissingSelector[] = [];
   let browserCheckCalls = 0;
   let remainingWorkRejected = false;
@@ -4032,6 +4037,7 @@ export async function runAgentTask(
       "read_file",
       "read_symbol",
       "find_in_file",
+      "diagnostics",
       "list_items",
       "count_matches",
       "json_query",
@@ -4090,6 +4096,7 @@ export async function runAgentTask(
         read_file: "Reading file…",
         read_symbol: "Reading the enclosing symbol…",
         find_in_file: "Searching inside file…",
+        diagnostics: "Checking file diagnostics…",
         list_items: "Extracting list items…",
         count_matches: "Counting matches…",
         json_query: "Inspecting JSON…",
@@ -4179,6 +4186,30 @@ export async function runAgentTask(
         const observation =
           "The finish summary contained tool-call or XML markup. Reply with a plain Markdown answer in args.summary. Never output DSML, tool_call, function or provider control tags.";
         log("error", "Finish summary leaked tool markup", rawSummary.replace(/\s+/g, " ").slice(0, 160));
+        recordStep({
+          index,
+          action: "invalid",
+          args: {},
+          observation,
+          ok: false,
+          durationMs: Date.now() - started,
+          tokenUsage: stepUsage,
+        });
+        transcript.push({ role: "user", content: `Observation (step ${index}) [invalid]: ${observation}` });
+        continue;
+      }
+
+      if (
+        !readOnlyMode &&
+        syntaxFailures.length > 0 &&
+        modelTurns < maxSteps &&
+        syntaxNudges < 2
+      ) {
+        syntaxNudges += 1;
+        const observation = `Syntax diagnostics failed after the edit:\n${syntaxFailures
+          .map((item) => `- ${item.file}: ${item.output.slice(0, 600)}`)
+          .join("\n")}\nFix the syntax errors before finishing.`;
+        log("warn", "Finish rejected: syntax diagnostics", syntaxFailures.map((item) => item.file).join(", "));
         recordStep({
           index,
           action: "invalid",
@@ -4389,6 +4420,11 @@ export async function runAgentTask(
         summary += `\n\n**UI wiring warning:** ${missingSelectors
           .map((item) => `#${item.id} (${item.file})`)
           .join(", ")} is referenced but not defined in any project markup.`;
+      }
+      if (!readOnlyMode && syntaxFailures.length > 0) {
+        summary += `\n\n**Syntax diagnostics:** ${syntaxFailures
+          .map((item) => `${item.file} — ${item.output.slice(0, 300)}`)
+          .join("; ")}`;
       }
       if (
         !readOnlyMode &&
@@ -4695,6 +4731,23 @@ export async function runAgentTask(
           log("info", `${lines.length} lines read`, `${file.filePath} (${startLine}-${Math.min(endLine, lines.length)})`);
           ok = true;
         }
+      } else if (action === "diagnostics") {
+        const filePath = normalizeAgentPath(analysis.rootPath, args.path);
+        if (!filePath) throw new Error("A file path is required.");
+        if (isSecretAgentPath(filePath)) throw new Error("Reading environment, key or Git internals files is denied.");
+        const result = await checkFileSyntax(analysis, filePath);
+        observation = result.supported
+          ? `Diagnostics: ${result.filePath} — ${result.ok ? "OK" : "FAILED"}${
+              result.command ? `\nCommand: ${result.command}` : ""
+            }\n${(result.output || "No diagnostics reported.").slice(0, 3_000)}`
+          : `Diagnostics unavailable for ${result.filePath}: ${result.output}`;
+        evidence.push({ path: result.filePath, label: "Diagnostics" });
+        log(
+          result.supported && !result.ok ? "warn" : "info",
+          result.supported ? "Diagnostics checked" : "Diagnostics unavailable",
+          result.filePath,
+        );
+        ok = result.supported ? result.ok : true;
       } else if (action === "find_in_file") {
         const filePath = normalizeAgentPath(analysis.rootPath, args.path);
         const query = String(args.query ?? "").trim();
@@ -6004,9 +6057,34 @@ export async function runAgentTask(
         log("warn", "UI wiring incomplete", detail);
       }
     }
+    if (
+      ok &&
+      !readOnlyMode &&
+      ["write_file", "replace_in_file", "replace_many", "rename_path", "delete_file", "format_file"].includes(action)
+    ) {
+      const diagnostics = await Promise.all(
+        changedFiles.slice(0, 6).map((filePath) =>
+          checkFileSyntax(analysis, filePath).catch(() => null),
+        ),
+      );
+      syntaxFailures = diagnostics
+        .filter(
+          (item): item is NonNullable<typeof item> =>
+            Boolean(item && item.supported && !item.ok),
+        )
+        .map((item) => ({ file: item.filePath, output: item.output }));
+      if (syntaxFailures.length > 0) {
+        observation = `${observation}\n\nSyntax diagnostics failed:\n${syntaxFailures
+          .map((item) => `- ${item.file}: ${item.output.slice(0, 500)}`)
+          .join("\n")}`;
+        log("warn", "Syntax diagnostics failed", syntaxFailures.map((item) => item.file).join(", "));
+      }
+    }
     const observationLimit =
       step.action === "read_file" || step.action === "find_in_file"
         ? 3_200
+        : step.action === "diagnostics"
+          ? 3_500
         : step.action === "read_symbol"
           ? 6_000
         : step.action === "web_fetch"
