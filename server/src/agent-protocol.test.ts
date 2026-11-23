@@ -104,3 +104,21 @@ test("streaming provider tool calls are converted to the JSON action protocol", 
   assert.equal(parsed.__actions?.length, 2);
   assert.equal(toolCallsToJson([]), null);
 });
+
+test("balanced JSON extraction survives prose, trailing commas and multiline summaries", () => {
+  const prose = 'Use {this} as a note, then {"action":"read_file","args":{"path":"src/a.ts"}} is the action.';
+  assert.equal(parseAgentReply(prose).action, "read_file");
+
+  const trailing = '{"action":"finish","args":{"summary":"done",},}';
+  assert.equal(parseAgentReply(trailing).action, "finish");
+
+  const multiline = String.raw`{"action":"finish","args":{"summary":"line one\nline two"}}`;
+  const parsed = parseAgentReply(multiline);
+  assert.equal(parsed.action, "finish");
+  assert.match(String((parsed.args as Record<string, unknown>).summary), /line one\nline two/);
+
+  const unescaped = '{"action":"finish","args":{"summary":"first line\nsecond line"}}';
+  const repaired = parseAgentReply(unescaped);
+  assert.equal(repaired.action, "finish");
+  assert.match(String((repaired.args as Record<string, unknown>).summary), /first line\nsecond line/);
+});

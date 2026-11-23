@@ -236,16 +236,108 @@ function evidenceOf(analysis: AnalysisResult, filePath: string, startLine?: numb
   return { path: filePath, startLine, endLine, label };
 }
 
-function parseJsonObject(text: string): Record<string, unknown> {
-  const withoutFences = text.replace(/```(?:json)?/gi, "").replace(/```/g, "").trim();
-  const start = withoutFences.indexOf("{");
-  const end = withoutFences.lastIndexOf("}");
-  if (start === -1 || end === -1 || end <= start) throw new Error("The model did not return a JSON object.");
-  try {
-    return JSON.parse(withoutFences.slice(start, end + 1)) as Record<string, unknown>;
-  } catch {
-    throw new Error("The model returned invalid JSON. Try again or switch models.");
+function escapeControlCharactersInStrings(text: string): string {
+  let result = "";
+  let inString = false;
+  let escaped = false;
+  for (const character of text) {
+    if (inString) {
+      if (escaped) {
+        result += character;
+        escaped = false;
+        continue;
+      }
+      if (character === "\\") {
+        result += character;
+        escaped = true;
+        continue;
+      }
+      if (character === '"') {
+        result += character;
+        inString = false;
+        continue;
+      }
+      if (character === "\n") {
+        result += "\\n";
+        continue;
+      }
+      if (character === "\r") {
+        result += "\\r";
+        continue;
+      }
+      if (character === "\t") {
+        result += "\\t";
+        continue;
+      }
+      result += character;
+      continue;
+    }
+    if (character === '"') {
+      inString = true;
+      result += character;
+      continue;
+    }
+    result += character;
   }
+  return result;
+}
+
+function jsonCandidates(text: string): string[] {
+  const clean = text
+    .replace(/```(?:json)?/gi, "")
+    .replace(/```/g, "")
+    .replace(/[\u200B-\u200D\uFEFF]/g, "")
+    .replace(/[“”]/g, '"')
+    .trim();
+  const candidates: string[] = [];
+  for (let start = clean.indexOf("{"); start >= 0; start = clean.indexOf("{", start + 1)) {
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+    for (let index = start; index < clean.length; index += 1) {
+      const character = clean[index];
+      if (inString) {
+        if (escaped) escaped = false;
+        else if (character === "\\") escaped = true;
+        else if (character === '"') inString = false;
+        continue;
+      }
+      if (character === '"') {
+        inString = true;
+        continue;
+      }
+      if (character === "{") depth += 1;
+      else if (character === "}") {
+        depth -= 1;
+        if (depth === 0) {
+          candidates.push(clean.slice(start, index + 1));
+          break;
+        }
+      }
+    }
+  }
+  return candidates;
+}
+
+function parseJsonObject(text: string): Record<string, unknown> {
+  const candidates = jsonCandidates(text);
+  if (candidates.length === 0) {
+    throw new Error("The model did not return a JSON object.");
+  }
+  for (const candidate of candidates) {
+    for (const variant of [
+      candidate,
+      candidate.replace(/,\s*([}\]])/g, "$1"),
+      escapeControlCharactersInStrings(candidate).replace(/,\s*([}\]])/g, "$1"),
+    ]) {
+      try {
+        return JSON.parse(variant) as Record<string, unknown>;
+      } catch {
+        // Try the next repair/candidate.
+      }
+    }
+  }
+  throw new Error("The model returned invalid JSON. Try again or switch models.");
 }
 
 function stringArray(value: unknown): string[] {
@@ -2061,6 +2153,15 @@ export function parseAgentReply(text: string): Record<string, unknown> {
           __actions: actions,
         };
       }
+    }
+    const multipleActions = parseMultipleJsonActions(text);
+    if (multipleActions.length > 1) {
+      return {
+        action: multipleActions[0].action,
+        args: multipleActions[0].args,
+        __actionCount: multipleActions.length,
+        __actions: multipleActions,
+      };
     }
     return single;
   } catch {
