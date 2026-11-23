@@ -7,7 +7,9 @@ import {
   getSkill,
   listSkills,
   loadEnabledSkills,
+  loadSkillsForPrompt,
   readSkillFile,
+  runSkillScript,
   renderSkillsForPrompt,
   setSkillEnabled,
   type EnabledSkill,
@@ -186,6 +188,75 @@ test("skill file previews are confined to the skill directory", async () => {
     const detail = await getSkill(project, "project-d", key, { dataDir, homeDir });
     assert.match(detail.content, /---/);
     assert.equal(detail.body, "Body");
+  } finally {
+    await fs.rm(cleanup, { recursive: true, force: true });
+  }
+});
+
+test("@skill mention loads a disabled skill for that run only", async () => {
+  const { project, dataDir, homeDir, cleanup } = await roots();
+  try {
+    await writeSkill(
+      path.join(project, ".cie", "skills"),
+      "code-review",
+      "name: Code Review\ndescription: Reviews a diff.",
+      "CHECK THE DIFF",
+    );
+    const result = await loadSkillsForPrompt(
+      project,
+      "project-mention",
+      "Please @code-review this change",
+      { dataDir, homeDir },
+    );
+    assert.deepEqual(result.mentions, ["Code Review"]);
+    assert.equal(result.skills.length, 1);
+    assert.match(result.skills[0].content, /CHECK THE DIFF/);
+    const plain = await loadSkillsForPrompt(project, "project-mention", "normal question", {
+      dataDir,
+      homeDir,
+    });
+    assert.equal(plain.mentions.length, 0);
+    assert.equal(plain.skills.length, 0);
+  } finally {
+    await fs.rm(cleanup, { recursive: true, force: true });
+  }
+});
+
+test("skill scripts run only from listed script files", async () => {
+  const { project, dataDir, homeDir, cleanup } = await roots();
+  try {
+    const skillDir = await writeSkill(
+      path.join(project, ".cie", "skills"),
+      "scripted",
+      "name: Scripted\ndescription: Has a script.",
+      "Use the script.",
+    );
+    await fs.mkdir(path.join(skillDir, "scripts"), { recursive: true });
+    await fs.writeFile(
+      path.join(skillDir, "scripts", "hello.py"),
+      'print("script-ok")\n',
+      "utf8",
+    );
+    await fs.writeFile(path.join(project, "secret.py"), 'print("secret")\n', "utf8");
+    const key = (await listSkills(project, "project-script", { dataDir, homeDir })).skills[0].key;
+    const result = await runSkillScript(
+      project,
+      "project-script",
+      key,
+      "scripts/hello.py",
+      [],
+      { dataDir, homeDir },
+    );
+    assert.equal(result.exitCode, 0);
+    assert.match(result.output, /script-ok/);
+    await assert.rejects(
+      () => runSkillScript(project, "project-script", key, "../secret.py", [], { dataDir, homeDir }),
+      /only script files|outside/i,
+    );
+    await assert.rejects(
+      () => runSkillScript(project, "project-script", key, "SKILL.md", [], { dataDir, homeDir }),
+      /only script files/i,
+    );
   } finally {
     await fs.rm(cleanup, { recursive: true, force: true });
   }

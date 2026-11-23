@@ -49,6 +49,13 @@ export interface SkillListResponse {
   };
 }
 
+export interface SkillScriptRunResult {
+  command: string;
+  output: string;
+  exitCode: number | null;
+  durationMs: number;
+}
+
 export interface SkillFileResponse {
   path: string;
   bytes: number;
@@ -95,6 +102,7 @@ export interface InstalledSkillInfo {
   source: string;
   ref: string;
   hash: string;
+  commitSha?: string;
   enabled: boolean;
 }
 

@@ -105,7 +105,7 @@ import { findProjectIcon } from "./icons";
 import { discoverTests, runTests } from "./tests";
 import { listFolders } from "./fsbrowse";
 import { listProjectTemplates, scaffoldProject } from "./scaffold";
-import { getSkill, listSkills, readSkillFile, setSkillEnabled } from "./skills";
+import { getSkill, listSkills, readSkillFile, runSkillScript, setSkillEnabled } from "./skills";
 import {
   installSkills,
   previewSkillSource,
@@ -1006,6 +1006,21 @@ app.get("/api/projects/:id/skills/:key/file", async (req, res) => {
     const analysis = await loadAnalysis(req.params.id);
     const filePath = typeof req.query.path === "string" ? req.query.path : "";
     res.json(await readSkillFile(analysis.rootPath, req.params.id, req.params.key, filePath));
+  } catch (error) {
+    handleError(res, error, 400);
+  }
+});
+
+app.post("/api/projects/:id/skills/:key/run", async (req, res) => {
+  try {
+    const analysis = await loadAnalysis(req.params.id);
+    const relativePath = typeof req.body?.path === "string" ? req.body.path : "";
+    const args = Array.isArray(req.body?.args)
+      ? req.body.args.filter((value: unknown): value is string => typeof value === "string")
+      : [];
+    res.json(
+      await runSkillScript(analysis.rootPath, analysis.id, req.params.key, relativePath, args),
+    );
   } catch (error) {
     handleError(res, error, 400);
   }

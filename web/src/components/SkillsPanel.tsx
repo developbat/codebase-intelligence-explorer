@@ -3,6 +3,7 @@ import {
   AlertTriangle,
   FileText,
   FolderOpen,
+  Play,
   Plus,
   Trash2,
   Loader2,
@@ -58,6 +59,13 @@ export function SkillsPanel({ projectId }: SkillsPanelProps) {
   const [previewBusy, setPreviewBusy] = useState(false);
   const [installBusy, setInstallBusy] = useState(false);
   const [addMessage, setAddMessage] = useState<string | null>(null);
+  const [scriptBusy, setScriptBusy] = useState(false);
+  const [scriptResult, setScriptResult] = useState<{
+    command: string;
+    output: string;
+    exitCode: number | null;
+    durationMs: number;
+  } | null>(null);
 
   async function load() {
     setLoading(true);
@@ -143,6 +151,36 @@ export function SkillsPanel({ projectId }: SkillsPanelProps) {
         .includes(needle);
     });
   }, [data, query, scope]);
+
+  async function runSelectedScript() {
+    if (!detail || !selectedFile || scriptBusy) return;
+    const file = detail.files.find(
+      (item) => item.path === selectedFile && item.kind === "script",
+    );
+    if (!file) return;
+    const approved = window.confirm(
+      t("Run {path} with your user permissions? Review the script first if you did not write it.", {
+        path: selectedFile,
+      }),
+    );
+    if (!approved) return;
+    setScriptBusy(true);
+    setScriptResult(null);
+    try {
+      const result = await api.skills.runScript(projectId, detail.key, selectedFile);
+      setScriptResult(result);
+    } catch (requestError) {
+      setScriptResult({
+        command: selectedFile,
+        output:
+          requestError instanceof Error ? requestError.message : t("Could not run this script."),
+        exitCode: null,
+        durationMs: 0,
+      });
+    } finally {
+      setScriptBusy(false);
+    }
+  }
 
   async function toggleSkill(skill: SkillRecord, enabled: boolean) {
     setBusyKey(skill.key);
@@ -296,7 +334,7 @@ export function SkillsPanel({ projectId }: SkillsPanelProps) {
 
       <p className="skills-intro">
         {t(
-          "Skills are SKILL.md instruction packs discovered from project and global agent folders. Disabled skills are never sent to the model. Scripts are not executed.",
+          "Skills are SKILL.md instruction packs discovered from project, built-in and global agent folders. Disabled skills are never sent automatically. Type @skill-name in a message to use a skill for that run only. Skill scripts run only after explicit approval.",
         )}
       </p>
 
@@ -342,7 +380,7 @@ export function SkillsPanel({ projectId }: SkillsPanelProps) {
               />
               {t("Enable after install")}
             </label>
-            <span>{t("Scripts are not executed.")}</span>
+            <span>{t("Scripts run only after explicit approval.")}</span>
           </div>
           {preview ? (
             <div className="skills-candidates">
@@ -634,6 +672,28 @@ export function SkillsPanel({ projectId }: SkillsPanelProps) {
                       </button>
                     ))}
                 </div>
+
+                {selectedFile &&
+                detail.files.some(
+                  (item) => item.path === selectedFile && item.kind === "script",
+                ) ? (
+                  <div className="skills-script-run">
+                    <button
+                      className="ghost-button"
+                      onClick={() => void runSelectedScript()}
+                      disabled={scriptBusy}
+                    >
+                      {scriptBusy ? <Loader2 size={10} className="spin" /> : <Play size={10} />}
+                      {t("Run script")}
+                    </button>
+                    <span>{t("Runs only after this confirmation, with your user permissions.")}</span>
+                  </div>
+                ) : null}
+                {scriptResult ? (
+                  <pre className={`skills-script-output ${scriptResult.exitCode === 0 ? "is-ok" : "is-error"}`}>
+                    {`$ ${scriptResult.command}\nexit ${scriptResult.exitCode ?? "—"} · ${scriptResult.durationMs} ms\n\n${scriptResult.output}`}
+                  </pre>
+                ) : null}
 
                 <pre className="skills-content">
                   {fileLoading

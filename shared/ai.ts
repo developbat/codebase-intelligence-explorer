@@ -616,6 +616,7 @@ export type AiAgentAction =
   | "search_notes"
   | "create_project_tool"
   | "create_skill"
+  | "run_skill_script"
   | "git_info"
   | "git_commit"
   | "git_create_branch"

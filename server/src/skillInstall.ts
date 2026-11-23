@@ -32,6 +32,7 @@ interface SourceFiles {
   ref: string;
   source: string;
   hash: string;
+  commitSha?: string;
   warnings: string[];
 }
 
@@ -47,6 +48,7 @@ interface LockEntry {
   repository?: string;
   ref: string;
   hash: string;
+  commitSha?: string;
   installedAt: string;
   updatedAt: string;
 }
@@ -218,6 +220,29 @@ async function readLocalFiles(root: string): Promise<Map<string, Buffer>> {
   return files;
 }
 
+async function resolveCommitSha(owner: string, repo: string, ref: string): Promise<string | undefined> {
+  if (!owner || !repo) return undefined;
+  try {
+    const response = await fetch(
+      `https://api.github.com/repos/${owner}/${repo}/commits/${encodeURIComponent(ref)}`,
+      {
+        headers: {
+          "User-Agent": "codebase-intelligence-explorer",
+          Accept: "application/vnd.github+json",
+        },
+        signal: AbortSignal.timeout(15_000),
+      },
+    );
+    if (!response.ok) return undefined;
+    const payload = (await response.json()) as { sha?: unknown };
+    return typeof payload.sha === "string" && /^[a-f0-9]{40}$/i.test(payload.sha)
+      ? payload.sha
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 async function loadSource(source: string, ref?: string): Promise<SourceFiles> {
   const parsed = parseSource(source);
   if (parsed.kind === "local") {
@@ -248,12 +273,14 @@ async function loadSource(source: string, ref?: string): Promise<SourceFiles> {
   const buffer = Buffer.from(await response.arrayBuffer());
   if (buffer.length > MAX_DOWNLOAD_BYTES) throw new Error("Skill archive is too large.");
   const files = stripArchiveRoot(parseTarGz(buffer));
+  const commitSha = await resolveCommitSha(owner, repo, targetRef);
   return {
     files,
     source,
     repository: `${owner}/${repo}`,
     ref: targetRef,
     hash: hashFiles(files),
+    commitSha,
     warnings: parsed.skill ? [`Filtered to skill "${parsed.skill}".`] : [],
   };
 }
@@ -379,6 +406,7 @@ export async function installSkills(
       repository: loaded.repository,
       ref: loaded.ref,
       hash,
+      commitSha: loaded.commitSha,
       installedAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
@@ -393,6 +421,7 @@ export async function installSkills(
       source: request.source,
       ref: loaded.ref,
       hash,
+      commitSha: loaded.commitSha,
       enabled: request.enable === true,
     });
   }
@@ -463,6 +492,7 @@ export async function updateInstalledSkill(
     ...entry,
     ref: loaded.ref,
     hash,
+    commitSha: loaded.commitSha,
     updatedAt: new Date().toISOString(),
   };
   await writeLock(root, lock);
@@ -477,6 +507,7 @@ export async function updateInstalledSkill(
     source: entry.source,
     ref: loaded.ref,
     hash,
+    commitSha: loaded.commitSha,
     enabled,
   };
 }

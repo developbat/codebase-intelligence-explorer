@@ -352,6 +352,17 @@ export const api = {
         body: JSON.stringify({ key }),
       }),
 
+    runScript: (id: string, key: string, path: string, args: string[] = []) =>
+      request<{
+        command: string;
+        output: string;
+        exitCode: number | null;
+        durationMs: number;
+      }>(`/api/projects/${id}/skills/${encodeURIComponent(key)}/run`, {
+        method: "POST",
+        body: JSON.stringify({ path, args }),
+      }),
+
     get: (id: string, key: string) =>
       request<SkillDetail>(`/api/projects/${id}/skills/${encodeURIComponent(key)}`),
 

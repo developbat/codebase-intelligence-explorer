@@ -111,7 +111,7 @@ import type {
 import { AGENT_TOOL_GROUPS } from "../../../shared/intent";
 import { pickAlternateAgentModel } from "./agents";
 import { getPrompt, renderPrompt } from "./prompts";
-import { listSkills, loadEnabledSkills, renderSkillsForPrompt, setSkillEnabled } from "../skills";
+import { listSkills, loadSkillsForPrompt, renderSkillsForPrompt, runSkillScript, setSkillEnabled } from "../skills";
 import {
   createSkill,
   installSkills,
@@ -1672,9 +1672,11 @@ export async function askProject(
 
   const context = contextParts.join("\n");
   const chatPrompt = await getPrompt("chat.answer", projectId);
-  const skillsPrompt = await loadEnabledSkills(analysis.rootPath, projectId)
-    .then(renderSkillsForPrompt)
-    .catch(() => "");
+  const chatSkills = await loadSkillsForPrompt(analysis.rootPath, projectId, question).catch(() => ({
+    skills: [],
+    mentions: [],
+  }));
+  const skillsPrompt = renderSkillsForPrompt(chatSkills.skills);
   const messages: ChatMessage[] = [
     {
       role: "system",
@@ -2813,6 +2815,7 @@ const ACTION_TOOL_GROUPS: Partial<Record<string, AgentToolGroup[]>> = {
   set_skill_enabled: ["skills"],
   remove_skill: ["skills"],
   create_skill: ["skills"],
+  run_skill_script: ["skills", "command"],
   create_graphic: ["media"],
   placeholder_asset: ["media"],
   compress_video: ["media"],
@@ -2963,6 +2966,7 @@ export function agentToolCatalog(
     tools.push(`{"action":"save_note","args":{"title":"Research: topic","content":"notes with sources","tags":["research"],"sources":["https://example.com"]}}${approval}  // saves under .cie/agent/notes`);
     tools.push(`{"action":"create_project_tool","args":{"name":"check-links","language":"js","description":"Validate links","code":"// reusable script"}}${approval}  // saves under .cie/agent/tools`);
     tools.push(`{"action":"create_skill","args":{"name":"my-workflow","description":"When to use it","body":"instructions","enable":true}}${approval}  // creates .cie/skills/<name>/SKILL.md`);
+    tools.push(`{"action":"run_skill_script","args":{"skill":"code-review","path":"scripts/check.py","args":[]}}${commandApproval}  // runs one listed skill script; requires user approval`);
     tools.push(`{"action":"git_commit","args":{"message":"feat: change","stageAll":true}}${approval}  // stages and commits; never pushes`);
     tools.push(`{"action":"http_request","args":{"method":"POST","url":"https://api.example.com/items","headers":{"Content-Type":"application/json"},"body":"{\"name\":\"demo\"}"}}${commandApproval}  // explicit network request; requires approval`);
     tools.push(`{"action":"git_push","args":{"remote":"origin","branch":"main","setUpstream":true}}  // always requires confirmation`);
@@ -3438,7 +3442,7 @@ export async function runAgentTask(
     tool: string,
     target: string | undefined,
     detail: string | undefined,
-    options: { preview?: string; destructive?: boolean } = {},
+    options: { preview?: string; destructive?: boolean; forceConfirm?: boolean } = {},
   ): Promise<boolean> => {
     if (readOnlyMode) {
       if (
@@ -3450,7 +3454,7 @@ export async function runAgentTask(
       return false;
     }
     const destructive = options.destructive === true;
-    if (!destructive) {
+    if (!destructive && options.forceConfirm !== true) {
       if (kind === "write" && writeApproved) return true;
       if (kind === "command" && commandsApproved) return true;
     }
@@ -3800,20 +3804,20 @@ export async function runAgentTask(
     workspaceMode === "ask"
       ? "\n\nInspection profile: this task is read-only. Read at most 6 files, never re-read the same range, and finish with a compact report. Do not propose a large next-step list."
       : "";
-  const enabledSkills = await loadEnabledSkills(analysis.rootPath, projectId).catch(() => []);
-  const mentionedSkill = enabledSkills.some((skill) => {
-    const name = skill.record.name.toLowerCase();
-    return (
-      instruction.toLowerCase().includes(name) ||
-      instruction.toLowerCase().includes(`@${name}`)
-    );
-  });
+  const skillLoad = await loadSkillsForPrompt(analysis.rootPath, projectId, instruction).catch(
+    () => ({ skills: [] as never[], mentions: [] as string[] }),
+  );
+  const enabledSkills = skillLoad.skills;
+  const mentionedSkill = skillLoad.mentions.length > 0;
   const includeSkills =
     !options.intent ||
     contextMode === "project" ||
     toolGroups.includes("skills") ||
     mentionedSkill;
   const skillsPrompt = includeSkills ? renderSkillsForPrompt(enabledSkills) : "";
+  if (skillLoad.mentions.length > 0) {
+    log("info", "Skill mention", `${skillLoad.mentions.join(", ")} · used for this run only`);
+  }
   if (enabledSkills.length > 0) {
     log(
       "info",
@@ -4220,6 +4224,7 @@ export async function runAgentTask(
       "rename_path",
       "delete_file",
       "format_file",
+      "run_skill_script",
       "run_command",
       "finish",
     ];
@@ -6237,6 +6242,52 @@ export async function runAgentTask(
         observation = `${formatted.command}\n${formatted.formatted ? "File formatted." : "File was already formatted."}`;
         log("success", "File formatted", formatted.filePath);
         ok = true;
+      } else if (action === "run_skill_script") {
+        const skillName = String(args.skill ?? "").trim();
+        const scriptPath = String(args.path ?? "").trim();
+        if (!skillName || !scriptPath) {
+          throw new Error("A skill name and script path are required.");
+        }
+        const skillList = await listSkills(analysis.rootPath, projectId);
+        const skill = skillList.skills.find(
+          (item) =>
+            item.key === skillName || item.name.toLowerCase() === skillName.toLowerCase(),
+        );
+        if (!skill) throw new Error(`Skill not found: ${skillName}`);
+        const script = skill.files.find(
+          (file) => file.kind === "script" && file.path === scriptPath,
+        );
+        if (!script) {
+          throw new Error("Only scripts listed by this skill can be run.");
+        }
+        const scriptArgs = Array.isArray(args.args)
+          ? args.args.filter((value): value is string => typeof value === "string").slice(0, 20)
+          : [];
+        const scriptAllowed = await requirePermission(
+          "command",
+          "run_skill_script",
+          `${skill.name}/${scriptPath}`,
+          `Skill: ${skill.name}${scriptArgs.length > 0 ? ` · args: ${scriptArgs.join(" ")}` : ""}`,
+          { preview: scriptPath, forceConfirm: true },
+        );
+        if (!scriptAllowed) throw new Error("The user denied permission to run this skill script.");
+        const scriptResult = await runSkillScript(
+          analysis.rootPath,
+          projectId,
+          skill.key,
+          scriptPath,
+          scriptArgs,
+        );
+        ranCommands.push(`${skill.name}/${scriptPath}`);
+        log(
+          scriptResult.exitCode === 0 ? "success" : "error",
+          "Skill script finished",
+          `exit ${scriptResult.exitCode ?? "—"} · ${scriptResult.durationMs} ms`,
+        );
+        observation = clampObservation(
+          `Skill script: ${scriptResult.command}\nExit: ${scriptResult.exitCode ?? "—"}\nDuration: ${scriptResult.durationMs} ms\n${scriptResult.output}`,
+        );
+        ok = scriptResult.exitCode === 0;
       } else if (action === "run_command") {
         if (ranCommands.length >= AGENT_MAX_COMMANDS) throw new Error(`Command limit reached (${AGENT_MAX_COMMANDS}).`);
         const command = String(args.command ?? "").trim();

@@ -1,6 +1,9 @@
+import { execFile } from "node:child_process";
 import fs from "node:fs/promises";
+import { promisify } from "node:util";
 import os from "node:os";
 import path from "node:path";
+import { ensureBuiltinSkills, builtinSkillRoot } from "./builtinSkills";
 import { isWithin } from "./scanner";
 import { getDataDir } from "./store";
 import type {
@@ -10,6 +13,7 @@ import type {
   SkillListResponse,
   SkillRecord,
   SkillScope,
+  SkillScriptRunResult,
   SkillSourceInfo,
 } from "../../shared/skills";
 
@@ -23,6 +27,7 @@ const MAX_PROMPT_TOTAL_CHARS = 8_000;
 const SKILL_FILE = "SKILL.md";
 const IGNORED_DIRECTORIES = new Set([".git", "node_modules", "__pycache__", ".venv", "venv"]);
 const IGNORED_FILES = new Set([".DS_Store", "Thumbs.db"]);
+const execFileAsync = promisify(execFile);
 const SCRIPT_PATTERN = /\.(sh|bash|zsh|fish|ps1|bat|cmd|py|js|mjs|cjs|ts|rb|php|pl|lua)$/i;
 
 interface SkillSource {
@@ -88,39 +93,46 @@ function sourceList(projectRoot: string, options: SkillsOptions = {}): SkillSour
       priority: 3,
     },
     {
+      id: "builtin",
+      label: "Built-in · Codebase Explorer",
+      scope: "global",
+      directory: builtinSkillRoot(dataDir),
+      priority: 4,
+    },
+    {
       id: "app-global",
       label: "Global · Codebase Explorer",
       scope: "global",
       directory: path.join(dataDir, "skills"),
-      priority: 4,
+      priority: 5,
     },
     {
       id: "opencode-global",
       label: "Global · OpenCode",
       scope: "external",
       directory: path.join(home, ".config", "opencode", "skills"),
-      priority: 5,
+      priority: 6,
     },
     {
       id: "agents-global",
       label: "Global · .agents",
       scope: "external",
       directory: path.join(home, ".agents", "skills"),
-      priority: 6,
+      priority: 7,
     },
     {
       id: "claude-global",
       label: "Global · Claude",
       scope: "external",
       directory: path.join(home, ".claude", "skills"),
-      priority: 7,
+      priority: 8,
     },
     {
       id: "cursor-global",
       label: "Global · Cursor",
       scope: "external",
       directory: path.join(home, ".cursor", "skills"),
-      priority: 8,
+      priority: 9,
     },
   ];
 
@@ -342,6 +354,11 @@ async function scanSkills(
   options: SkillsOptions = {},
 ): Promise<{ records: SkillRecord[]; sources: SkillSourceInfo[]; sourcesRaw: SkillSource[] }> {
   const dataDir = options.dataDir ?? getDataDir();
+  // Seed the bundled skills only in the real app data folder. Tests and custom
+  // data directories stay untouched.
+  if (options.dataDir === undefined) {
+    await ensureBuiltinSkills(dataDir).catch(() => undefined);
+  }
   const sourcesRaw = sourceList(projectRoot, { ...options, dataDir });
   const state = await readState(dataDir);
   const enabledMap = state.projects[projectId]?.enabled ?? {};
@@ -442,6 +459,138 @@ export async function readSkillFile(
   const buffer = await fs.readFile(realTarget);
   if (buffer.includes(0)) throw new Error("Binary skill files cannot be previewed as text.");
   return { path: requested, bytes: stat.size, content: buffer.toString("utf8") };
+}
+
+export function skillMentionSlug(name: string): string {
+  return name
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+function scriptCommand(scriptPath: string): string[] | null {
+  const extension = path.extname(scriptPath).toLowerCase();
+  if (extension === ".py") return ["python3"];
+  if (extension === ".js" || extension === ".mjs" || extension === ".cjs") {
+    return [process.execPath];
+  }
+  if (extension === ".sh" || extension === ".bash") return ["bash"];
+  if (extension === ".zsh") return ["zsh"];
+  if (extension === ".fish") return ["fish"];
+  if (extension === ".rb") return ["ruby"];
+  if (extension === ".php") return ["php"];
+  if (extension === ".pl" || extension === ".pm") return ["perl"];
+  if (extension === ".lua") return ["lua"];
+  if (extension === ".ps1") return ["pwsh", "-NoProfile", "-File"];
+  if (extension === ".bat" || extension === ".cmd") {
+    return [process.platform === "win32" ? "cmd" : "cmd.exe", "/c"];
+  }
+  return null;
+}
+
+const MAX_SCRIPT_OUTPUT = 20_000;
+
+export async function runSkillScript(
+  projectRoot: string,
+  projectId: string,
+  key: string,
+  relativePath: string,
+  args: string[] = [],
+  options: SkillsOptions = {},
+): Promise<SkillScriptRunResult> {
+  const { records } = await scanSkills(projectRoot, projectId, options);
+  const record = records.find((item) => item.key === key);
+  if (!record) throw new Error("Skill not found.");
+  const requested = relativePath.trim().replace(/\\/g, "/").replace(/^\/+/, "");
+  const file = record.files.find((item) => item.path === requested && item.kind === "script");
+  if (!file) throw new Error("Only script files listed by this skill can be run.");
+  const target = path.resolve(record.directory, requested);
+  if (!isWithin(record.directory, target) || target === record.directory) {
+    throw new Error("Skill script is outside the skill folder.");
+  }
+  const realDirectory = await fs.realpath(record.directory);
+  const realTarget = await fs.realpath(target);
+  if (!isWithin(realDirectory, realTarget) || realTarget === realDirectory) {
+    throw new Error("Skill script is outside the skill folder.");
+  }
+  const stat = await fs.stat(realTarget);
+  if (!stat.isFile()) throw new Error("Skill script not found.");
+  const command = scriptCommand(requested);
+  if (!command) throw new Error("This script type is not supported for direct execution.");
+  if (args.length > 20 || args.some((arg) => typeof arg !== "string" || arg.length > 200)) {
+    throw new Error("Too many or too long script arguments.");
+  }
+  const label = `${command.join(" ")} ${requested}${args.length > 0 ? ` ${args.join(" ")}` : ""}`;
+  const started = Date.now();
+  try {
+    const result = await execFileAsync(command[0], [...command.slice(1), realTarget, ...args], {
+      cwd: projectRoot,
+      timeout: 60_000,
+      maxBuffer: MAX_SCRIPT_OUTPUT * 4,
+      env: {
+        ...process.env,
+        CIE_SKILL_DIR: record.directory,
+        CIE_SKILL_NAME: record.name,
+        CIE_PROJECT_ROOT: projectRoot,
+      },
+    });
+    const output = `${result.stdout ?? ""}${result.stderr ? `\n${result.stderr}` : ""}`.trim();
+    return {
+      command: label,
+      output: output.slice(-MAX_SCRIPT_OUTPUT) || "(no output)",
+      exitCode: 0,
+      durationMs: Date.now() - started,
+    };
+  } catch (error) {
+    const detail = error as {
+      stdout?: string;
+      stderr?: string;
+      code?: number | string;
+      message?: string;
+    };
+    const output = `${detail.stdout ?? ""}${detail.stderr ? `\n${detail.stderr}` : ""}`.trim();
+    return {
+      command: label,
+      output: (output || detail.message || "Script failed.").slice(-MAX_SCRIPT_OUTPUT),
+      exitCode: typeof detail.code === "number" ? detail.code : null,
+      durationMs: Date.now() - started,
+    };
+  }
+}
+
+export async function loadSkillsForPrompt(
+  projectRoot: string,
+  projectId: string,
+  instruction: string,
+  options: SkillsOptions = {},
+): Promise<{ skills: EnabledSkill[]; mentions: string[] }> {
+  const { records } = await scanSkills(projectRoot, projectId, options);
+  const tokens = [...instruction.matchAll(/@([a-zA-Z0-9][\w.-]*)/g)].map((match) =>
+    match[1].toLowerCase(),
+  );
+  const mentioned = records.filter((record) => {
+    const slug = skillMentionSlug(record.name);
+    return tokens.includes(slug) || tokens.includes(record.name.toLowerCase().replace(/\s+/g, "-"));
+  });
+  const ordered = [...mentioned, ...records.filter((record) => record.enabled)];
+  const seen = new Set<string>();
+  const skills: EnabledSkill[] = [];
+  for (const record of ordered) {
+    if (skills.length >= MAX_PROMPT_SKILLS) break;
+    const key = record.name.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    try {
+      skills.push({ record, content: await readSkillContent(record) });
+    } catch {
+      // Skip unreadable skills.
+    }
+  }
+  return {
+    skills,
+    mentions: mentioned.map((record) => record.name),
+  };
 }
 
 export async function loadEnabledSkills(
