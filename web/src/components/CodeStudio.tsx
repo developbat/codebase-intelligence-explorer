@@ -3178,7 +3178,10 @@ export function CodeStudio({
               <div className="studio-model-wrap">
                 <button
                   className="studio-model-trigger compact"
-                  onClick={openModelPicker}
+                  onClick={() => {
+                    if (modelPickerOpen) setPendingContinue(null);
+                    openModelPicker();
+                  }}
                   title={`${providerDisplayName(active.provider)} · ${active.model}`}
                 >
                   <span className="studio-model-trigger-model">{active.model || t("Select a model")}</span>
@@ -3193,7 +3196,13 @@ export function CodeStudio({
                 </button>
                 {modelPickerOpen ? (
                   <>
-                    <div className="studio-model-backdrop" onClick={() => setModelPickerOpen(false)} />
+                    <div
+                      className="studio-model-backdrop"
+                      onClick={() => {
+                        setModelPickerOpen(false);
+                        setPendingContinue(null);
+                      }}
+                    />
                     <div className="studio-model-popover" onClick={(event) => event.stopPropagation()}>
                       <div className="studio-model-popover-head">
                         <div className="studio-model-popover-title">
