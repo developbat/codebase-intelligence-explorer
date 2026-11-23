@@ -35,7 +35,7 @@ import {
   runMobileCheck,
 } from "./mobileDevices";
 import { createPlaceholderAsset } from "./placeholderAssets";
-import { checkToolchains, installToolchain } from "./toolchains";
+import { checkToolchains, installRecommended, installToolchain } from "./toolchains";
 import { runGameCheck } from "./gameCheck";
 import { createGraphic } from "./graphics";
 import { checkGraphic } from "./graphicCheck";
@@ -557,6 +557,18 @@ app.post("/api/projects/:id/assets/placeholder", async (req, res) => {
 
 app.get("/api/toolchains", async (req, res) => {
   try {
+    const projectId = typeof req.query.projectId === "string" ? req.query.projectId : "";
+    if (projectId) {
+      const analysis = await loadAnalysis(projectId);
+      res.json(
+        await checkToolchains(req.query.refresh === "1", {
+          rootPath: analysis.rootPath,
+          languages: Object.keys(analysis.languages),
+          files: analysis.files.map((file) => file.path),
+        }),
+      );
+      return;
+    }
     res.json(await checkToolchains(req.query.refresh === "1"));
   } catch (error) {
     handleError(res, error);
@@ -570,7 +582,25 @@ app.post("/api/toolchains/install", async (req, res) => {
       res.status(400).json({ error: "A toolchain id is required." });
       return;
     }
-    res.json(await installToolchain(id));
+    const projectId = typeof req.body?.projectId === "string" ? req.body.projectId : "";
+    const analysis = projectId ? await loadAnalysis(projectId) : null;
+    res.json(await installToolchain(id, analysis?.rootPath));
+  } catch (error) {
+    handleError(res, error, 400);
+  }
+});
+
+app.post("/api/toolchains/install-recommended", async (req, res) => {
+  try {
+    const projectId = typeof req.body?.projectId === "string" ? req.body.projectId : "";
+    const analysis = projectId ? await loadAnalysis(projectId) : null;
+    res.json(
+      await installRecommended({
+        rootPath: analysis?.rootPath,
+        languages: analysis ? Object.keys(analysis.languages) : [],
+        files: analysis?.files.map((file) => file.path) ?? [],
+      }),
+    );
   } catch (error) {
     handleError(res, error, 400);
   }

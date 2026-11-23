@@ -257,7 +257,7 @@ export function SettingsScreen({
                   </div>
                 </section>
 
-                <ToolchainsPanel />
+                <ToolchainsPanel projectId={projectId} />
 
                 <section className="settings-section">
                   <h3>{t("General approvals")}</h3>

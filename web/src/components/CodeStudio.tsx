@@ -119,6 +119,7 @@ import {
   Upload,
   TestTube2,
   WandSparkles,
+  Wrench,
   X,
 } from "lucide-react";
 import type {
@@ -710,6 +711,7 @@ export function CodeStudio({
   }, [settingsRequest?.nonce]);
   const [settingsModelsAdd, setSettingsModelsAdd] = useState(false);
   const [indexStatus, setIndexStatus] = useState<ProjectIndexStatus | null>(null);
+  const [environmentAlert, setEnvironmentAlert] = useState<{ names: string[] } | null>(null);
   const [checkCommand, setCheckCommand] = useState("");
   const [checkOutput, setCheckOutput] = useState("");
   const [checkBusy, setCheckBusy] = useState(false);
@@ -884,6 +886,17 @@ export function CodeStudio({
   useEffect(() => {
     localStorage.setItem("cie:agent-commands", agentAllowCommands ? "on" : "off");
   }, [agentAllowCommands]);
+  useEffect(() => {
+    void api
+      .toolchains(false, analysis.id)
+      .then((report) => {
+        const names = report.tools
+          .filter((tool) => report.recommendedMissing.includes(tool.id))
+          .map((tool) => tool.name);
+        setEnvironmentAlert(names.length > 0 ? { names } : null);
+      })
+      .catch(() => setEnvironmentAlert(null));
+  }, [analysis.id]);
   useEffect(() => {
     void api.tasks
       .get(analysis.id)
@@ -3161,6 +3174,27 @@ export function CodeStudio({
                   : t("The project index is not ready. Build it for faster search and better answers.")}
             </span>
             <button onClick={() => void buildIndex()}>{t("Build index")}</button>
+          </div>
+        ) : null}
+
+        {environmentAlert ? (
+          <div className="studio-index-banner environment-banner">
+            <Wrench size={12} />
+            <span>
+              {t("Missing recommended tools: {count}", {
+                count: environmentAlert.names.length,
+              })}{" "}
+              {environmentAlert.names.slice(0, 3).join(", ")}
+              {environmentAlert.names.length > 3 ? "…" : ""}
+            </span>
+            <button
+              onClick={() => {
+                setEnvironmentAlert(null);
+                openSettings("general");
+              }}
+            >
+              {t("Check environment")}
+            </button>
           </div>
         ) : null}
 

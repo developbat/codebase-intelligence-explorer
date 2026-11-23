@@ -534,14 +534,28 @@ export const api = {
 
   mobileDevices: () => request<MobileDeviceReport>("/api/mobile/devices"),
 
-  toolchains: (refresh = false) =>
-    request<ToolchainReport>(`/api/toolchains${refresh ? "?refresh=1" : ""}`),
+  toolchains: (refresh = false, projectId?: string) => {
+    const params = new URLSearchParams();
+    if (refresh) params.set("refresh", "1");
+    if (projectId) params.set("projectId", projectId);
+    const query = params.toString();
+    return request<ToolchainReport>(`/api/toolchains${query ? `?${query}` : ""}`);
+  },
 
-  installToolchain: (id: string) =>
+  installToolchain: (id: string, projectId?: string) =>
     request<ToolchainInstallResult>("/api/toolchains/install", {
       method: "POST",
-      body: JSON.stringify({ id }),
+      body: JSON.stringify({ id, projectId }),
     }),
+
+  installRecommendedTools: (projectId?: string) =>
+    request<{ results: ToolchainInstallResult[]; report: ToolchainReport }>(
+      "/api/toolchains/install-recommended",
+      {
+        method: "POST",
+        body: JSON.stringify({ projectId }),
+      },
+    ),
 
   mobileBoot: (projectId: string, platform: "ios" | "android", id: string) =>
     request<MobileBootResult>(`/api/projects/${projectId}/mobile/devices/boot`, {
