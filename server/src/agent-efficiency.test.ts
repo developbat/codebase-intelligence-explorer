@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   blockDependentsOf,
+  intentTask,
   isInspectionAnswer,
   shouldRetryWithEditFirst,
   taskLooksLikeInspection,
@@ -204,4 +205,27 @@ test("an edit task with inspection context is not a verification task", () => {
   assert.equal(taskLooksLikeVerification(task), false);
   assert.equal(taskLooksLikeVerification({ ...task, title: "Verify the form" }), true);
   assert.equal(taskLooksLikeWrite(task), true);
+});
+
+test("ask mode is a cheap read-only task profile", () => {
+  const intent = {
+    kind: "question" as const,
+    understanding: "answer a question",
+    language: "tr",
+    needsClarification: false,
+    scope: "small" as const,
+    mode: "single" as const,
+    areas: [],
+    verification: "none" as const,
+    context: "project" as const,
+    history: "none" as const,
+    toolGroups: [],
+    approach: "",
+    needsExhaustiveEvidence: false,
+    assumptions: [],
+  };
+  const task = intentTask("başka hangi alanlar eklenebilir?", intent, undefined, "ask");
+  assert.equal(task.effort, "simple");
+  assert.equal(task.role, "main");
+  assert.equal(task.verification, undefined);
 });

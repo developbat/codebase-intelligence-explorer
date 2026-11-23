@@ -3179,8 +3179,10 @@ export async function runAgentTask(
           ? 8
           : workspaceMode === "research"
             ? 12
-            : readOnlyMode
-              ? 8
+            : workspaceMode === "ask"
+              ? 6
+              : readOnlyMode
+                ? 8
               : fastTask
                 ? 10
                 : AGENT_MAX_STEPS),
@@ -3547,7 +3549,9 @@ export async function runAgentTask(
     .join("\n");
 
   const focusedRead =
-    !readOnlyMode && contextMode === "focused" && !plan.needsWrite;
+    (workspaceMode === "ask" || !readOnlyMode) &&
+    contextMode === "focused" &&
+    !plan.needsWrite;
   const basePromptId = askMode ? "agent.ask" : autoMode ? "agent.auto" : "agent.coding";
   const promptId =
     workspaceMode === "plan"

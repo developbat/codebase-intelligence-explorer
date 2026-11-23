@@ -500,7 +500,7 @@ function aggregateResult(
   };
 }
 
-function intentTask(
+export function intentTask(
   goal: string,
   intent: IntentAnalysis,
   verification?: string,
@@ -513,15 +513,17 @@ function intentTask(
     intent.kind === "analyze" ||
     intent.kind === "run";
   const effort =
-    workspaceMode !== "build"
-      ? "standard"
-      : readOnly
-        ? "simple"
-        : intent.scope === "trivial" || intent.scope === "small"
+    workspaceMode === "ask"
+      ? "simple"
+      : workspaceMode !== "build"
+        ? "standard"
+        : readOnly
           ? "simple"
-          : intent.scope === "medium"
-            ? "standard"
-            : "hard";
+          : intent.scope === "trivial" || intent.scope === "small"
+            ? "simple"
+            : intent.scope === "medium"
+              ? "standard"
+              : "hard";
   return {
     id: "task-1",
     title: goal.length > 90 ? `${goal.slice(0, 87)}…` : goal,
@@ -542,7 +544,9 @@ function intentTask(
     status: "pending",
     effort,
     role:
-      workspaceMode !== "build" || effort !== "simple" ? "main" : "fast",
+      workspaceMode === "ask" || workspaceMode !== "build" || effort !== "simple"
+        ? "main"
+        : "fast",
     dependsOn: [],
     attempts: 0,
     changedFiles: [],
@@ -748,7 +752,9 @@ export async function runProjectLoop(
               ? 8
               : workspaceMode === "research"
                 ? 12
-                : taskLooksLikeInspection(current)
+                : workspaceMode === "ask"
+                  ? 6
+                  : taskLooksLikeInspection(current)
                   ? 5
                   : current.effort === "simple"
                     ? 6
