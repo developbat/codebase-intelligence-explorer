@@ -3161,6 +3161,9 @@ export function CodeStudio({
                 <PanelLeftOpen size={11} /> {t("Files")}
               </button>
             ) : null}
+            <button onClick={() => openSettings("reports")} title={t("Open the task report")}>
+              <ListChecks size={12} /> {t("Reports")}
+            </button>
             <button onClick={() => setIndexSearchOpen(true)} title={t("Search the project index")}>
               <Search size={12} /> {t("Search project")}
             </button>

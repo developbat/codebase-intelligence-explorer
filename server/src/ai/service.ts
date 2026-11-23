@@ -6465,8 +6465,8 @@ export async function runAgentTask(
       protocolFailures += 1;
       if (protocolFailures >= 2) {
         stoppedReason = "error";
-        summary =
-          "The model repeatedly returned an invalid tool protocol. Switch model or retry; the task was stopped early to avoid burning tokens.";
+        const detail = step.observation.replace(/\s+/g, " ").slice(0, 500);
+        summary = `The model repeatedly returned an invalid tool protocol. Last reply: ${detail} Switch model or retry; the task was stopped early to avoid burning tokens.`;
         errorMessage = summary;
         log("error", "Stopping invalid tool protocol", "2 consecutive invalid replies");
         break;
@@ -6582,7 +6582,7 @@ export async function runAgentTask(
         : "";
     const lastSuccess = [...steps].reverse().find((step) => step.ok);
     const lastEvidence = lastSuccess
-      ? ` Last successful tool: ${lastSuccess.action} — ${lastSuccess.observation.slice(0, 260)}`
+      ? ` Last successful tool: ${lastSuccess.action} — ${lastSuccess.observation.slice(0, 700)}`
       : "";
     summary = `${errorMessage ?? "The agent stopped because a request failed."}${worked}${lastEvidence}`;
   }
