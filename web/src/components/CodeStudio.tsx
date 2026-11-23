@@ -554,6 +554,8 @@ export function CodeStudio({
 }: CodeStudioProps) {
   const { t, locale } = useI18n();
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
+  const [intentOpenIndex, setIntentOpenIndex] = useState<number | null>(null);
+  const [pendingContinue, setPendingContinue] = useState<{ goal: string } | null>(null);
   const [chainBusy, setChainBusy] = useState(false);
   const [modelCatalog, setModelCatalog] = useState<string[]>([]);
   const [modelCatalogBusy, setModelCatalogBusy] = useState(false);
@@ -683,6 +685,8 @@ export function CodeStudio({
     mode?: AiWorkspaceMode;
     provider?: string;
     model?: string;
+    taskQueue?: ProjectTaskQueue;
+    intent?: IntentAnalysis;
   };
   type StudioChatTab = { id: string; title: string; createdAt: string; updatedAt: string };
   const [chatMessages, setChatMessages] = useState<StudioChatMessage[]>([]);
@@ -702,12 +706,7 @@ export function CodeStudio({
     to: { provider: string; model: string };
     reason: string;
   } | null>(null);
-  const [intentNotice, setIntentNotice] = useState<{
-    intent: IntentAnalysis;
-    provider: string;
-    model: string;
-    totalTokens: number;
-  } | null>(null);
+  const lastIntentRef = useRef<IntentAnalysis | null>(null);
   const [taskPanelOpen, setTaskPanelOpen] = useState(false);
   const [waitSeconds, setWaitSeconds] = useState(0);
   const chatLiveLogsRef = useRef<AiAgentLogEntry[]>([]);
@@ -1105,7 +1104,7 @@ export function CodeStudio({
           JSON.stringify(
             chatMessages
               .slice(-40)
-              .map(({ role, content, evidence, tokenUsage, logs, plan, planPath, mode, provider, model }) => ({
+              .map(({ role, content, evidence, tokenUsage, logs, plan, planPath, mode, provider, model, taskQueue, intent }) => ({
                 role,
                 content,
                 evidence,
@@ -1116,6 +1115,8 @@ export function CodeStudio({
                 mode,
                 provider,
                 model,
+                taskQueue,
+                intent,
               })),
           ),
         );
@@ -1175,6 +1176,17 @@ export function CodeStudio({
           ? await api.ai.autoConfigureAgents().catch(() => null)
           : null;
       onSettingsSaved(auto?.settings ?? updated);
+      const continueGoal = pendingContinue?.goal;
+      setPendingContinue(null);
+      if (continueGoal) {
+        void askProject(continueGoal, false, {
+          retryFailed: true,
+          skipClarify: true,
+          workspaceMode: "build",
+          provider: next.provider,
+          model: next.model,
+        });
+      }
     } finally {
       setChainBusy(false);
       setModelPickerOpen(false);
@@ -2277,7 +2289,7 @@ export function CodeStudio({
   function serializeChatMessages(messages: StudioChatMessage[]) {
     return messages
       .slice(-40)
-      .map(({ role, content, evidence, tokenUsage, logs, plan, planPath, mode, provider, model }) => ({
+      .map(({ role, content, evidence, tokenUsage, logs, plan, planPath, mode, provider, model, taskQueue, intent }) => ({
         role,
         content,
         evidence,
@@ -2288,6 +2300,8 @@ export function CodeStudio({
         mode,
         provider,
         model,
+        taskQueue,
+        intent,
       }));
   }
 
@@ -2431,10 +2445,14 @@ export function CodeStudio({
       retryFailed?: boolean;
       skipClarify?: boolean;
       workspaceMode?: AiWorkspaceMode;
+      provider?: AiProviderId;
+      model?: string;
     } = {},
   ) {
     const modeForRun = runOptions.workspaceMode ?? studioMode;
     if (!active || (!question.trim() && !attachment) || chatBusy) return;
+    const runProvider = runOptions.provider ?? active.provider;
+    const runModel = runOptions.model ?? active.model;
     const baseText = question.trim();
     const text = attachment
       ? `${baseText}${baseText ? "\n\n" : ""}Ek dosya: ${attachment.path}`
@@ -2453,7 +2471,8 @@ export function CodeStudio({
     }
     setClarification(null);
     setModelNotice(null);
-    setIntentNotice(null);
+    lastIntentRef.current = null;
+    setIntentOpenIndex(null);
     setChatBusy(true);
     setChatError(null);
     setChatRetryQuestion(null);
@@ -2485,12 +2504,7 @@ export function CodeStudio({
         setPermissionQueue((queue) => [...queue, event.request]);
         setPermissionBusy(false);
       } else if (event.type === "intent") {
-        setIntentNotice({
-          intent: event.intent,
-          provider: event.provider,
-          model: event.model,
-          totalTokens: event.totalTokens,
-        });
+        lastIntentRef.current = event.intent;
       } else if (event.type === "clarify") {
         setClarification({ request: event.request, original: text });
       } else if (event.type === "model") {
@@ -2514,8 +2528,8 @@ export function CodeStudio({
           text,
           {
             activeFile: activeFile ?? undefined,
-            provider: active.provider,
-            model: active.model,
+            provider: runProvider,
+            model: runModel,
             allowWrite: modeForRun === "build" ? agentAllowWrite : false,
             allowCommands: modeForRun === "build" ? agentAllowCommands : false,
             language: locale,
@@ -2537,8 +2551,8 @@ export function CodeStudio({
             mode: "auto",
             history,
             activeFile: activeFile ?? undefined,
-            provider: active.provider,
-            model: active.model,
+            provider: runProvider,
+            model: runModel,
             allowWrite: modeForRun === "build" ? agentAllowWrite : false,
             allowCommands: modeForRun === "build" ? agentAllowCommands : false,
             language: locale,
@@ -2558,8 +2572,8 @@ export function CodeStudio({
           changedFiles: [],
           ranCommands: [],
           stoppedReason: "aborted",
-          provider: active.provider,
-          model: active.model,
+          provider: runProvider,
+          model: runModel,
           createdAt: new Date().toISOString(),
         };
       } else if (controller.signal.aborted) {
@@ -2598,6 +2612,8 @@ export function CodeStudio({
           mode: modeForRun,
           provider: result.provider,
           model: result.model,
+          taskQueue: result.taskQueue,
+          intent: lastIntentRef.current ?? undefined,
         },
       ]);
       if (result.changedFiles.length > 0) {
@@ -3247,7 +3263,10 @@ export function CodeStudio({
                         ) : null}
                       </div>
                       <div className="studio-model-list-head">
-                        <span className="studio-model-section-label">{t("Available models")}</span>
+                        <span className="studio-model-section-label">
+                          {t("Available models")}
+                          {modelCatalog.length > 0 ? ` · ${modelCatalog.length}` : ""}
+                        </span>
                         <div>
                           <button
                             className="ghost-button"
@@ -3434,6 +3453,14 @@ export function CodeStudio({
                 /(?:error 410|end of life|no longer available|model .* unavailable)/i.test(
                   workflowMessage.content,
                 );
+              const failedTasks =
+                workflowMessage.taskQueue?.tasks.filter(
+                  (task) => task.status === "failed" || task.status === "blocked",
+                ) ?? [];
+              const canContinue =
+                workflowMessage.role === "assistant" &&
+                Boolean(workflowMessage.taskQueue) &&
+                (failedTasks.length > 0 || workflowMessage.taskQueue?.status === "stopped");
               return (
               <div key={index} className={`studio-workflow-message ${workflowMessage.role}`}>
                 <div className="studio-workflow-role">
@@ -3443,6 +3470,47 @@ export function CodeStudio({
                       ? t("You")
                       : workflowMessage.model ?? t("Agent")}
                   </span>
+                  {workflowMessage.intent ? (
+                    <div className="studio-intent-wrap">
+                      <button
+                        className={`studio-intent-trigger ${intentOpenIndex === index ? "is-open" : ""}`}
+                        onClick={() =>
+                          setIntentOpenIndex(intentOpenIndex === index ? null : index)
+                        }
+                        title={t("Understood request")}
+                        aria-label={t("Understood request")}
+                      >
+                        <Sparkles size={10} />
+                      </button>
+                      {intentOpenIndex === index ? (
+                        <div className="studio-intent-popover is-inline">
+                          <div className="studio-intent-popover-head">
+                            <strong>{t("Understood request")}</strong>
+                            <button onClick={() => setIntentOpenIndex(null)} aria-label={t("Close")}>
+                              <X size={11} />
+                            </button>
+                          </div>
+                          <p>{workflowMessage.intent.understanding}</p>
+                          <small>
+                            {t("Scope")}: {t(workflowMessage.intent.scope)} · {t("Mode")}:{" "}
+                            {t(workflowMessage.intent.mode === "single" ? "Single task" : "Task loop")}
+                            {workflowMessage.intent.areas.length > 0
+                              ? ` · ${workflowMessage.intent.areas.slice(0, 4).join(", ")}`
+                              : ""}
+                          </small>
+                          <small>
+                            {t("Context")}: {workflowMessage.intent.context} · {t("Tools")}:{" "}
+                            {["core", ...workflowMessage.intent.toolGroups].join(" + ")}
+                          </small>
+                          {workflowMessage.intent.approach ? (
+                            <small>
+                              {t("Approach")}: {workflowMessage.intent.approach}
+                            </small>
+                          ) : null}
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : null}
                   {workflowMessage.mode ? (
                     <span className={`studio-mode-badge is-${workflowMessage.mode}`}>
                       {workflowMessage.mode === "ask"
@@ -3548,6 +3616,39 @@ export function CodeStudio({
                         </span>
                       ) : null}
                     </summary>
+                    {workflowMessage.tokenUsage ? (
+                      <div className="studio-token-report">
+                        <span>
+                          {t("Input")} <b>{formatTokens(workflowMessage.tokenUsage.inputTokens)}</b>
+                        </span>
+                        <span>
+                          {t("Output")} <b>{formatTokens(workflowMessage.tokenUsage.outputTokens)}</b>
+                        </span>
+                        <span>
+                          {t("Total")} <b>{formatTokens(workflowMessage.tokenUsage.totalTokens)}</b>
+                        </span>
+                        {workflowMessage.steps && workflowMessage.steps.length > 1 ? (
+                          <span>
+                            <b>
+                              {formatTokens(
+                                Math.round(
+                                  workflowMessage.tokenUsage.totalTokens /
+                                    workflowMessage.steps.length,
+                                ),
+                              )}
+                            </b>{" "}
+                            / {t("step")}
+                          </span>
+                        ) : null}
+                        {workflowMessage.tokenUsage.totalTokens > 120_000 ? (
+                          <small>
+                            {t(
+                              "High usage: most of this is re-sent context. Use a reasoner for planning and a cheaper model for small edits.",
+                            )}
+                          </small>
+                        ) : null}
+                      </div>
+                    ) : null}
                     {workflowMessage.logs && workflowMessage.logs.length > 0 ? (
                       <details className="studio-workflow-trace">
                         <summary>
@@ -3603,6 +3704,59 @@ export function CodeStudio({
                     ) : null}
                   </details>
                 ) : null}
+                {canContinue && workflowMessage.taskQueue ? (
+                  <div className="studio-continue">
+                    <div className="studio-continue-info">
+                      <strong>{t("Task stopped")}</strong>
+                      <span>
+                        {workflowMessage.taskQueue.tasks.filter((task) => task.status === "done").length}/
+                        {workflowMessage.taskQueue.tasks.length} {t("done")}
+                        {failedTasks.length > 0
+                          ? ` · ${failedTasks.length} ${t("blocked or failed")}`
+                          : ""}
+                      </span>
+                      {failedTasks.length > 0 ? (
+                        <small>
+                          {failedTasks
+                            .slice(0, 2)
+                            .map((task) => `${task.id} · ${task.title}`)
+                            .join(" · ")}
+                        </small>
+                      ) : null}
+                    </div>
+                    <div className="studio-continue-actions">
+                      <button
+                        className="ghost-button"
+                        disabled={chatBusy || !active}
+                        onClick={() => {
+                          void askProject(workflowMessage.taskQueue!.goal, false, {
+                            retryFailed: true,
+                            skipClarify: true,
+                            workspaceMode: "build",
+                          });
+                        }}
+                      >
+                        <Play size={11} /> {t("Continue")}
+                        {active ? ` · ${active.model}` : ""}
+                      </button>
+                      <button
+                        className="primary-button"
+                        disabled={chatBusy || !active}
+                        onClick={() => {
+                          setPendingContinue({ goal: workflowMessage.taskQueue!.goal });
+                          setModelPickerOpen(true);
+                          setModelCatalog([]);
+                          if (active) {
+                            setModelCatalogProvider(active.provider);
+                            void loadModels(active.provider);
+                          }
+                        }}
+                      >
+                        <RefreshCw size={11} /> {t("Choose model & continue")}
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
               </div>
               );
             })
@@ -3610,28 +3764,6 @@ export function CodeStudio({
 
           {chatBusy ? (
             <div className="studio-workflow-live">
-              <div className="studio-activity">
-                <div className="studio-activity-orb">
-                  <span />
-                  <span />
-                  <span />
-                  <Bot size={15} />
-                </div>
-                <div className="studio-activity-body">
-                  <strong>{liveActivity?.label ?? t("Thinking…")}</strong>
-                  <small>
-                    {liveActivity?.target ?? ""}
-                    {liveTokens > 0 ? `${liveActivity?.target ? " · " : ""}${formatTokens(liveTokens)} tok` : ""}
-                  </small>
-                </div>
-                <div className="studio-activity-bars">
-                  <i />
-                  <i />
-                  <i />
-                  <i />
-                  <i />
-                </div>
-              </div>
               {chatLiveAnswer ? (
                 <div className="studio-live-answer">
                   <MarkdownText value={chatLiveAnswer} />
@@ -3698,35 +3830,6 @@ export function CodeStudio({
           ) : null}
         </div>
 
-        {intentNotice ? (
-          <div className="studio-intent-notice">
-            <Sparkles size={13} />
-            <div>
-              <strong>{t("Understood request")}</strong>
-              <p>{intentNotice.intent.understanding}</p>
-              <small>
-                {t("Scope")}: {t(intentNotice.intent.scope)} · {t("Mode")}:{" "}
-                {t(intentNotice.intent.mode === "single" ? "Single task" : "Task loop")}
-                {intentNotice.intent.areas.length > 0
-                  ? ` · ${intentNotice.intent.areas.slice(0, 4).join(", ")}`
-                  : ""}
-              </small>
-              <small>
-                {t("Context")}: {intentNotice.intent.context} · {t("Tools")}:{" "}
-                {["core", ...intentNotice.intent.toolGroups].join(" + ")}
-              </small>
-              {intentNotice.intent.approach ? (
-                <small className="studio-intent-approach">
-                  {t("Approach")}: {intentNotice.intent.approach}
-                </small>
-              ) : null}
-            </div>
-            <button onClick={() => setIntentNotice(null)} aria-label={t("Dismiss")}>
-              <X size={12} />
-            </button>
-          </div>
-        ) : null}
-
         {modelNotice ? (
           <div className="studio-model-toast" role="status" aria-live="polite">
             <span className="studio-model-toast-icon">
@@ -3743,6 +3846,94 @@ export function CodeStudio({
             </div>
             <button onClick={() => setModelNotice(null)} aria-label={t("Dismiss")}>
               <X size={12} />
+            </button>
+          </div>
+        ) : null}
+
+        {!chatBusy &&
+        taskQueue &&
+        (taskQueue.status === "stopped" ||
+          taskQueue.tasks.some(
+            (task) => task.status === "failed" || task.status === "blocked",
+          )) ? (
+          <div className="studio-continue is-global">
+            <div className="studio-continue-info">
+              <strong>{t("Task stopped")}</strong>
+              <span>
+                {taskQueue.tasks.filter((task) => task.status === "done").length}/
+                {taskQueue.tasks.length} {t("done")} ·{" "}
+                {taskQueue.tasks.filter((task) => task.status === "failed" || task.status === "blocked").length}{" "}
+                {t("blocked or failed")}
+              </span>
+              <small>{taskQueue.goal}</small>
+            </div>
+            <div className="studio-continue-actions">
+              <button
+                className="ghost-button"
+                disabled={!active}
+                onClick={() => {
+                  void askProject(taskQueue.goal, false, {
+                    retryFailed: true,
+                    skipClarify: true,
+                    workspaceMode: "build",
+                  });
+                }}
+              >
+                <Play size={11} /> {t("Continue")}
+                {active ? ` · ${active.model}` : ""}
+              </button>
+              <button
+                className="primary-button"
+                disabled={!active}
+                onClick={() => {
+                  setPendingContinue({ goal: taskQueue.goal });
+                  setModelPickerOpen(true);
+                  setModelCatalog([]);
+                  if (active) {
+                    setModelCatalogProvider(active.provider);
+                    void loadModels(active.provider);
+                  }
+                }}
+              >
+                <RefreshCw size={11} /> {t("Choose model & continue")}
+              </button>
+            </div>
+          </div>
+        ) : null}
+
+        {chatBusy ? (
+          <div className="studio-run-status" role="status" aria-live="polite">
+            <div className="studio-run-status-orb">
+              <span />
+              <span />
+              <span />
+              <Bot size={13} />
+            </div>
+            <div className="studio-run-status-body">
+              <strong>{liveActivity?.label ?? t("Thinking…")}</strong>
+              <small>
+                {active ? `${active.provider}/${active.model}` : ""}
+                {chatLiveSteps.length > 0 ? ` · ${chatLiveSteps.length} ${t("steps")}` : ""}
+                {liveTokens > 0 ? ` · ${formatTokens(liveTokens)} tok` : ""}
+                {liveActivity?.target ? ` · ${liveActivity.target}` : ""}
+              </small>
+            </div>
+            <div className="studio-run-status-bars" aria-hidden="true">
+              <i />
+              <i />
+              <i />
+              <i />
+              <i />
+            </div>
+            <button
+              className="primary-button is-stop"
+              onClick={() => {
+                agentStopRequestedRef.current = true;
+                agentAbortRef.current?.abort();
+              }}
+              title={t("Stop agent")}
+            >
+              <Square size={12} /> {t("Stop")}
             </button>
           </div>
         ) : null}

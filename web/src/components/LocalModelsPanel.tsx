@@ -151,6 +151,9 @@ export function LocalModelsPanel({ onSaved }: { onSaved: (settings: AiSettingsPu
             <HardDrive size={13} /> {t("Local models (Ollama)")}
           </strong>
           <small>
+            {t("Best for reading, searching and short summaries. File edits stay on the main coding model.")}
+          </small>
+          <small>
             {!status
               ? t("Checking local models…")
               : status.running

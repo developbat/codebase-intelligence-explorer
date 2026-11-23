@@ -1,4 +1,4 @@
-import type { AiProviderId, AiTestResult, AiTokenUsage } from "../../../shared/ai";
+import { AI_PROVIDERS, type AiProviderId, type AiTestResult, type AiTokenUsage } from "../../../shared/ai";
 import { resolveProvider, saveProviderModels, type ResolvedProvider } from "./settings";
 import { localModelStatus } from "../localModels";
 
@@ -436,6 +436,20 @@ export async function testProvider(provider?: AiProviderId, model?: string): Pro
   }
 }
 
+function mergeModels(fetched: string[], existing: string[], builtIn: string[] = []): string[] {
+  return [
+    ...new Set(
+      [...fetched, ...existing, ...builtIn]
+        .map((model) => model.trim())
+        .filter(Boolean),
+    ),
+  ].sort();
+}
+
+function builtInModels(provider: AiProviderId): string[] {
+  return AI_PROVIDERS.find((entry) => entry.id === provider)?.models ?? [];
+}
+
 export async function listProviderModels(
   provider: AiProviderId,
   options: { refresh?: boolean } = {},
@@ -496,7 +510,7 @@ export async function listProviderModels(
         .map((model) => model.name ?? "")
         .filter(Boolean);
       if (models.length === 0) return config.models;
-      const unique = [...new Set(models)].sort();
+      const unique = mergeModels(models, config.models, builtInModels(provider));
       await saveProviderModels(provider, unique);
       return unique;
     }
@@ -514,8 +528,9 @@ export async function listProviderModels(
         .filter(Boolean)
         .sort();
       if (models.length === 0) return config.models;
-      await saveProviderModels(provider, models);
-      return models;
+      const unique = mergeModels(models, config.models, builtInModels(provider));
+      await saveProviderModels(provider, unique);
+      return unique;
     }
 
     const headers: Record<string, string> = {};
@@ -533,7 +548,7 @@ export async function listProviderModels(
       ...(payload.result ?? []),
     ].filter(Boolean);
     if (models.length === 0) return config.models;
-    const unique = [...new Set(models)].sort();
+    const unique = mergeModels(models, config.models, builtInModels(provider));
     await saveProviderModels(provider, unique);
     return unique;
   } catch {

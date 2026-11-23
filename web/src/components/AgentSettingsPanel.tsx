@@ -230,7 +230,7 @@ export function AgentSettingsPanel({ settings, onSaved }: AgentSettingsPanelProp
         <Sparkles size={12} />
         <span>
           {t(
-            "Auto-assign uses enabled providers, your selected fallback chain and local/free models for simple work. Use Model providers to add keys, and Model selection to choose the active model.",
+            "Auto-assign uses enabled providers, your selected fallback chain and local/free models for simple read-only work. Local models are not auto-assigned to file edits; those stay on the main model. Use Model providers to add keys, and Model selection to choose the active model.",
           )}
         </span>
       </div>

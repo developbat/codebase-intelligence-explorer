@@ -3355,6 +3355,7 @@ export async function runAgentTask(
     forceWrite?: boolean;
     tokenBudget?: number;
     costBudgetUsd?: number;
+    startingUsage?: AiTokenUsage;
     intent?: IntentAnalysis;
   } = {},
   emit: (event: AiAgentEvent) => void = () => {},
@@ -3877,12 +3878,40 @@ export async function runAgentTask(
     },
   ];
 
+  /**
+   * Old tool observations are re-sent on every model turn. Keep the recent
+   * window intact, but shrink observations older than eight messages so a
+   * long run does not pay for the same file excerpt twenty times.
+   */
+  const compactTranscript = () => {
+    const cutoff = transcript.length - 8;
+    if (cutoff <= 2) return;
+    let compacted = 0;
+    for (let i = 2; i < cutoff; i += 1) {
+      const message = transcript[i];
+      if (message.role !== "user" || !message.content.startsWith("Observation (step")) continue;
+      if (message.content.length <= 700) continue;
+      const headerEnd = message.content.indexOf("\n");
+      const header = headerEnd >= 0 ? message.content.slice(0, headerEnd) : "Observation";
+      const body = headerEnd >= 0 ? message.content.slice(headerEnd + 1) : message.content;
+      transcript[i] = {
+        role: "user",
+        content: `${header}\n${body.slice(0, 700)}\n… older observation compacted; re-read only the exact range if still needed.`,
+      };
+      compacted += 1;
+    }
+    if (compacted > 0) {
+      log("info", "Context compacted", `${compacted} older observation(s) shortened`);
+    }
+  };
+
   let summary = "";
   let stoppedReason: AiAgentResult["stoppedReason"] = "max_steps";
   let errorMessage: string | undefined;
   let consecutiveFailures = 0;
   let protocolFailures = 0;
   let emptyResponseCount = 0;
+  const startingUsage = options.startingUsage ?? { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
   const tokenTotal: AiTokenUsage = { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
   const queuedActions: ParsedToolAction[] = [];
   const readCoverage = new Map<string, { start: number; end: number; wholeFile: boolean; step: number }[]>();
@@ -3914,12 +3943,17 @@ export async function runAgentTask(
       break;
     }
     if (options.tokenBudget || options.costBudgetUsd !== undefined) {
-      const costSoFar = await estimateUsageCost(config.id, config.model, tokenTotal).catch(
+      const cumulativeUsage: AiTokenUsage = {
+        inputTokens: tokenTotal.inputTokens + startingUsage.inputTokens,
+        outputTokens: tokenTotal.outputTokens + startingUsage.outputTokens,
+        totalTokens: tokenTotal.totalTokens + startingUsage.totalTokens,
+      };
+      const costSoFar = await estimateUsageCost(config.id, config.model, cumulativeUsage).catch(
         () => undefined,
       );
-      if (budgetExceeded(tokenTotal, costSoFar, options.tokenBudget, options.costBudgetUsd)) {
+      if (budgetExceeded(cumulativeUsage, costSoFar, options.tokenBudget, options.costBudgetUsd)) {
         stoppedReason = "budget";
-        summary = `Task budget exceeded: ${tokenTotal.totalTokens.toLocaleString()} tokens${
+        summary = `Task budget exceeded: ${cumulativeUsage.totalTokens.toLocaleString()} tokens${
           options.tokenBudget ? ` of ${options.tokenBudget.toLocaleString()}` : ""
         }${costSoFar !== undefined ? ` · $${costSoFar.toFixed(4)}` : ""}${
           options.costBudgetUsd !== undefined ? ` of $${options.costBudgetUsd.toFixed(4)}` : ""
@@ -3969,6 +4003,7 @@ export async function runAgentTask(
       }
     }
     log("model", "Model is thinking…", "Planning the next tool call");
+    compactTranscript();
     try {
       inputChars += transcript.reduce((total, message) => total + message.content.length, 0);
       let receivedChars = 0;
@@ -4317,7 +4352,7 @@ export async function runAgentTask(
         !readOnlyMode &&
         syntaxFailures.length > 0 &&
         modelTurns < maxSteps &&
-        syntaxNudges < 2
+        syntaxNudges < 3
       ) {
         syntaxNudges += 1;
         const observation = `Syntax diagnostics failed after the edit:\n${syntaxFailures
@@ -4335,6 +4370,18 @@ export async function runAgentTask(
         });
         transcript.push({ role: "user", content: `Observation (step ${index}) [invalid]: ${observation}` });
         continue;
+      }
+
+      if (!readOnlyMode && syntaxFailures.length > 0) {
+        // Never report a successful finish while the edited file cannot even be
+        // parsed. Stop as failed so the user can continue with a stronger model.
+        stoppedReason = "error";
+        summary = `Task stopped: syntax errors remain after ${syntaxNudges + 1} repair attempts.\n\n${syntaxFailures
+          .map((item) => `**${item.file}**\n${item.output.slice(0, 900)}`)
+          .join("\n\n")}\n\nThe file was left as written. Continue with a stronger model, or fix the syntax manually.`;
+        errorMessage = "Syntax errors remained after the edit.";
+        log("error", "Stopped with syntax errors", syntaxFailures.map((item) => item.file).join(", "));
+        break;
       }
 
       if (

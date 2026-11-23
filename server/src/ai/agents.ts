@@ -254,6 +254,9 @@ export async function pickAlternateAgentModel(exclude?: {
   const catalog = await getModelCatalog().catch(() => null);
   const health = await modelHealthByProviderModel();
   const pricing = await getPricingReport().catch(() => null);
+  const localStatus = await localModelStatus().catch(() => null);
+  const localRunning = Boolean(localStatus?.running);
+  const localUsable = (provider: string) => provider !== "local" || localRunning;
   const priceAllowed = (candidate: { provider: string; model: string }) => {
     if (!pricing) return true;
     const price = findPrice(pricing.prices, candidate.provider, candidate.model);
@@ -286,7 +289,8 @@ export async function pickAlternateAgentModel(exclude?: {
           (provider) =>
             provider.id === item.provider &&
             (provider.hasKey || provider.custom || provider.id === "local") &&
-            provider.enabled !== false,
+            provider.enabled !== false &&
+            localUsable(provider.id),
         ),
       )
       .map((item) => ({
@@ -302,6 +306,7 @@ export async function pickAlternateAgentModel(exclude?: {
     (provider) =>
       (provider.hasKey || provider.custom || provider.id === "local") &&
       provider.enabled !== false &&
+      localUsable(provider.id) &&
       provider.id !== exclude?.provider,
   );
   // Coding fallbacks should stay cheap and fast first. Reviewer/planner models

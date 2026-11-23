@@ -768,13 +768,22 @@ export async function runProjectLoop(
         options.model = alternate.model;
       }
     }
+    const forceWrite = workspaceMode === "build" && taskLooksLikeWrite(task);
+    // Small local models are useful for reading, searching and summarizing, but
+    // their JSON edit protocol is not reliable enough to let an auto-assigned
+    // fast/reviewer worker rewrite project files. Keep edits on the main model.
+    if (taskConfig.id === "local" && forceWrite && current.role !== "main") {
+      taskConfig = main;
+    }
     queue = markTask(queue, task.id, {
       provider: taskConfig.id,
       model: taskConfig.model,
+      notes:
+        taskConfig.id === "local" && !forceWrite
+          ? "Local worker used for a read-only/simple task."
+          : current.notes,
     });
     emit({ type: "task", queue, task: queue.tasks.find((item) => item.id === task.id) });
-
-    const forceWrite = workspaceMode === "build" && taskLooksLikeWrite(task);
     let result: AiAgentResult | null = null;
     try {
       result = await runAgentTask(
@@ -808,6 +817,7 @@ export async function runProjectLoop(
           forceWrite,
           tokenBudget,
           costBudgetUsd,
+          startingUsage: current.tokenUsage,
           intent: options.intent,
           history: options.history?.slice(-8),
         },
