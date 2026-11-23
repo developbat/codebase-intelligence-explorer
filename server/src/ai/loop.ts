@@ -30,7 +30,12 @@ import { pickAlternateAgentModel } from "./agents";
 import { healthKey, modelHealthByProviderModel } from "./modelStats";
 import { estimateUsageCost } from "./pricing";
 import { formatUsd } from "../../../shared/pricing";
-import { preferredVerificationCommand, reportsRemainingWork, runAgentTask } from "./service";
+import {
+  looksLikePlanningText,
+  preferredVerificationCommand,
+  reportsRemainingWork,
+  runAgentTask,
+} from "./service";
 
 const MAX_PLANNED_TASKS = 12;
 const DEFAULT_MAX_TASKS = 12;
@@ -284,7 +289,9 @@ export async function planProjectTasks(
               ? 8
               : 2;
       if (tasks.length > limit) {
-        const verificationTask = [...tasks].reverse().find((task) => taskLooksLikeVerification(task));
+        const verificationTask = [...tasks]
+          .reverse()
+          .find((task) => taskLooksLikeVerification(task) && !taskLooksLikeWrite(task));
         const kept = tasks.slice(0, limit);
         if (verificationTask && !kept.includes(verificationTask)) {
           kept[limit - 1] = verificationTask;
@@ -313,7 +320,7 @@ export async function planProjectTasks(
   return queue;
 }
 
-function taskLooksLikeWrite(task: ProjectTask): boolean {
+export function taskLooksLikeWrite(task: ProjectTask): boolean {
   const text = `${task.title} ${task.detail}`;
   if (
     /\b(inspect|read|review|verify|check|analy[sz]e|research|understand|plan)\b|incele|oku|gözden geçir|doğrula|kontrol et|araştır/i.test(
@@ -367,9 +374,9 @@ export function taskLooksLikeInspection(task: ProjectTask): boolean {
   return inspection.test(title) && !write.test(title);
 }
 
-function taskLooksLikeVerification(task: ProjectTask): boolean {
-  return /\b(verify|verification|check|test|validate|confirm|review)\b|doğrula|kontrol|test et|incele/i.test(
-    `${task.title} ${task.detail}`,
+export function taskLooksLikeVerification(task: ProjectTask): boolean {
+  return /\b(verify|verification|check|test|validate|confirm|review)\b|doğrula|kontrol|test et/i.test(
+    task.title,
   );
 }
 
@@ -430,6 +437,7 @@ export function shouldRetryWithEditFirst(
 export function isInspectionAnswer(summary: string): boolean {
   return (
     summary.trim().length >= 120 &&
+    !looksLikePlanningText(summary) &&
     !/reached the step limit|invalid tool protocol|empty response|no readable text/i.test(
       summary,
     )
@@ -722,6 +730,7 @@ export async function runProjectLoop(
     });
     emit({ type: "task", queue, task: queue.tasks.find((item) => item.id === task.id) });
 
+    const forceWrite = workspaceMode === "build" && taskLooksLikeWrite(task);
     let result: AiAgentResult | null = null;
     try {
       result = await runAgentTask(
@@ -750,6 +759,7 @@ export async function runProjectLoop(
           workspaceMode,
           interactive: true,
           forceFast: current.effort === "simple",
+          forceWrite,
           intent: options.intent,
           history: options.history?.slice(-8),
         },
@@ -804,10 +814,11 @@ export async function runProjectLoop(
         ),
     );
     const inspectionTask =
-      taskLooksLikeInspection(task) ||
-      options.intent?.kind === "question" ||
-      options.intent?.kind === "analyze" ||
-      options.intent?.kind === "run";
+      !forceWrite &&
+      (taskLooksLikeInspection(task) ||
+        options.intent?.kind === "question" ||
+        options.intent?.kind === "analyze" ||
+        options.intent?.kind === "run");
     const inspectionAnswer =
       inspectionTask && isInspectionAnswer(result.summary);
     const writeWithoutChange =
@@ -819,6 +830,7 @@ export async function runProjectLoop(
     const verificationBlocker =
       !inspectionTask &&
       taskLooksLikeVerification(task) &&
+      !taskLooksLikeWrite(task) &&
       summaryReportsBlocker(result.summary) &&
       !summaryAllowsNoChanges(result.summary);
     const pendingWork = !inspectionTask && reportsRemainingWork(result.summary);

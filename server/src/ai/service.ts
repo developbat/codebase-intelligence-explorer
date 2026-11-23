@@ -3146,6 +3146,7 @@ export async function runAgentTask(
     history?: { role: "user" | "assistant"; content: string }[];
     interactive?: boolean;
     forceFast?: boolean;
+    forceWrite?: boolean;
     intent?: IntentAnalysis;
   } = {},
   emit: (event: AiAgentEvent) => void = () => {},
@@ -3442,12 +3443,30 @@ export async function runAgentTask(
             : plan.steps,
     };
   }
+  if (!readOnlyMode && options.forceWrite === true) {
+    plan = {
+      ...plan,
+      intent: "edit",
+      needsWrite: true,
+      summary: plan.summary || "Apply the requested change.",
+      steps:
+        plan.steps.length > 0
+          ? plan.steps
+          : [
+              { label: "Inspect the target files" },
+              { label: "Apply the requested change" },
+              { label: "Verify the result" },
+            ],
+    };
+  }
   activePlan = plan;
+  const writeIntent =
+    options.forceWrite === true || options.intent?.kind === "edit";
   const narrowEdit =
     !readOnlyMode &&
     plan.needsWrite &&
-    options.intent?.kind === "edit" &&
-    (options.intent.scope === "trivial" || options.intent.scope === "small");
+    writeIntent &&
+    (options.intent?.scope === "trivial" || options.intent?.scope === "small");
   const contextMode = options.intent?.context ?? "project";
   const historyMode = options.intent?.history ?? "recent";
   const latestProjectPlan =
@@ -3458,6 +3477,9 @@ export async function runAgentTask(
         ).catch(() => "")
       : "";
   const toolGroups = resolveToolGroups(options.intent, instruction, workspaceMode);
+  if (options.forceWrite === true && !toolGroups.includes("edit")) {
+    toolGroups.push("edit");
+  }
   const seed =
     contextMode === "none"
       ? ""
@@ -4100,13 +4122,13 @@ export async function runAgentTask(
       }
 
       if (
-        readOnlyMode &&
         workspaceMode !== "plan" &&
         looksLikePlanningText(rawSummary)
       ) {
         planningNudges += 1;
-        const observation =
-          "Your finish summary is an internal plan or next-step note, not an answer. Do not finish with phrases like 'need to read', 'let's check' or 'I will inspect'. Call the needed tool now, collect the evidence, then finish with the actual answer in Markdown. If something truly blocks you, state the exact blocker and what you tried.";
+        const observation = readOnlyMode
+          ? "Your finish summary is an internal plan or next-step note, not an answer. Do not finish with phrases like 'need to read', 'let's check' or 'I will inspect'. Call the needed tool now, collect the evidence, then finish with the actual answer in Markdown. If something truly blocks you, state the exact blocker and what you tried."
+          : "Your finish summary is a next-step note, not a completed change. Do not finish with phrases like 'let me read', 'I will inspect' or 'need to check'. Make the requested edit now, verify it, and only then finish with the actual changed files and result.";
         log(
           "warn",
           "Finish rejected: internal plan",

@@ -5,6 +5,8 @@ import {
   isInspectionAnswer,
   shouldRetryWithEditFirst,
   taskLooksLikeInspection,
+  taskLooksLikeVerification,
+  taskLooksLikeWrite,
 } from "./ai/loop";
 import {
   preferredVerificationCommand,
@@ -166,6 +168,12 @@ test("inspection answers are accepted only when substantive", () => {
     false,
   );
   assert.equal(isInspectionAnswer("Too short"), false);
+  assert.equal(
+    isInspectionAnswer(
+      "Let me read the rest of index.html (120-134) and js/app.js to understand the form before I make the change.",
+    ),
+    false,
+  );
 });
 
 test("a summary that admits missing markup is treated as incomplete", () => {
@@ -176,4 +184,24 @@ test("a summary that admits missing markup is treated as incomplete", () => {
     true,
   );
   assert.equal(reportsIncompleteWiring("All changes are complete and verified."), false);
+});
+
+test("an edit task with inspection context is not a verification task", () => {
+  const task = {
+    id: "task-1",
+    title: "form kısmında görev kişisi eklenmeli",
+    detail: "Mevcut form yapısını inceleyerek alanı ekleyin.",
+    status: "pending" as const,
+    effort: "simple" as const,
+    role: "fast" as const,
+    dependsOn: [],
+    attempts: 0,
+    changedFiles: [],
+    commands: [],
+    createdAt: "",
+    updatedAt: "",
+  };
+  assert.equal(taskLooksLikeVerification(task), false);
+  assert.equal(taskLooksLikeVerification({ ...task, title: "Verify the form" }), true);
+  assert.equal(taskLooksLikeWrite(task), true);
 });
