@@ -49,7 +49,7 @@ import type {
   AiTestResult,
   AiUnresolvedAnalysis,
 } from "../../shared/ai";
-import type { ProjectTaskQueue } from "../../shared/tasks";
+import type { ProjectTask, ProjectTaskQueue } from "../../shared/tasks";
 import type {
   CatalogImportResult,
   ModelCatalog,
@@ -632,6 +632,39 @@ export const api = {
   tasks: {
     get: (projectId: string) =>
       request<{ queue: ProjectTaskQueue | null }>(`/api/projects/${projectId}/tasks`),
+    update: (
+      projectId: string,
+      taskId: string,
+      patch: Partial<
+        Pick<
+          ProjectTask,
+          | "title"
+          | "detail"
+          | "acceptance"
+          | "status"
+          | "effort"
+          | "role"
+          | "tokenBudget"
+          | "costBudgetUsd"
+          | "dependsOn"
+          | "notes"
+        >
+      >,
+    ) =>
+      request<{ queue: ProjectTaskQueue }>(
+        `/api/projects/${projectId}/tasks/${encodeURIComponent(taskId)}`,
+        { method: "PATCH", body: JSON.stringify(patch) },
+      ),
+    remove: (projectId: string, taskId: string) =>
+      request<{ queue: ProjectTaskQueue }>(
+        `/api/projects/${projectId}/tasks/${encodeURIComponent(taskId)}`,
+        { method: "DELETE" },
+      ),
+    reorder: (projectId: string, order: string[]) =>
+      request<{ queue: ProjectTaskQueue }>(`/api/projects/${projectId}/tasks/reorder`, {
+        method: "POST",
+        body: JSON.stringify({ order }),
+      }),
     plan: (projectId: string, instruction: string, language?: string, replan = false) =>
       request<ProjectTaskQueue>(`/api/projects/${projectId}/tasks/plan`, {
         method: "POST",

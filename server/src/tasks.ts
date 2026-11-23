@@ -221,3 +221,37 @@ export function markTask(
     tasks: queue.tasks.map((task) => (task.id === id ? { ...task, ...patch, updatedAt: nowIso() } : task)),
   };
 }
+
+export function updateTask(
+  queue: ProjectTaskQueue,
+  id: string,
+  patch: Partial<ProjectTask>,
+): ProjectTaskQueue {
+  return {
+    ...queue,
+    tasks: queue.tasks.map((task) =>
+      task.id === id ? { ...task, ...patch, id: task.id, updatedAt: nowIso() } : task,
+    ),
+  };
+}
+
+export function removeTask(queue: ProjectTaskQueue, id: string): ProjectTaskQueue {
+  return {
+    ...queue,
+    tasks: queue.tasks
+      .filter((task) => task.id !== id)
+      .map((task) => ({
+        ...task,
+        dependsOn: task.dependsOn.filter((dependency) => dependency !== id),
+      })),
+  };
+}
+
+export function reorderTasks(queue: ProjectTaskQueue, order: string[]): ProjectTaskQueue {
+  const byId = new Map(queue.tasks.map((task) => [task.id, task]));
+  const ordered = [
+    ...order.map((id) => byId.get(id)).filter((task): task is ProjectTask => Boolean(task)),
+    ...queue.tasks.filter((task) => !order.includes(task.id)),
+  ];
+  return { ...queue, tasks: ordered };
+}

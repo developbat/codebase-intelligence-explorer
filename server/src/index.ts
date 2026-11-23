@@ -40,6 +40,8 @@ import { runGameCheck } from "./gameCheck";
 import { createGraphic } from "./graphics";
 import { checkGraphic } from "./graphicCheck";
 import { getProjectTaskQueue, planProjectTasks, runProjectLoop } from "./ai/loop";
+import { loadQueue, removeTask, reorderTasks, saveQueue, updateTask } from "./tasks";
+import type { ProjectTask } from "../../shared/tasks";
 import { getPublicSettings, updateAiSettings } from "./ai/settings";
 import { getPrompt, getPromptVersion, listPrompts, renderPrompt, resetPrompt, savePrompt } from "./ai/prompts";
 import { resolvePermission } from "./ai/permissions";
@@ -1250,6 +1252,89 @@ app.get("/api/projects/:id/plans/:name", async (req, res) => {
 app.get("/api/projects/:id/tasks", async (req, res) => {
   try {
     res.json({ queue: await getProjectTaskQueue(req.params.id) });
+  } catch (error) {
+    handleError(res, error, 400);
+  }
+});
+
+app.patch("/api/projects/:id/tasks/:taskId", async (req, res) => {
+  try {
+    const analysis = await loadAnalysis(req.params.id);
+    const queue = await loadQueue(analysis.rootPath, req.params.id);
+    if (!queue) {
+      res.status(404).json({ error: "No task queue for this project." });
+      return;
+    }
+    if (queue.status === "running") {
+      res.status(409).json({ error: "Stop the running task loop before editing the queue." });
+      return;
+    }
+    const patch: Partial<ProjectTask> = {};
+    if (typeof req.body?.title === "string" && req.body.title.trim()) {
+      patch.title = req.body.title.trim().slice(0, 240);
+    }
+    if (typeof req.body?.detail === "string") patch.detail = req.body.detail.slice(0, 4_000);
+    if (typeof req.body?.acceptance === "string") {
+      patch.acceptance = req.body.acceptance.slice(0, 1_000);
+    }
+    if (["simple", "standard", "hard"].includes(req.body?.effort)) patch.effort = req.body.effort;
+    if (["main", "fast", "planner", "reviewer"].includes(req.body?.role)) patch.role = req.body.role;
+    if (["pending", "failed", "blocked"].includes(req.body?.status)) {
+      patch.status = req.body.status;
+      if (req.body.status === "pending") {
+        patch.completedAt = undefined;
+        patch.attempts = 0;
+        patch.notes = req.body?.notes ?? undefined;
+      }
+    }
+    if (Number(req.body?.tokenBudget) > 0) patch.tokenBudget = Number(req.body.tokenBudget);
+    if (Number(req.body?.costBudgetUsd) > 0) patch.costBudgetUsd = Number(req.body.costBudgetUsd);
+    if (Array.isArray(req.body?.dependsOn)) {
+      patch.dependsOn = req.body.dependsOn
+        .filter((id: unknown): id is string => typeof id === "string")
+        .filter((id: string) => queue.tasks.some((task) => task.id === id));
+    }
+    const updated = updateTask(queue, req.params.taskId, patch);
+    res.json({ queue: await saveQueue(analysis.rootPath, updated) });
+  } catch (error) {
+    handleError(res, error, 400);
+  }
+});
+
+app.delete("/api/projects/:id/tasks/:taskId", async (req, res) => {
+  try {
+    const analysis = await loadAnalysis(req.params.id);
+    const queue = await loadQueue(analysis.rootPath, req.params.id);
+    if (!queue) {
+      res.status(404).json({ error: "No task queue for this project." });
+      return;
+    }
+    if (queue.status === "running") {
+      res.status(409).json({ error: "Stop the running task loop before editing the queue." });
+      return;
+    }
+    res.json({ queue: await saveQueue(analysis.rootPath, removeTask(queue, req.params.taskId)) });
+  } catch (error) {
+    handleError(res, error, 400);
+  }
+});
+
+app.post("/api/projects/:id/tasks/reorder", async (req, res) => {
+  try {
+    const analysis = await loadAnalysis(req.params.id);
+    const queue = await loadQueue(analysis.rootPath, req.params.id);
+    if (!queue) {
+      res.status(404).json({ error: "No task queue for this project." });
+      return;
+    }
+    if (queue.status === "running") {
+      res.status(409).json({ error: "Stop the running task loop before editing the queue." });
+      return;
+    }
+    const order = Array.isArray(req.body?.order)
+      ? req.body.order.filter((id: unknown): id is string => typeof id === "string")
+      : [];
+    res.json({ queue: await saveQueue(analysis.rootPath, reorderTasks(queue, order)) });
   } catch (error) {
     handleError(res, error, 400);
   }

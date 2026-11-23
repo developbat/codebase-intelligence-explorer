@@ -2157,6 +2157,39 @@ export function CodeStudio({
     );
   }
 
+  async function updateQueueTask(taskId: string, patch: Parameters<typeof api.tasks.update>[2]) {
+    try {
+      const result = await api.tasks.update(analysis.id, taskId, patch);
+      setTaskQueue(result.queue);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : t("Could not update the task."));
+    }
+  }
+
+  async function deleteQueueTask(taskId: string) {
+    try {
+      const result = await api.tasks.remove(analysis.id, taskId);
+      setTaskQueue(result.queue);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : t("Could not delete the task."));
+    }
+  }
+
+  async function moveQueueTask(taskId: string, direction: "up" | "down") {
+    if (!taskQueue) return;
+    const order = taskQueue.tasks.map((task) => task.id);
+    const index = order.indexOf(taskId);
+    const target = direction === "up" ? index - 1 : index + 1;
+    if (index < 0 || target < 0 || target >= order.length) return;
+    [order[index], order[target]] = [order[target], order[index]];
+    try {
+      const result = await api.tasks.reorder(analysis.id, order);
+      setTaskQueue(result.queue);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : t("Could not reorder the tasks."));
+    }
+  }
+
   async function askProject(
     question = chatInput,
     appendUser = true,
@@ -3307,6 +3340,9 @@ export function CodeStudio({
                     if (chatBusy || !taskQueue) return;
                     void askProject(taskQueue.goal, false, { retryFailed: true, skipClarify: true });
                   }}
+                  onUpdateTask={updateQueueTask}
+                  onDeleteTask={deleteQueueTask}
+                  onMoveTask={moveQueueTask}
                 />
               ) : null}
               {chatLivePlan ? (
@@ -3442,6 +3478,9 @@ export function CodeStudio({
                     workspaceMode: "build",
                   });
                 }}
+                onUpdateTask={updateQueueTask}
+                onDeleteTask={deleteQueueTask}
+                onMoveTask={moveQueueTask}
               />
             </div>
           ) : null}

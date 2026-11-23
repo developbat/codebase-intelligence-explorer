@@ -18203,3 +18203,98 @@ button.canvas-stat {
   font-size: 12.5px;
   line-height: 1.65;
 }
+
+/* Task queue editing */
+
+.task-queue-controls {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 5px;
+}
+
+.task-queue-controls button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid rgba(139, 168, 206, 0.2);
+  border-radius: 6px;
+  background: transparent;
+  color: #8ba8ce;
+  cursor: pointer;
+}
+
+.task-queue-controls button:hover:not(:disabled) {
+  border-color: rgba(110, 168, 254, 0.5);
+  color: #e3f0ff;
+}
+
+.task-queue-controls button:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+.task-queue-edit {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.task-queue-edit > input,
+.task-queue-edit > textarea,
+.task-queue-edit-budget input {
+  width: 100%;
+  padding: 7px 9px;
+  border: 1px solid rgba(139, 168, 206, 0.24);
+  border-radius: 7px;
+  background: #0b121c;
+  color: #eaf3ff;
+  font-family: inherit;
+  font-size: 10.5px;
+}
+
+.task-queue-edit > textarea {
+  min-height: 54px;
+  resize: vertical;
+}
+
+.task-queue-edit-budget {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 8px;
+}
+
+.task-queue-edit-budget label {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  color: #8ba8ce;
+  font-size: 9px;
+}
+
+.task-queue-edit-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.task-queue-edit-actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 27px;
+  padding: 0 9px;
+  border: 1px solid rgba(139, 168, 206, 0.25);
+  border-radius: 7px;
+  background: transparent;
+  color: #a9c3e2;
+  font-size: 9.5px;
+  cursor: pointer;
+}
+
+.task-queue-edit-actions button:hover {
+  border-color: rgba(110, 168, 254, 0.5);
+  color: #e3f0ff;
+}

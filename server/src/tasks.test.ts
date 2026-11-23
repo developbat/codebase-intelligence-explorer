@@ -12,7 +12,10 @@ import {
   loadQueue,
   markTask,
   nextPendingTask,
+  removeTask,
+  reorderTasks,
   saveQueue,
+  updateTask,
 } from "./tasks";
 
 function task(id: string, dependsOn: string[] = []): ProjectTask {
@@ -94,4 +97,33 @@ test("recognizes already-satisfied task summaries without false completion", () 
   assert.equal(summaryAllowsNoChanges("All three button colors verified; CSS variables and rules confirmed."), true);
   assert.equal(summaryAllowsNoChanges("Button colors verified, nothing was rewritten."), true);
   assert.equal(summaryAllowsNoChanges("Task is not done and the footer is missing."), false);
+});
+
+test("updates, removes and reorders queued tasks", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "cie-tasks-"));
+  try {
+    let queue = await createQueue(root, "project-1", "Edit tasks", [
+      task("task-1"),
+      task("task-2"),
+      task("task-3", ["task-2"]),
+    ]);
+    queue = reorderTasks(queue, ["task-3", "task-1"]);
+    assert.deepEqual(queue.tasks.map((item) => item.id), ["task-3", "task-1", "task-2"]);
+
+    queue = updateTask(queue, "task-1", {
+      title: "Edited task",
+      tokenBudget: 50_000,
+      costBudgetUsd: 0.03,
+    });
+    const edited = queue.tasks.find((item) => item.id === "task-1");
+    assert.equal(edited?.title, "Edited task");
+    assert.equal(edited?.tokenBudget, 50_000);
+    assert.equal(edited?.costBudgetUsd, 0.03);
+
+    queue = removeTask(queue, "task-2");
+    assert.equal(queue.tasks.some((item) => item.id === "task-2"), false);
+    assert.deepEqual(queue.tasks.find((item) => item.id === "task-3")?.dependsOn, []);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
 });
