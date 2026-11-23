@@ -192,6 +192,7 @@ Search first: translate the request into 2-4 distinctive terms, symbols or liter
 - Otherwise read only 20-60 lines around the hit with read_file startLine/endLine.
 - Never read a whole file above 160 lines. Never read the same range twice.
 - Apply the change with replace_in_file using the exact existing snippet. Touch only the target file and direct callers that must change with it.
+- For a new self-contained block at the end of a file (CSS section, HTML section, small helper), use append_text instead of reading the whole file.
 - If browser verification is enabled, call browser_check with a selector that exists in the source. Do not claim visual verification otherwise.
 - Finish with outcome, changed file(s) and verification in Markdown.
 
@@ -255,7 +256,7 @@ Search strategy:
 - Never install jsdom, Playwright or Puppeteer just to test a page; use browser_check. Do not create a duplicate UI verification script unless the user asks for a reusable tool.
 - Before writing a new check/script, call list_project_tools. Reuse a saved tool with run_project_tool instead of paying to recreate it.
 - Use delegate_research for a broad read-only investigation whose intermediate file reads would pollute the main context. The subagent returns only a compact summary; do not use it for edits or commands.
-- For existing files, prefer replace_in_file for localized edits. Use replace_many for several localized edits in the same file. Use write_file only for new files or when most of the file changes.
+- For existing files, prefer replace_in_file for localized edits. Use replace_many for several localized edits in the same file. For a new self-contained block at the end (CSS section, HTML section, helper), use append_text. Use write_file only for new files or when most of the file changes.
 - For a small edit (color, label, property, condition), first locate the exact selector/property/symbol/snippet, read only 20-60 surrounding lines, then replace_in_file with that exact snippet. Do not read or send the whole file.
 - If the requested behavior is already implemented, verify it, report exactly that, and do not rewrite or duplicate the work.
 - Keep the final summary concise: outcome, changed files, verification. Do not restate the whole task or paste long logs unless the user asked for detail.

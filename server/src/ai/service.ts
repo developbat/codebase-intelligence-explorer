@@ -2783,6 +2783,7 @@ const ACTION_TOOL_GROUPS: Partial<Record<string, AgentToolGroup[]>> = {
   write_file: ["edit"],
   replace_in_file: ["edit"],
   replace_many: ["edit"],
+  append_text: ["edit"],
   rename_path: ["edit"],
   delete_file: ["edit"],
   format_file: ["edit"],
@@ -2939,6 +2940,7 @@ export function agentToolCatalog(
     tools.push(`{"action":"write_file","args":{"path":"src/new-file.ts","content":"complete final file content"}}${approval}`);
     tools.push(`{"action":"replace_in_file","args":{"path":"src/app.ts","find":"exact existing snippet","replace":"replacement snippet"}}${approval}`);
     tools.push(`{"action":"replace_many","args":{"path":"src/app.ts","edits":[{"find":"first exact snippet","replace":"first replacement"},{"find":"second exact snippet","replace":"second replacement"}]}}${approval}`);
+    tools.push(`{"action":"append_text","args":{"path":"css/styles.css","content":"/* new self-contained section */\n.new-rule { display: block; }"}}${approval}  // append without reading the whole file`);
     tools.push(`{"action":"rename_path","args":{"path":"src/old.ts","newPath":"src/new.ts"}}  // always requires confirmation`);
     tools.push(`{"action":"delete_file","args":{"path":"src/obsolete.ts"}}  // always requires confirmation`);
     tools.push(`{"action":"format_file","args":{"path":"src/app.ts"}}${approval}`);
@@ -4179,6 +4181,7 @@ export async function runAgentTask(
       "write_file",
       "replace_in_file",
       "replace_many",
+      "append_text",
       "rename_path",
       "delete_file",
       "format_file",
@@ -4259,6 +4262,7 @@ export async function runAgentTask(
         placeholder_asset: "Creating a placeholder asset…",
         write_file: "Writing file…",
         replace_in_file: "Editing file…",
+        append_text: "Appending to file…",
         rename_path: "Moving path…",
         delete_file: "Deleting file…",
         format_file: "Formatting file…",
@@ -6086,6 +6090,39 @@ export async function runAgentTask(
         observation = `Replaced one snippet in ${written.filePath} (${written.bytes} bytes).`;
         log("success", "File edited", written.filePath);
         ok = true;
+      } else if (action === "append_text") {
+        const filePath = normalizeAgentPath(analysis.rootPath, args.path);
+        const content = typeof args.content === "string" ? args.content : "";
+        if (!filePath) throw new Error("A file path is required.");
+        if (!content.trim()) throw new Error("The content to append is required.");
+        if (isSecretAgentPath(filePath)) throw new Error("Editing environment, key or Git internals files is denied.");
+        if (changedFiles.length >= AGENT_MAX_WRITES && !changedFiles.includes(filePath)) {
+          throw new Error(`Write limit reached (${AGENT_MAX_WRITES} files).`);
+        }
+        const existing = await readSourceFile(analysis.rootPath, filePath).catch(() => null);
+        const normalized = content.trim();
+        if (existing && existing.content.trimEnd().endsWith(normalized)) {
+          observation = `The requested content is already at the end of ${filePath}; no change was needed.`;
+          ok = true;
+        } else {
+          const allowed = await requirePermission(
+            "write",
+            "append_text",
+            filePath,
+            `Append ${content.length} chars to the end of the file.`,
+            { preview: content.slice(0, 500) },
+          );
+          if (!allowed) throw new Error("The user denied permission to append to this file.");
+          const separator = existing && existing.content.length > 0 && !existing.content.endsWith("\n") ? "\n" : "";
+          const nextContent = `${existing?.content ?? ""}${separator}${content}`;
+          const written = await writeSourceFile(projectId, analysis.rootPath, filePath, nextContent);
+          if (!changedFiles.includes(written.filePath)) changedFiles.push(written.filePath);
+          evidence.push({ path: written.filePath, label: "Appended by agent" });
+          invalidateReadCaches();
+          observation = `Appended ${content.length} chars to ${written.filePath} (${written.bytes} bytes).`;
+          log("success", "File appended", written.filePath);
+          ok = true;
+        }
       } else if (action === "replace_many") {
         const filePath = normalizeAgentPath(analysis.rootPath, args.path);
         if (!filePath) throw new Error("A file path is required.");
@@ -6249,8 +6286,10 @@ export async function runAgentTask(
     const observationLimit =
       step.action === "read_file" || step.action === "find_in_file"
         ? 3_200
-        : step.action === "diagnostics"
-          ? 3_500
+        : step.action === "append_text"
+          ? 2_000
+          : step.action === "diagnostics"
+            ? 3_500
           : step.action === "lsp_hover"
             ? 2_500
             : step.action === "lsp_completion"

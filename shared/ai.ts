@@ -580,6 +580,7 @@ export type AiAgentAction =
   | "format_file"
   | "replace_in_file"
   | "replace_many"
+  | "append_text"
   | "run_command"
   | "finish";
 
