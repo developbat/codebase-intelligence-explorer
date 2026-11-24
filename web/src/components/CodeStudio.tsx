@@ -144,6 +144,7 @@ import { MarkdownText } from "./MarkdownText";
 import { GitDiffView } from "./GitDiffView";
 import { ExtractionTableView } from "./ExtractionTable";
 import { ContentInventoryPanel } from "./ContentInventoryPanel";
+import { JsonPreview } from "./JsonPreview";
 import type { ExtractionTable } from "../../../shared/extraction";
 import { formatTokens } from "./UsageDialog";
 import { formatUsd } from "../../../shared/pricing";
@@ -700,6 +701,7 @@ export function CodeStudio({
   const [terminals, setTerminals] = useState<TerminalSession[]>(() => [createTerminalSession()]);
   const [activeTerminalId, setActiveTerminalId] = useState(() => terminals[0]?.id ?? "");
   const terminalOutputRef = useRef<Record<string, string>>({});
+  const [terminalSearch, setTerminalSearch] = useState("");
   const terminalFlushRef = useRef<Record<string, number | null>>({});
   const terminalAbortRef = useRef<Record<string, AbortController | null>>({});
   const agentTerminalRef = useRef<string | null>(null);
@@ -1386,6 +1388,19 @@ export function CodeStudio({
   const activeContent = activeFile ? contents[activeFile] ?? "" : "";
   const effectivePreviewPath = htmlFiles.includes(previewPath) ? previewPath : htmlFiles[0] ?? "";
   const activeTerminal = terminals.find((terminal) => terminal.id === activeTerminalId) ?? terminals[0];
+  const terminalSearchQuery = terminalSearch.trim().toLowerCase();
+  const terminalOutput = activeTerminal?.output ?? "";
+  const terminalSearchMatches = terminalSearchQuery
+    ? terminalOutput.split("\n").filter((line) => line.toLowerCase().includes(terminalSearchQuery))
+    : [];
+  const displayedTerminalOutput = terminalSearchQuery
+    ? terminalSearchMatches.join("\n") || t("No matching log lines.")
+    : terminalOutput ||
+      (activeTerminal?.busy
+        ? t("Running…")
+        : activeTerminal?.result
+          ? t("No output.")
+          : t("No command output yet."));
   const terminalsRef = useRef(terminals);
   useEffect(() => {
     terminalsRef.current = terminals;
@@ -1624,9 +1639,13 @@ export function CodeStudio({
 
   async function openFile(filePath: string, force = false) {
     setPendingLine(null);
+    const previewOnly = /\.(?:pdf|png|jpe?g|gif|webp|avif|bmp|tiff|svg|ico|mp4|webm|mov|mp3|wav|ogg|flac|m4a|woff2?|ttf|otf|eot)$/i.test(
+      filePath,
+    );
     setActiveFile(filePath);
-    setRightTab(filePath);
+    setRightTab(previewOnly ? "preview" : filePath);
     setOpenTabs((current) => (current.includes(filePath) ? current : [...current, filePath]));
+    if (previewOnly) return;
     if (!force && contents[filePath] !== undefined) return;
     const token = ++requestRef.current;
     setFileLoading(true);
@@ -4754,6 +4773,25 @@ export function CodeStudio({
                       </button>
                     </div>
                     <div className="studio-command-tools">
+                      <label className="studio-terminal-search">
+                        <Search size={9} />
+                        <input
+                          value={terminalSearch}
+                          onChange={(event) => setTerminalSearch(event.target.value)}
+                          placeholder={t("Search output…")}
+                          spellCheck={false}
+                        />
+                        {terminalSearchQuery ? (
+                          <span>
+                            {terminalSearchMatches.length} {t("matching lines")}
+                          </span>
+                        ) : null}
+                        {terminalSearchQuery ? (
+                          <button onClick={() => setTerminalSearch("")} aria-label={t("Clear search")}>
+                            <X size={8} />
+                          </button>
+                        ) : null}
+                      </label>
                       <button
                         className={commandHistoryOpen ? "is-active" : ""}
                         onClick={() => setCommandHistoryOpen((value) => !value)}
@@ -4890,12 +4928,7 @@ export function CodeStudio({
                       ) : null}
                     </div>
                     <pre className="studio-terminal-output">
-                      {activeTerminal?.output ||
-                        (activeTerminal?.busy
-                          ? t("Running…")
-                          : activeTerminal?.result
-                            ? t("No output.")
-                            : t("No command output yet."))}
+                      {displayedTerminalOutput}
                     </pre>
                       </>
                     )}
@@ -5707,6 +5740,22 @@ export function CodeStudio({
                   title={t("Live dev server preview")}
                   sandbox="allow-scripts allow-forms allow-same-origin allow-popups allow-modals"
                 />
+              ) : activeFile && /\.pdf$/i.test(activeFile) ? (
+                <iframe
+                  key={`${activeFile}-${previewKey}`}
+                  className="studio-preview-frame studio-pdf-preview"
+                  src={`/api/projects/${analysis.id}/preview/${activeFile
+                    .split("/")
+                    .map(encodeURIComponent)
+                    .join("/")}`}
+                  title={t("PDF preview")}
+                />
+              ) : activeFile && /\.(?:md|mdx)$/i.test(activeFile) ? (
+                <div className="studio-markdown-preview">
+                  <MarkdownText value={activeContent} />
+                </div>
+              ) : activeFile && /\.(?:json|jsonc|json5)$/i.test(activeFile) ? (
+                <JsonPreview value={activeContent} />
               ) : activeFile && isImagePreviewPath(activeFile) ? (
                 <div className="studio-image-preview">
                   <img

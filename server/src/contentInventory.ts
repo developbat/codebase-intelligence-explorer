@@ -11,7 +11,7 @@ import type {
 } from "../../shared/contentInventory";
 
 const ASSET_EXTENSIONS = new Set([
-  "png", "jpg", "jpeg", "gif", "webp", "avif", "bmp", "tiff", "svg", "ico",
+  "png", "jpg", "jpeg", "gif", "webp", "avif", "bmp", "tiff", "svg", "ico", "pdf",
   "woff", "woff2", "ttf", "otf", "eot", "mp3", "wav", "ogg", "aac", "flac",
   "m4a", "mp4", "webm", "mov",
 ]);

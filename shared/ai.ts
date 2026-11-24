@@ -607,6 +607,8 @@ export type AiAgentAction =
   | "list_colors"
   | "extract_entities"
   | "audit_content"
+  | "create_document"
+  | "create_zip"
   | "apply_mapped_changes"
   | "undo_change"
   | "json_query"

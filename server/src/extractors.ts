@@ -133,6 +133,7 @@ const ASSET_EXTENSIONS = new Set([
   "bmp",
   "tiff",
   "svg",
+  "pdf",
   "ico",
   "woff",
   "woff2",

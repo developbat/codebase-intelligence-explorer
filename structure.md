@@ -366,7 +366,35 @@ The right panel **Assets** tab and the `audit_content` tool share
 Dynamic JavaScript references are reported as a note rather than a hard
 failure. Clicking an item opens the source file/line.
 
-### 4.12 Persistence
+### 4.12 Preview, documents and archives
+
+Preview is selected by the active file type:
+
+- HTML → iframe (static/live server)
+- images/PDF → binary preview (`application/pdf` included)
+- Markdown → rendered `MarkdownText`
+- JSON → formatted JSON viewer with object/array summary
+- other files → source preview
+
+The agent uses tools, not dedicated UI buttons, for documents:
+
+- `read_document` — PDF, Word (`doc`/`docx`/`rtf`), Excel (`xls`/`xlsx`), CSV/TSV,
+  text, JSON, HTML, images with OCR
+- `csv_query` — structured CSV filters/counts
+- `create_document` — xlsx, csv, tsv, docx, pdf, md, txt, json, html
+- `create_zip` — archive selected files/folders
+- `search_document` — search inside a document
+
+Generated `.pdf` files are listed as assets and can be previewed in the right
+panel. Excel/Word outputs are read back with `read_document`; they are not
+rendered as rich previews yet. The external `pdf-editor`, `json-viewer.html` and
+`md-viewer.html` tools are not required because native JSON/Markdown/PDF
+preview and document read/write tools cover the common path.
+
+Terminal output has an inline search filter; arbitrary log search can also use
+`grep` in the terminal.
+
+### 4.13 Persistence
 
 - Project analysis: application data directory (project id based).
 - Agent notes: `<project>/.cie/agent/`.

@@ -121,6 +121,7 @@ import { ensureProjectMap } from "../projectMap";
 import { buildChangeReport } from "../changes";
 import { auditClaims } from "./claims";
 import { auditContentInventory, renderContentInventory } from "../contentInventory";
+import { createArchive, createDocument, type DocumentFormat } from "../documentWriter";
 import {
   actionPlanInstruction,
   resolveActionPlan,
@@ -3010,6 +3011,8 @@ const ACTION_TOOL_GROUPS: Partial<Record<string, AgentToolGroup[]>> = {
   write_file: ["edit"],
   apply_mapped_changes: ["edit"],
   undo_change: ["edit"],
+  create_document: ["edit"],
+  create_zip: ["edit"],
   replace_in_file: ["edit"],
   replace_many: ["edit"],
   append_text: ["edit"],
@@ -3191,6 +3194,9 @@ export function agentToolCatalog(
     '{"action":"extract_entities","args":{"kind":"asset"}}',
     '{"action":"extract_entities","args":{"kind":"document"}}',
     '{"action":"audit_content","args":{}}',
+    '{"action":"create_document","args":{"path":"reports/summary.xlsx","format":"xlsx","rows":[["name","value"],["alpha","1"]]}}',
+    '{"action":"create_document","args":{"path":"reports/notes.docx","format":"docx","content":"Hello"}}',
+    '{"action":"create_zip","args":{"path":"reports/bundle.zip","entries":["README.md","reports/notes.docx"]}}',
     '{"action":"apply_mapped_changes","args":{"kind":"color","scope":["styles.css"],"mapping":{"#22d3ee":"#ff5c8a"}}}',
     '{"action":"apply_mapped_changes","args":{"kind":"text","mapping":{"PLAY AGAIN":"RESTART"}}}',
     '{"action":"apply_mapped_changes","args":{"kind":"color","dryRun":true,"mapping":{"#fff":"#000","#000":"#fff"}}}',
@@ -4411,6 +4417,7 @@ ${lessons}` : "",
     "\n- Do not claim a feature from a config or variable that is never read at runtime. Wire it into the update/draw path or remove it." +
     "\n- For any complete list/audit (colors, inputs, buttons, links, functions, classes, components, env, routes, imports, selectors, assets, documents, markdown, todos, files), call extract_entities with the matching kind instead of manually reading/counting. Finish immediately with every item in the user's language; do not summarize or omit entries." +
     "\n- For asset references, broken local links or Markdown heading hierarchy, call audit_content and report the actual findings." +
+    "\n- For Excel/Word/CSV/TSV/Markdown/JSON/HTML/PDF outputs use create_document with the requested path/format; for archives use create_zip with entries. Verify the created file with read_document (or the relevant query tool)." +
     "\n- For a color/background/button color change, call extract_entities(kind=color) first, then apply the change with apply_mapped_changes or replace_many; never rewrite whole files without a mapping." +
     "\n- For non-color value changes (button labels, import paths, env keys), use apply_mapped_changes(kind=text) or replace_many; verify with a text extraction or search that the old value is gone." +
     "\n- Mappings are applied simultaneously, so color swaps like {\"#fff\":\"#000\",\"#000\":\"#fff\"} are safe. Use dryRun:true to preview a multi-file mapping before writing. If a mapped change was wrong, call undo_change with the file path to restore its latest backup." +
@@ -4952,6 +4959,8 @@ ${lessons}` : "",
       "list_colors",
       "extract_entities",
       "audit_content",
+      "create_document",
+      "create_zip",
       "apply_mapped_changes",
       "undo_change",
       "json_query",
@@ -5042,6 +5051,8 @@ ${lessons}` : "",
         list_colors: "Listing CSS colors…",
         extract_entities: "Extracting project entities…",
         audit_content: "Auditing assets and documents…",
+        create_document: "Creating document…",
+        create_zip: "Creating archive…",
         apply_mapped_changes: "Applying mapped changes…",
         undo_change: "Restoring the last backup…",
         json_query: "Inspecting JSON…",
@@ -6573,6 +6584,78 @@ ${lessons}` : "",
           "Content inventory audited",
           `${inventory.summary.broken} broken · ${inventory.summary.unreferenced} unreferenced · ${inventory.summary.headingWarnings} heading warnings`,
         );
+        ok = true;
+      } else if (action === "create_document") {
+        const outputPath = normalizeAgentPath(analysis.rootPath, pathFromArgs(args));
+        if (!outputPath) throw new Error("An output path is required.");
+        const format = typeof args.format === "string" ? (args.format as DocumentFormat) : undefined;
+        const content = typeof args.content === "string" ? args.content : undefined;
+        const rows = Array.isArray(args.rows)
+          ? (args.rows as unknown[])
+              .filter((row): row is unknown[] => Array.isArray(row))
+              .map((row) => row.map((cell) => String(cell ?? "")))
+          : undefined;
+        const sheets = Array.isArray(args.sheets)
+          ? (args.sheets as unknown[])
+              .filter((sheet): sheet is Record<string, unknown> => Boolean(sheet && typeof sheet === "object"))
+              .map((sheet, index) => ({
+                name: typeof sheet.name === "string" ? sheet.name : `Sheet${index + 1}`,
+                rows: Array.isArray(sheet.rows)
+                  ? (sheet.rows as unknown[])
+                      .filter((row): row is unknown[] => Array.isArray(row))
+                      .map((row) => row.map((cell) => String(cell ?? "")))
+                  : [],
+              }))
+          : undefined;
+        const source = typeof args.source === "string" ? args.source : undefined;
+        const allowed = await requirePermission(
+          "write",
+          "create_document",
+          outputPath,
+          `Create ${format ?? (path.extname(outputPath).slice(1) || "document")} output.`,
+          { preview: (content ?? "").slice(0, 1_000) },
+        );
+        if (!allowed) throw new Error("The user denied permission to create the document.");
+        const created = await createDocument(analysis.rootPath, outputPath, {
+          format,
+          content,
+          rows,
+          sheets,
+          source,
+          title: typeof args.title === "string" ? args.title : undefined,
+        });
+        if (!changedFiles.includes(created.path)) changedFiles.push(created.path);
+        evidence.push({ path: created.path, label: "Created document" });
+        invalidateReadCaches();
+        observation = `Created ${created.format} document ${created.path} (${created.bytes} bytes).`;
+        log("success", "Document created", `${created.path} · ${created.bytes} bytes`);
+        ok = true;
+      } else if (action === "create_zip") {
+        const outputPath = normalizeAgentPath(analysis.rootPath, pathFromArgs(args));
+        if (!outputPath) throw new Error("An output path is required.");
+        const rawEntries = Array.isArray(args.entries)
+          ? args.entries
+          : Array.isArray(args.files)
+            ? args.files
+            : Array.isArray(args.paths)
+              ? args.paths
+              : [];
+        const entries = rawEntries.filter((entry): entry is string => typeof entry === "string");
+        if (entries.length === 0) throw new Error("At least one file or folder entry is required.");
+        const allowed = await requirePermission(
+          "write",
+          "create_zip",
+          outputPath,
+          `Create archive with ${entries.length} entry/entries.`,
+          { preview: entries.join("\n").slice(0, 1_000) },
+        );
+        if (!allowed) throw new Error("The user denied permission to create the archive.");
+        const created = await createArchive(analysis.rootPath, outputPath, entries);
+        if (!changedFiles.includes(created.path)) changedFiles.push(created.path);
+        evidence.push({ path: created.path, label: "Created archive" });
+        invalidateReadCaches();
+        observation = `Created archive ${created.path} (${created.bytes} bytes) with ${created.entries.length} entries:\n${created.entries.join("\n")}`;
+        log("success", "Archive created", `${created.path} · ${created.bytes} bytes`);
         ok = true;
       } else if (action === "json_query") {
         const filePath = normalizeAgentPath(analysis.rootPath, pathFromArgs(args));
