@@ -116,6 +116,7 @@ import { AGENT_TOOL_GROUPS } from "../../../shared/intent";
 import { pickAlternateAgentModel } from "./agents";
 import { getPrompt, renderPrompt } from "./prompts";
 import { listSkills, loadSkillForRun, loadSkillsForPrompt, renderSkillsForPrompt, runSkillScript, setSkillEnabled } from "../skills";
+import { renderAgentToolCatalog, toolGroupsFor, validateToolArgs, type ProjectToolHint } from "./toolRegistry";
 import { appendLesson, readLessons } from "../tasks";
 import { ensureProjectMap } from "../projectMap";
 import { buildChangeReport } from "../changes";
@@ -2027,9 +2028,15 @@ export async function verificationCommandsForChanges(
 }
 
 export function reportsIncompleteWiring(summary: string): boolean {
-  return /(?:html|markup|template|form)[^\n]{0,100}(?:yok|tanımlı değil|yer almıyor|missing|not present|does not exist)|(?:eklenmesi|eklenmeli)[^\n]{0,100}gerekiyor|kabul kriteri[^\n]{0,100}tam karşılan|bu adım[^\n]{0,80}yer almıyor/i.test(
-    summary,
-  );
+  const noMissing =
+    /(?:eksik|missing|hatalı|kırık|broken)[^\n.]{0,80}(?:yok|değil|bulunmuyor|none\b|no\b)/i.test(
+      summary,
+    );
+  const positive =
+    /(?:html|markup|template|form)[^\n]{0,100}(?:yok|tanımlı değil|yer almıyor|missing|not present|does not exist)|(?:eklenmesi|eklenmeli)[^\n]{0,100}gerekiyor|kabul kriteri[^\n]{0,100}tam karşılan|bu adım[^\n]{0,80}yer almıyor/i.test(
+      summary,
+    );
+  return positive && !noMissing;
 }
 
 export function looksLikePlanningText(summary: string): boolean {
@@ -2483,6 +2490,7 @@ export async function agentSeedContext(
   analysis: AnalysisResult,
   instruction: string,
   activeFile?: string,
+  suppliedProjectTools?: { tools: ProjectToolHint[] } | null,
 ): Promise<string> {
   const tokens = [...new Set(instruction.toLowerCase().match(/[a-z0-9_]{3,}/g) ?? [])];
   const attachmentPaths = [...instruction.matchAll(/(?:Ek dosya|Attached file|Ekli dosya):\s*([^\s]+)/gi)]
@@ -2786,7 +2794,8 @@ export async function agentSeedContext(
     }
   }
 
-  const projectTools = await listProjectTools(analysis.rootPath).catch(() => null);
+  const projectTools =
+    suppliedProjectTools ?? (await listProjectTools(analysis.rootPath).catch(() => null));
   const toolLines =
     projectTools && projectTools.tools.length > 0
       ? `Saved project tools (run with run_project_tool; do not recreate them):\n${projectTools.tools
@@ -3030,70 +3039,6 @@ export async function agentSearch(
   return { results, source: "disk" };
 }
 
-const ACTION_TOOL_GROUPS: Partial<Record<string, AgentToolGroup[]>> = {
-  write_file: ["edit"],
-  apply_mapped_changes: ["edit"],
-  undo_change: ["edit"],
-  create_document: ["edit"],
-  create_zip: ["edit"],
-  replace_in_file: ["edit"],
-  replace_many: ["edit"],
-  append_text: ["edit"],
-  rename_path: ["edit"],
-  delete_file: ["edit"],
-  format_file: ["edit"],
-  run_command: ["command"],
-  run_project_tool: ["command", "skills"],
-  read_document: ["document"],
-  search_document: ["document"],
-  convert_document: ["document"],
-  transform_image: ["document"],
-  web_fetch: ["web"],
-  http_request: ["web"],
-  delegate_research: ["web"],
-  git_blame: ["git"],
-  git_info: ["git"],
-  git_commit: ["git"],
-  git_create_branch: ["git"],
-  git_remote: ["git"],
-  git_push: ["git"],
-  browser_check: ["browser"],
-  run_test_scenario: ["browser", "skills"],
-  game_check: ["browser"],
-  graphic_check: ["browser"],
-  list_project_tools: ["skills"],
-  create_project_tool: ["skills"],
-  list_skills: ["skills"],
-  load_skill: ["core", "skills"],
-  preview_skill_source: ["skills"],
-  install_skill: ["skills"],
-  set_skill_enabled: ["skills"],
-  remove_skill: ["skills"],
-  create_skill: ["skills"],
-  run_skill_script: ["skills", "command"],
-  create_graphic: ["media"],
-  placeholder_asset: ["media"],
-  compress_video: ["media"],
-  list_mobile_devices: ["mobile"],
-  boot_mobile_device: ["mobile"],
-  mobile_screenshot: ["mobile"],
-  open_mobile_url: ["mobile"],
-  mobile_logs: ["mobile"],
-  install_mobile_app: ["mobile"],
-  launch_mobile_app: ["mobile"],
-  mobile_check: ["mobile"],
-  save_note: ["notes"],
-  list_notes: ["notes"],
-  read_note: ["notes"],
-  search_notes: ["notes"],
-  check_toolchains: ["tools"],
-  rescan_project: ["core"],
-  install_toolchain: ["tools"],
-};
-
-function actionToolGroups(action: string): AgentToolGroup[] {
-  return ACTION_TOOL_GROUPS[action] ?? ["core"];
-}
 
 export async function auditUnreferencedAssets(
   analysis: AnalysisResult,
@@ -3196,122 +3141,9 @@ export function agentToolCatalog(
   writeApproved: boolean,
   commandsApproved: boolean,
   groups?: readonly AgentToolGroup[],
+  projectTools?: ProjectToolHint[],
 ): string {
-  const tools = [
-    '{"action":"list_files","args":{"path":"src","limit":80}}',
-    '{"action":"search_code","args":{"query":"login handler","limit":15}}',
-    '{"action":"read_file","args":{"path":"src/app.ts","startLine":1,"endLine":200}}',
-    '{"action":"read_symbol","args":{"path":"src/app.ts","line":142}}',
-    '{"action":"read_symbol","args":{"name":"UserService"}}',
-    '{"action":"find_in_file","args":{"path":"src/app.ts","query":"login","contextLines":2,"limit":10}}',
-    '{"action":"diagnostics","args":{"path":"src/app.ts"}}',
-    '{"action":"lsp_hover","args":{"path":"src/app.ts","line":42,"character":10}}',
-    '{"action":"lsp_completion","args":{"path":"src/app.ts","line":42,"character":10}}',
-    '{"action":"list_items","args":{"path":"data/items.html","limit":100}}',
-    '{"action":"count_matches","args":{"path":"src","query":"TODO","limit":20}}',
-    '{"action":"list_colors","args":{"path":"styles.css"}}',
-    '{"action":"extract_entities","args":{"kind":"input","scope":["index.html"]}}',
-    '{"action":"extract_entities","args":{"kind":"button"}}',
-    '{"action":"extract_entities","args":{"kind":"function","scope":["src"]}}',
-    '{"action":"extract_entities","args":{"kind":"route"}}',
-    '{"action":"extract_entities","args":{"kind":"color","scope":["styles.css"]}}',
-    '{"action":"extract_entities","args":{"kind":"asset"}}',
-    '{"action":"extract_entities","args":{"kind":"document"}}',
-    '{"action":"audit_content","args":{}}',
-    '{"action":"create_document","args":{"path":"reports/summary.xlsx","format":"xlsx","rows":[["name","value"],["alpha","1"]]}}',
-    '{"action":"create_document","args":{"path":"reports/notes.docx","format":"docx","content":"Hello"}}',
-    '{"action":"create_zip","args":{"path":"reports/bundle.zip","entries":["README.md","reports/notes.docx"]}}',
-    '{"action":"apply_mapped_changes","args":{"kind":"color","scope":["styles.css"],"mapping":{"#22d3ee":"#ff5c8a"}}}',
-    '{"action":"apply_mapped_changes","args":{"kind":"text","mapping":{"PLAY AGAIN":"RESTART"}}}',
-    '{"action":"apply_mapped_changes","args":{"kind":"color","dryRun":true,"mapping":{"#fff":"#000","#000":"#fff"}}}',
-    '{"action":"undo_change","args":{"path":"styles.css"}}',
-    '{"action":"json_query","args":{"path":"package.json","pointer":"scripts"}}',
-    '{"action":"find_symbols","args":{"query":"UserService","kind":"class","limit":20}}',
-    '{"action":"sqlite_query","args":{"path":"data/app.db","query":"SELECT name FROM sqlite_schema"}}',
-    '{"action":"csv_query","args":{"path":"data/users.csv","columns":["name","email"],"limit":10}}',
-    '{"action":"git_blame","args":{"path":"src/app.ts","startLine":10,"endLine":25}}',
-    '{"action":"browser_check","args":{"path":"index.html","steps":[{"action":"fill","selector":"#task-input","value":"Test"},{"action":"click","selector":"#add-task"},{"action":"expectText","selector":"#task-list","text":"Test"}]}}',
-    '{"action":"run_test_scenario","args":{"name":"comedy-events"}}',
-    '{"action":"list_project_tools","args":{}}',
-    '{"action":"list_mobile_devices","args":{}}',
-    '{"action":"list_skills","args":{}}',
-    '{"action":"load_skill","args":{"key":"project:project-cie:ui-review"}}',
-    '{"action":"preview_skill_source","args":{"source":"owner/repo","ref":"main"}}',
-    '{"action":"check_toolchains","args":{}}',
-    '{"action":"rescan_project","args":{}}',
-    '{"action":"game_check","args":{"path":"index.html","steps":[{"action":"expectVisible","selector":"canvas"}]}}',
-    '{"action":"create_graphic","args":{"path":"assets/report.svg","kind":"bar","title":"Weekly progress","data":[{"label":"Mon","value":4},{"label":"Tue","value":7},{"label":"Wed","value":5}]}}',
-    '{"action":"graphic_check","args":{"path":"assets/report.svg","expectText":"Weekly progress"}}',
-    '{"action":"web_fetch","args":{"url":"https://example.com","maxChars":8000}}',
-    '{"action":"read_document","args":{"path":"docs/spec.pdf","pageStart":1,"pageEnd":20}}',
-    '{"action":"read_document","args":{"path":"data/report.xlsx","sheet":"Sheet1"}}',
-    '{"action":"read_document","args":{"path":"assets/screenshot.png","ocr":true,"lang":"eng"}}',
-    '{"action":"search_document","args":{"path":"docs/spec.pdf","query":"deadline"}}',
-    '{"action":"search_conversations","args":{"query":"what the user asked earlier","limit":5}}',
-    '{"action":"project_search","args":{"query":"unchecked tasks deadline","limit":15}}',
-    '{"action":"list_notes","args":{}}',
-    '{"action":"read_note","args":{"path":".cie/agent/notes/research.md"}}',
-    '{"action":"search_notes","args":{"query":"previous research","limit":10}}',
-    '{"action":"git_info","args":{"operation":"status"}}',
-  ];
-  if (!readOnly) {
-    const approval = writeApproved ? "" : "  // requires user approval";
-    tools.push(`{"action":"write_file","args":{"path":"src/new-file.ts","content":"complete file content, max ~12k chars"}}${approval}  // for larger files write the first part, then append_text`);
-    tools.push(`{"action":"replace_in_file","args":{"path":"src/app.ts","find":"exact existing snippet","replace":"replacement snippet"}}${approval}`);
-    tools.push(`{"action":"replace_many","args":{"path":"src/app.ts","edits":[{"find":"first exact snippet","replace":"first replacement"},{"find":"second exact snippet","replace":"second replacement"}]}}${approval}`);
-    tools.push(`{"action":"append_text","args":{"path":"css/styles.css","content":"/* new self-contained section */\n.new-rule { display: block; }"}}${approval}  // append without reading the whole file`);
-    tools.push(`{"action":"rename_path","args":{"path":"src/old.ts","newPath":"src/new.ts"}}  // always requires confirmation`);
-    tools.push(`{"action":"delete_file","args":{"path":"src/obsolete.ts"}}  // always requires confirmation`);
-    tools.push(`{"action":"format_file","args":{"path":"src/app.ts"}}${approval}`);
-    const commandApproval = commandsApproved ? "" : "  // requires user approval";
-    tools.push(`{"action":"run_command","args":{"command":"npm test","cwd":"."}}${commandApproval}`);
-    tools.push(`{"action":"run_project_tool","args":{"name":"ui-check"}}${commandApproval}  // runs a saved project tool/script`);
-    tools.push('{"action":"delegate_research","args":{"goal":"specific read-only question to investigate"}}  // returns a compact summary only');
-    tools.push(`{"action":"placeholder_asset","args":{"path":"assets/player.svg","kind":"sprite","width":128,"height":128,"label":"player"}}${approval}`);
-    tools.push(`{"action":"placeholder_asset","args":{"path":"assets/icon.png","kind":"icon","format":"png","width":1024,"height":1024,"label":"App"}}${approval}`);
-    tools.push(`{"action":"placeholder_asset","args":{"path":"assets/beep.wav","kind":"sound","durationMs":500,"frequency":660}}${approval}`);
-    tools.push(`{"action":"placeholder_asset","args":{"path":"assets/loop.wav","kind":"music","durationMs":4000,"frequency":220,"loop":true}}${approval}`);
-    tools.push(`{"action":"placeholder_asset","args":{"path":"assets/sheet.png","kind":"spritesheet","format":"png","width":512,"height":512,"fps":8}}${approval}`);
-    tools.push(`{"action":"boot_mobile_device","args":{"platform":"ios","id":"SIMULATOR-UDID"}}${commandApproval}`);
-    tools.push(`{"action":"mobile_screenshot","args":{"platform":"ios","id":"SIMULATOR-UDID"}}${commandApproval}`);
-    tools.push(`{"action":"open_mobile_url","args":{"platform":"android","id":"emulator-5554","url":"http://localhost:8081"}}${commandApproval}`);
-    tools.push(`{"action":"mobile_logs","args":{"platform":"android","id":"emulator-5554","limit":200}}${commandApproval}`);
-    tools.push(`{"action":"install_mobile_app","args":{"platform":"android","id":"emulator-5554","path":"build/app.apk"}}${commandApproval}`);
-    tools.push(`{"action":"launch_mobile_app","args":{"platform":"android","id":"emulator-5554","target":"com.example.app"}}${commandApproval}`);
-    tools.push(`{"action":"install_toolchain","args":{"id":"godot"}}${commandApproval}  // brew/snap/choco install; requires user approval`);
-    tools.push(`{"action":"save_note","args":{"title":"Research: topic","content":"notes with sources","tags":["research"],"sources":["https://example.com"]}}${approval}  // saves under .cie/agent/notes`);
-    tools.push(`{"action":"create_project_tool","args":{"name":"check-links","language":"js","description":"Validate links","code":"// reusable script"}}${approval}  // saves under .cie/agent/tools`);
-    tools.push(`{"action":"create_skill","args":{"name":"my-workflow","description":"When to use it","body":"instructions","enable":true}}${approval}  // creates .cie/skills/<name>/SKILL.md`);
-    tools.push(`{"action":"run_skill_script","args":{"skill":"code-review","path":"scripts/check.py","args":[]}}${commandApproval}  // runs one listed skill script; requires user approval`);
-    tools.push(`{"action":"git_commit","args":{"message":"feat: change","stageAll":true}}${approval}  // stages and commits; never pushes`);
-    tools.push(`{"action":"http_request","args":{"method":"POST","url":"https://api.example.com/items","headers":{"Content-Type":"application/json"},"body":"{\"name\":\"demo\"}"}}${commandApproval}  // explicit network request; requires approval`);
-    tools.push(`{"action":"git_push","args":{"remote":"origin","branch":"main","setUpstream":true}}  // always requires confirmation`);
-    tools.push(`{"action":"git_create_branch","args":{"name":"feature/x","checkout":true}}${approval}`);
-    tools.push(`{"action":"git_remote","args":{"name":"origin","url":"git@github.com:owner/repo.git"}}${approval}`);
-    tools.push(`{"action":"compress_video","args":{"path":"assets/demo.mp4","maxWidth":1280,"crf":28,"preset":"medium"}}${commandApproval}  // ffmpeg`);
-    tools.push(`{"action":"convert_document","args":{"path":"docs/spec.pdf","outputPath":"notes/spec.md","format":"md"}}${approval}`);
-    tools.push(`{"action":"transform_image","args":{"path":"assets/photo.jpg","outputPath":"assets/photo-small.jpg","maxDimension":1200,"format":"jpeg","quality":82}}${approval}`);
-    tools.push(`{"action":"install_skill","args":{"source":"owner/repo","ref":"main","skills":["skill-folder"],"scope":"project","enable":true}}${approval}  // install SKILL.md packs; scripts are never executed`);
-    tools.push(`{"action":"set_skill_enabled","args":{"key":"project:project-cie:my-skill","enabled":true}}${approval}`);
-    tools.push(`{"action":"remove_skill","args":{"key":"project:project-cie:my-skill"}}  // always requires confirmation`);
-    tools.push(`{"action":"mobile_check","args":{"platform":"android","id":"emulator-5554","boot":true,"screenshot":true,"logs":true,"openUrl":"http://localhost:8081"}}${commandApproval}`);
-  }
-  if (readOnly && groups?.includes("notes")) {
-    tools.push('{"action":"save_note","args":{"title":"Research: topic","content":"notes with sources","tags":["research"],"sources":["https://example.com"]}}  // saves under .cie/agent/notes');
-  }
-  tools.push('{"action":"finish","args":{"summary":"final answer, plan, or change summary"}}');
-  const allowed = groups ? new Set(groups) : null;
-  return tools
-    .filter((tool) => {
-      if (!allowed) return true;
-      const action = tool.match(/"action":"([^"]+)"/)?.[1] ?? "";
-      if (action === "finish") return true;
-      return actionToolGroups(action).some(
-        (group) => group === "core" || allowed.has(group),
-      );
-    })
-    .map((tool) => `- ${tool}`)
-    .join("\n");
+  return renderAgentToolCatalog(readOnly, writeApproved, commandsApproved, groups, projectTools);
 }
 
 const COLOR_VALUE_PATTERN = /#[0-9a-fA-F]{3,8}\b|rgba?\([^)]*\)|hsla?\([^)]*\)/g;
@@ -4315,10 +4147,11 @@ export async function runAgentTask(
     const allowed = new Set<AgentToolGroup>(["core", "browser", "command", "document"]);
     toolGroups.splice(0, toolGroups.length, ...toolGroups.filter((group) => allowed.has(group)));
   }
+  const projectToolList = await listProjectTools(analysis.rootPath).catch(() => null);
   const seed =
     contextMode === "none"
       ? ""
-      : await agentSeedContext(analysis, instruction, options.activeFile);
+      : await agentSeedContext(analysis, instruction, options.activeFile, projectToolList);
   const seedLimit =
     testTask ? 1_500 : contextMode === "focused" ? 2_500 : fastTask ? 4_000 : 10_000;
   const seedText =
@@ -4453,7 +4286,13 @@ ${lessons}` : "",
   }
   const systemContent =
     renderPrompt(prompt.system, {
-      tools: agentToolCatalog(readOnlyMode, writeApproved, commandsApproved, toolGroups),
+      tools: agentToolCatalog(
+        readOnlyMode,
+        writeApproved,
+        commandsApproved,
+        toolGroups,
+        projectToolList?.tools,
+      ),
       language: languageInstruction,
     }) +
     (skillsPrompt ? `\n\n${skillsPrompt}` : "") +
@@ -5457,6 +5296,7 @@ ${lessons}` : "",
 
       if (
         !readOnlyMode &&
+        !testTask &&
         modelTurns < maxSteps &&
         wiringNudges < 2 &&
         !(mappedChangeVerified && workBrief?.mode === "change" && workBrief.kind === "color" && !compoundChange) &&
@@ -5601,6 +5441,7 @@ ${lessons}` : "",
 
       if (
         !readOnlyMode &&
+        !testTask &&
         modelTurns < maxSteps &&
         !remainingWorkRejected &&
         reportsRemainingWork(rawSummary)
@@ -5912,6 +5753,8 @@ ${lessons}` : "",
           `Unknown action "${rawAction || "(missing)"}". Reply with one JSON object using action and args. Your reply started with: ${reply.replace(/\s+/g, " ").slice(0, 180)}`,
         );
       }
+      const argumentError = validateToolArgs(action, args);
+      if (argumentError) throw new Error(argumentError);
       actionCacheKeyValue = READ_ONLY_ACTIONS.has(action)
         ? `${action}:${stableActionKey(args)}`
         : "";

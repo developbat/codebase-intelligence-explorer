@@ -58,6 +58,10 @@ test("remaining-work summaries are detected without flagging clean completions",
   );
   assert.equal(reportsRemainingWork("İş yapılmadı, route wiring eksik."), true);
   assert.equal(reportsRemainingWork("All changes are complete; typecheck passed."), false);
+  assert.equal(
+    reportsIncompleteWiring("index.html'de eksik kontrol veya bağlantı yok; tümü mevcut."),
+    false,
+  );
 });
 
 test("step-limit failures without edits retry with the edit-first fast profile", () => {

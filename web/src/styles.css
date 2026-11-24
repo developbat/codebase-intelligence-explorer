@@ -18137,6 +18137,67 @@ button.canvas-stat {
   white-space: pre-wrap;
 }
 
+.tools-registry {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(148, 163, 184, 0.02);
+  padding: 8px 10px;
+}
+
+.tools-registry > summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #b9cde6;
+  font-size: 9px;
+  cursor: pointer;
+}
+
+.tools-registry-list {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  max-height: 420px;
+  overflow-y: auto;
+  margin-top: 8px;
+  padding-right: 4px;
+}
+
+.tools-registry-list > div {
+  display: grid;
+  grid-template-columns: 150px minmax(0, 1fr);
+  gap: 2px 8px;
+  padding: 5px 6px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: rgba(148, 163, 184, 0.025);
+}
+
+.tools-registry-list code {
+  color: #9fc6ff;
+  font-family: var(--mono);
+  font-size: 8px;
+}
+
+.tools-registry-list span {
+  color: #6f89a7;
+  font-family: var(--mono);
+  font-size: 7px;
+}
+
+.tools-registry-list small {
+  grid-column: 1 / -1;
+  color: #a9c3e2;
+  font-size: 8px;
+}
+
+.tools-registry-list em {
+  grid-column: 1 / -1;
+  color: #718baa;
+  font-size: 7.5px;
+  font-style: normal;
+}
+
 .tools-footnote {
   margin: 0;
   color: var(--muted-2);

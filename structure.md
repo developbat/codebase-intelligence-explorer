@@ -428,7 +428,29 @@ scrolls instead of ending in a clipped note. New chat tabs show only the agent
 icon and one-line guidance; the full intro and quick actions stay on the first
 chat tab of a project.
 
-### 4.14 Verification flow and task visibility
+### 4.14 Tool registry and capability metadata
+
+`server/src/ai/toolRegistry.ts` is the single source of truth for the built-in
+agent surface. Each `AgentToolSpec` declares:
+
+- `action`, capability `groups`, catalog `example`
+- `description` and `whenToUse`
+- `permission` (`write` / `command`) and `destructive`
+- optional argument schema (required aliases and primitive types)
+- `writeModeOnly` for tools that are only exposed in Build mode
+
+`agentToolCatalog` renders the group-filtered list from this registry instead of
+a hand-maintained array. `validateToolArgs` runs before the action switch and
+returns a precise error for missing/typed arguments. Project tools under
+`.cie/agent/tools` are appended as `run_project_tool` examples when command
+access is allowed. `GET /api/projects/:id/tool-registry` exposes built-in and
+project metadata to the UI; **Settings → Tools** renders the built-in registry.
+
+Test-only verification tasks skip both the edit-wiring and remaining-work finish
+guards, and “eksik ... yok” style summaries are not treated as incomplete
+wiring.
+
+### 4.15 Verification flow and task visibility
 
 **Verification profile.** A goal whose action is `run` or `verify` (for example
 “oyunu oyna ve test et”) selects the compact `agent.test` prompt. It prefers an
@@ -460,7 +482,7 @@ approach, likely areas, assumptions and acceptance criterion. The Plan card
 shows `plan.summary` (the agent's understanding), `plan.reason` and the ordered
 steps; the run strip shows the current activity.
 
-### 4.15 Persistence
+### 4.16 Persistence
 
 - Project analysis: application data directory (project id based).
 - Agent notes: `<project>/.cie/agent/`.

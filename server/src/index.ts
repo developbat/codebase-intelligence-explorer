@@ -50,6 +50,7 @@ import { getProjectTaskQueue, planProjectTasks, runProjectLoop } from "./ai/loop
 import { loadQueue, removeTask, reorderTasks, saveQueue, updateTask } from "./tasks";
 import type { ProjectTask } from "../../shared/tasks";
 import { getPublicSettings, resolveAgentRole, resolveProvider, updateAiSettings } from "./ai/settings";
+import { allToolSpecs } from "./ai/toolRegistry";
 import { getPrompt, getPromptVersion, listPrompts, renderPrompt, resetPrompt, savePrompt } from "./ai/prompts";
 import { resolvePermission } from "./ai/permissions";
 import { analyzeIntent } from "./ai/intent";
@@ -1150,6 +1151,26 @@ app.get("/api/mobile/devices", async (_req, res) => {
     res.json(await listMobileDevices());
   } catch (error) {
     handleError(res, error);
+  }
+});
+
+app.get("/api/projects/:id/tool-registry", async (req, res) => {
+  try {
+    const analysis = await loadAnalysis(req.params.id);
+    const projectTools = await listProjectTools(analysis.rootPath).catch(() => ({ tools: [] }));
+    res.json({
+      builtIn: allToolSpecs().map((tool) => ({
+        action: tool.action,
+        groups: tool.groups,
+        description: tool.description,
+        whenToUse: tool.whenToUse,
+        permission: tool.permission,
+        destructive: tool.destructive === true,
+      })),
+      project: projectTools.tools,
+    });
+  } catch (error) {
+    handleError(res, error, 400);
   }
 });
 

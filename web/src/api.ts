@@ -766,6 +766,18 @@ export const api = {
 
   projectTools: (projectId: string) =>
     request<ProjectToolList>(`/api/projects/${projectId}/tools`),
+  toolRegistry: (projectId: string) =>
+    request<{
+      builtIn: {
+        action: string;
+        groups: string[];
+        description: string;
+        whenToUse: string;
+        permission?: "write" | "command";
+        destructive?: boolean;
+      }[];
+      project: ProjectToolList["tools"];
+    }>(`/api/projects/${projectId}/tool-registry`),
 
   runProjectTool: (projectId: string, name: string) =>
     request<{ tool: ProjectTool; result: RunCommandResult }>(

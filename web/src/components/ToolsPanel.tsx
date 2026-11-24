@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ListChecks, Loader2, Play, RefreshCw, Wrench } from "lucide-react";
 import type { ProjectToolList } from "../../../shared/projectTools";
 import { api } from "../api";
@@ -20,6 +20,31 @@ export function ToolsPanel({ projectId }: { projectId?: string }) {
   );
   const [runBusy, setRunBusy] = useState<string | null>(null);
   const [output, setOutput] = useState<{ name: string; text: string; ok: boolean } | null>(null);
+  const [registry, setRegistry] = useState<{
+    builtIn: {
+      action: string;
+      groups: string[];
+      description: string;
+      whenToUse: string;
+      permission?: "write" | "command";
+      destructive?: boolean;
+    }[];
+    project: ProjectToolList["tools"];
+  } | null>(null);
+
+  useEffect(() => {
+    if (!projectId) return;
+    let cancelled = false;
+    void api
+      .toolRegistry(projectId)
+      .then((result) => {
+        if (!cancelled) setRegistry(result);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId, updatedAt]);
 
   async function run(name: string) {
     if (!projectId || runBusy) return;
@@ -122,6 +147,29 @@ export function ToolsPanel({ projectId }: { projectId?: string }) {
           </div>
           <pre>{output.text}</pre>
         </div>
+      ) : null}
+
+      {registry ? (
+        <details className="tools-registry">
+          <summary>
+            <Wrench size={11} /> {t("Agent tool registry")} · {registry.builtIn.length}{" "}
+            {t("built-in tools")}
+          </summary>
+          <div className="tools-registry-list">
+            {registry.builtIn.map((tool) => (
+              <div key={tool.action}>
+                <code>{tool.action}</code>
+                <span>
+                  {tool.groups.join(" · ")}
+                  {tool.permission ? ` · ${tool.permission}` : ""}
+                  {tool.destructive ? ` · ${t("destructive")}` : ""}
+                </span>
+                <small>{tool.description}</small>
+                <em>{tool.whenToUse}</em>
+              </div>
+            ))}
+          </div>
+        </details>
       ) : null}
 
       <p className="tools-footnote">
