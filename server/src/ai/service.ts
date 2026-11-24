@@ -1917,6 +1917,55 @@ export function preferredVerificationCommands(
   return (unique.length > 0 ? unique : fallback).slice(0, 3);
 }
 
+function shellSingleQuote(value: string): string {
+  return `'${value.replace(/'/g, "'\\''")}'`;
+}
+
+async function nearestGoModule(root: string, file: string): Promise<string | null> {
+  let directory = path.dirname(path.resolve(root, file));
+  const resolvedRoot = path.resolve(root);
+  while (directory.startsWith(resolvedRoot)) {
+    if (await fs.access(path.join(directory, "go.mod")).then(() => true).catch(() => false)) {
+      return path.relative(resolvedRoot, directory) || ".";
+    }
+    if (directory === resolvedRoot) break;
+    directory = path.dirname(directory);
+  }
+  return null;
+}
+
+export async function verificationCommandsForChanges(
+  rootPath: string,
+  changedFiles: readonly string[],
+  baseCommands: readonly string[],
+): Promise<string[]> {
+  const commands = [...baseCommands];
+  const goFiles = changedFiles.filter((file) => /\.go$/i.test(file));
+  if (goFiles.length === 0) return commands;
+  const hasRootModule = await fs
+    .access(path.join(rootPath, "go.mod"))
+    .then(() => true)
+    .catch(() => false);
+  if (hasRootModule) return commands;
+  const modules = new Set<string>();
+  for (const file of goFiles) {
+    // eslint-disable-next-line no-await-in-loop
+    const module = await nearestGoModule(rootPath, file);
+    if (module) modules.add(module);
+  }
+  if (modules.size === 0) return commands;
+  const alreadyRunsGoTests = commands.some((command) => /\bgo test\b/.test(command));
+  if (alreadyRunsGoTests) return commands;
+  for (const module of [...modules].slice(0, 3)) {
+    commands.push(
+      module === "."
+        ? "go test ./..."
+        : `(cd ${shellSingleQuote(module)} && go test ./...)`,
+    );
+  }
+  return commands;
+}
+
 export function reportsIncompleteWiring(summary: string): boolean {
   return /(?:html|markup|template|form)[^\n]{0,100}(?:yok|tanımlı değil|yer almıyor|missing|not present|does not exist)|(?:eklenmesi|eklenmeli)[^\n]{0,100}gerekiyor|kabul kriteri[^\n]{0,100}tam karşılan|bu adım[^\n]{0,80}yer almıyor/i.test(
     summary,
@@ -3958,7 +4007,12 @@ export async function runAgentTask(
     if (askMode || changedFiles.length === 0) {
       return { signature: "", ran: false, ok: false, output: "", cached: false };
     }
-    if (verificationCommands.length === 0) {
+    const commandsToRun = await verificationCommandsForChanges(
+      analysis.rootPath,
+      changedFiles,
+      verificationCommands,
+    );
+    if (commandsToRun.length === 0) {
       log("warn", "No verification command", "No lint/typecheck/test/build command was detected for this project.");
       return {
         signature: "none",
@@ -3987,7 +4041,7 @@ export async function runAgentTask(
     verificationAttempts += 1;
     const results: { command: string; ok: boolean; output: string }[] = [];
     let allOk = true;
-    for (const [commandIndex, command] of verificationCommands.entries()) {
+    for (const [commandIndex, command] of commandsToRun.entries()) {
       const allowed = await requirePermission(
         "command",
         "verify_changes",
@@ -4025,7 +4079,7 @@ export async function runAgentTask(
         break;
       }
       log("success", "Verification passed", command);
-      if (commandIndex === verificationCommands.length - 1) break;
+      if (commandIndex === commandsToRun.length - 1) break;
     }
     const verification = {
       signature,
@@ -5519,9 +5573,9 @@ ${lessons}` : "",
           continue;
         }
         if (verification.ran && verification.ok && !/verification/i.test(rawSummary)) {
-          rawSummary = `${rawSummary}\n\n**Typecheck:** \`${verification.command}\` passed.`.trim();
+          rawSummary = `${rawSummary}\n\n**Verification:** \`${verification.command}\` passed.`.trim();
         } else if (verification.ran && !verification.ok) {
-          rawSummary = `${rawSummary}\n\n**Typecheck failed:** \`${verification.command}\`\n\`\`\`\n${verification.output.slice(0, 3_000)}\n\`\`\``.trim();
+          rawSummary = `${rawSummary}\n\n**Verification failed:** \`${verification.command}\`\n\`\`\`\n${verification.output.slice(0, 3_000)}\n\`\`\``.trim();
         } else if (verification.output) {
           rawSummary = `${rawSummary}\n\n**Verification:** ${verification.output}`.trim();
         }
@@ -7977,10 +8031,10 @@ ${lessons}` : "",
       }
       const finalVerification = getLastVerification();
       if (finalVerification?.ran && finalVerification.ok && !/verification/i.test(summary)) {
-        summary = `${summary}\n\n**Typecheck:** \`${finalVerification.command}\` passed.`.trim();
+        summary = `${summary}\n\n**Verification:** \`${finalVerification.command}\` passed.`.trim();
       }
       if (finalVerification?.ran && !finalVerification.ok) {
-        summary = `${summary}\n\n**Typecheck failed:** \`${finalVerification.command}\`\n\`\`\`\n${finalVerification.output.slice(0, 3_000)}\n\`\`\``.trim();
+        summary = `${summary}\n\n**Verification failed:** \`${finalVerification.command}\`\n\`\`\`\n${finalVerification.output.slice(0, 3_000)}\n\`\`\``.trim();
       }
     } catch {
       // keep the step-limit summary

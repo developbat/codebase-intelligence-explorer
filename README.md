@@ -613,11 +613,14 @@ npm run eval:ask
 npm run eval:stages
 npm run eval:change
 npm run eval:extract
+npm run eval:verify
 ```
 
 The extraction golden matrix checks exact/minimum totals, uniqueness and
 required items across neon-escape, CBE, sample, CIE, Laravel, Python, Go and
-React Native without calling a model.
+React Native without calling a model. `eval:verify` creates scratch Python, Go
+and Node projects, proves the test command fails on a bug, fixes it, reruns the
+test and runs the app for a real stdout result.
 
 Current coverage:
 

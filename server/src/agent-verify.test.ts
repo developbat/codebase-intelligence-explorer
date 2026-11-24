@@ -138,7 +138,7 @@ test("agent runs the project typecheck before accepting finish and fixes reporte
     assert.ok(result.steps.some((step) => step.action === "run_command" && !step.ok), "verification failure should be recorded");
     assert.ok(result.logs?.some((entry) => entry.label === "Verification failed"));
     assert.ok(result.logs?.some((entry) => entry.label === "Verification passed"));
-    assert.match(result.summary, /Typecheck.*passed/is);
+    assert.match(result.summary, /Verification.*passed/is);
     assert.ok(requestCount >= 4, `expected verification retry, got ${requestCount} model calls`);
     assert.equal(await fs.readFile(path.join(projectRoot, "src", "bad.ts"), "utf8"), "export const bad: number = 1;\n");
     assert.ok(calls.some((call) => call.includes("Verification failed")));

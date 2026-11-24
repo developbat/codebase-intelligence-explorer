@@ -53,6 +53,19 @@ export async function detectProjectProfile(
   const rootFiles = new Set(entries.filter((entry) => entry.isFile()).map((entry) => entry.name));
   const testFiles = testFilesFor(files);
   const hasTest = (pattern: RegExp) => testFiles.some((file) => pattern.test(file));
+  const pythonTestFiles = testFiles.filter((file) => /\.py$/i.test(file));
+  const pythonTestDir =
+    pythonTestFiles.length > 0 && pythonTestFiles.every((file) => file.startsWith("tests/"))
+      ? "tests"
+      : ".";
+  let pythonUsesUnittest = false;
+  for (const file of pythonTestFiles.slice(0, 8)) {
+    const content = await fs.readFile(path.join(rootPath, file), "utf8").catch(() => "");
+    if (/^\s*(?:import unittest|from unittest)/m.test(content)) {
+      pythonUsesUnittest = true;
+      break;
+    }
+  }
 
   const exists = (name: string) => rootFiles.has(name);
 
@@ -620,8 +633,16 @@ export async function detectProjectProfile(
     hasTests = true;
   }
   if (!testFramework && hasTest(/\.py$/i)) {
-    testFramework = "Pytest";
-    addCommand(testCommands, "pytest -q");
+    if (pythonUsesUnittest) {
+      testFramework = "unittest";
+      addCommand(
+        testCommands,
+        `python3 -m unittest discover -s ${pythonTestDir} -q`,
+      );
+    } else {
+      testFramework = "Pytest";
+      addCommand(testCommands, "pytest -q");
+    }
     hasTests = true;
   }
   if (testCommands.length === 0 && exists("Makefile")) {

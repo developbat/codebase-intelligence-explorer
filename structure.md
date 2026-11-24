@@ -254,6 +254,17 @@ On `finish` the loop checks, among others:
 lists. A static list is proven by `extract_entities`; running a browser for it is
 wasted work.
 
+For project verification:
+
+- Python tests using `unittest` are detected as
+  `python3 -m unittest discover -s tests -q`; otherwise `pytest -q` is used.
+- Go changes in a multi-module repository use the nearest `go.mod` directory
+  (`cd <module> && go test ./...`) when no root `go.mod` exists.
+- Node/React Native projects use the detected `npm test` / `npx tsc --noEmit`
+  commands.
+- Verification summaries use the generic **Verification** label, not
+  “Typecheck”, because the command may be a test or build command.
+
 ### 4.9 Persistence
 
 - Project analysis: application data directory (project id based).
@@ -331,9 +342,14 @@ npm run eval:ask       # read-only code understanding/list checks
 npm run eval:stages    # intent + planning stages
 npm run eval:change    # temp-copy change workflow
 npm run eval:extract   # deterministic extraction golden matrix
+npm run eval:verify    # scratch Python/Go/Node test+run checks
 npx tsc -p tsconfig.json --noEmit
 npm run build
 ```
+
+`eval:verify` creates fresh Python (unittest), Go and Node projects in a temp
+folder, confirms the detected test command fails on buggy code, fixes it, reruns
+the test and runs the app for a real stdout result.
 
 `eval:extract` runs the golden matrix in
 `fixtures/agent-eval/extraction.json` against real project analyses (no model

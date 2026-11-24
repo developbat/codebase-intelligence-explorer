@@ -16,7 +16,8 @@
     "eval:stages": "tsx server/src/evalStages.ts",
     "eval:ask": "tsx server/src/evalAsk.ts",
     "eval:change": "tsx server/src/evalChange.ts",
-    "eval:extract": "tsx server/src/evalExtraction.ts"
+    "eval:extract": "tsx server/src/evalExtraction.ts",
+    "eval:verify": "tsx server/src/evalVerify.ts"
   },
   "dependencies": {
     "@codemirror/autocomplete": "^6.20.4",
