@@ -441,9 +441,17 @@ agent surface. Each `AgentToolSpec` declares:
 
 `agentToolCatalog` renders the group-filtered list from this registry instead of
 a hand-maintained array. `validateToolArgs` runs before the action switch and
-returns a precise error for missing/typed arguments. Project tools under
-`.cie/agent/tools` are appended as `run_project_tool` examples when command
-access is allowed. `GET /api/projects/:id/tool-registry` exposes built-in and
+returns a precise error for missing/typed arguments. Schemas support the simple
+alias form and a JSON Schema subset (`type`, `required`, `properties`, `anyOf`,
+`items`, `enum`). Project tools under `.cie/agent/tools` are appended as
+`run_project_tool` examples when command access is allowed.
+
+Handler modules live in `server/src/ai/tools/` (`types.ts`, `builtins.ts`,
+`registry.ts`). `runRegisteredTool` is called before the legacy switch.
+`create_document`, `create_zip`, `create_graphic`, `graphic_check`,
+`check_toolchains` and `list_project_tools` are already modular; the remaining
+switch branches will migrate incrementally without changing the action
+protocol. `GET /api/projects/:id/tool-registry` exposes built-in and
 project metadata to the UI; **Settings → Tools** renders the built-in registry.
 
 Test-only verification tasks skip both the edit-wiring and remaining-work finish

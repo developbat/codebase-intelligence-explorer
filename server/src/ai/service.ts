@@ -117,6 +117,8 @@ import { pickAlternateAgentModel } from "./agents";
 import { getPrompt, renderPrompt } from "./prompts";
 import { listSkills, loadSkillForRun, loadSkillsForPrompt, renderSkillsForPrompt, runSkillScript, setSkillEnabled } from "../skills";
 import { renderAgentToolCatalog, toolGroupsFor, validateToolArgs, type ProjectToolHint } from "./toolRegistry";
+import { runRegisteredTool } from "./tools/registry";
+import type { AgentToolContext } from "./tools/types";
 import { appendLesson, readLessons } from "../tasks";
 import { ensureProjectMap } from "../projectMap";
 import { buildChangeReport } from "../changes";
@@ -5755,11 +5757,33 @@ ${lessons}` : "",
       }
       const argumentError = validateToolArgs(action, args);
       if (argumentError) throw new Error(argumentError);
-      actionCacheKeyValue = READ_ONLY_ACTIONS.has(action)
-        ? `${action}:${stableActionKey(args)}`
-        : "";
-      cachedAction = actionCacheKeyValue ? readOnlyCache.get(actionCacheKeyValue) : undefined;
-      if (cachedAction) {
+      const toolContext: AgentToolContext = {
+        projectId,
+        analysis,
+        args,
+        readOnly: readOnlyMode,
+        liveBrowser: options.liveBrowser === true,
+        signal,
+        log,
+        requirePermission,
+        evidence,
+        changedFiles,
+        invalidate: invalidateReadCaches,
+        normalizePath: (value) => normalizeAgentPath(analysis.rootPath, value),
+        pathFromArgs,
+        isSecretPath: isSecretAgentPath,
+      };
+      const registeredResult = await runRegisteredTool(action, toolContext);
+      if (registeredResult) {
+        observation = registeredResult.observation;
+        ok = registeredResult.ok;
+      }
+      if (!registeredResult) {
+        actionCacheKeyValue = READ_ONLY_ACTIONS.has(action)
+          ? `${action}:${stableActionKey(args)}`
+          : "";
+        cachedAction = actionCacheKeyValue ? readOnlyCache.get(actionCacheKeyValue) : undefined;
+        if (cachedAction) {
         observation = `Already executed in step ${cachedAction.step} with the same arguments. Reuse that observation; do not repeat this call.`;
         ok = cachedAction.ok;
         log("info", "Skipped duplicate tool call", `${action} · step ${cachedAction.step}`);
@@ -6503,78 +6527,6 @@ ${lessons}` : "",
           `${inventory.summary.broken} broken · ${inventory.summary.unreferenced} unreferenced · ${inventory.summary.headingWarnings} heading warnings`,
         );
         ok = true;
-      } else if (action === "create_document") {
-        const outputPath = normalizeAgentPath(analysis.rootPath, pathFromArgs(args));
-        if (!outputPath) throw new Error("An output path is required.");
-        const format = typeof args.format === "string" ? (args.format as DocumentFormat) : undefined;
-        const content = typeof args.content === "string" ? args.content : undefined;
-        const rows = Array.isArray(args.rows)
-          ? (args.rows as unknown[])
-              .filter((row): row is unknown[] => Array.isArray(row))
-              .map((row) => row.map((cell) => String(cell ?? "")))
-          : undefined;
-        const sheets = Array.isArray(args.sheets)
-          ? (args.sheets as unknown[])
-              .filter((sheet): sheet is Record<string, unknown> => Boolean(sheet && typeof sheet === "object"))
-              .map((sheet, index) => ({
-                name: typeof sheet.name === "string" ? sheet.name : `Sheet${index + 1}`,
-                rows: Array.isArray(sheet.rows)
-                  ? (sheet.rows as unknown[])
-                      .filter((row): row is unknown[] => Array.isArray(row))
-                      .map((row) => row.map((cell) => String(cell ?? "")))
-                  : [],
-              }))
-          : undefined;
-        const source = typeof args.source === "string" ? args.source : undefined;
-        const allowed = await requirePermission(
-          "write",
-          "create_document",
-          outputPath,
-          `Create ${format ?? (path.extname(outputPath).slice(1) || "document")} output.`,
-          { preview: (content ?? "").slice(0, 1_000) },
-        );
-        if (!allowed) throw new Error("The user denied permission to create the document.");
-        const created = await createDocument(analysis.rootPath, outputPath, {
-          format,
-          content,
-          rows,
-          sheets,
-          source,
-          title: typeof args.title === "string" ? args.title : undefined,
-        });
-        if (!changedFiles.includes(created.path)) changedFiles.push(created.path);
-        evidence.push({ path: created.path, label: "Created document" });
-        invalidateReadCaches();
-        observation = `Created ${created.format} document ${created.path} (${created.bytes} bytes).`;
-        log("success", "Document created", `${created.path} · ${created.bytes} bytes`);
-        ok = true;
-      } else if (action === "create_zip") {
-        const outputPath = normalizeAgentPath(analysis.rootPath, pathFromArgs(args));
-        if (!outputPath) throw new Error("An output path is required.");
-        const rawEntries = Array.isArray(args.entries)
-          ? args.entries
-          : Array.isArray(args.files)
-            ? args.files
-            : Array.isArray(args.paths)
-              ? args.paths
-              : [];
-        const entries = rawEntries.filter((entry): entry is string => typeof entry === "string");
-        if (entries.length === 0) throw new Error("At least one file or folder entry is required.");
-        const allowed = await requirePermission(
-          "write",
-          "create_zip",
-          outputPath,
-          `Create archive with ${entries.length} entry/entries.`,
-          { preview: entries.join("\n").slice(0, 1_000) },
-        );
-        if (!allowed) throw new Error("The user denied permission to create the archive.");
-        const created = await createArchive(analysis.rootPath, outputPath, entries);
-        if (!changedFiles.includes(created.path)) changedFiles.push(created.path);
-        evidence.push({ path: created.path, label: "Created archive" });
-        invalidateReadCaches();
-        observation = `Created archive ${created.path} (${created.bytes} bytes) with ${created.entries.length} entries:\n${created.entries.join("\n")}`;
-        log("success", "Archive created", `${created.path} · ${created.bytes} bytes`);
-        ok = true;
       } else if (action === "json_query") {
         const filePath = normalizeAgentPath(analysis.rootPath, pathFromArgs(args));
         if (!filePath) throw new Error("A file path is required.");
@@ -6779,19 +6731,6 @@ ${lessons}` : "",
         observation = `Removed ${key}.`;
         log("success", "Skill removed", key);
         ok = true;
-      } else if (action === "list_project_tools") {
-        const projectTools = await listProjectTools(analysis.rootPath);
-        observation =
-          projectTools.tools.length > 0
-            ? `Saved project tools (${projectTools.tools.length}):\n${projectTools.tools
-                .map(
-                  (tool) =>
-                    `- ${tool.name}: ${tool.command}${tool.description ? ` — ${tool.description}` : ""}`,
-                )
-                .join("\n")}`
-            : "No saved project tools. Create a reusable script under .cie/agent/tools/ and it will be auto-registered.";
-        log("info", "Project tools listed", `${projectTools.tools.length} tools`);
-        ok = true;
       } else if (action === "list_mobile_devices") {
         const report = await listMobileDevices();
         const ios = report.ios
@@ -6882,20 +6821,6 @@ ${lessons}` : "",
         invalidateReadCaches();
         observation = `Rescanned project: ${fresh.files.length} files, ${fresh.symbols.length} symbols. Rebuilt the analysis and search index; the project map will refresh on the next run.`;
         log("success", "Project rescanned", `${fresh.files.length} files · ${fresh.symbols.length} symbols`);
-        ok = true;
-      } else if (action === "check_toolchains") {
-        const report = await checkToolchains();
-        observation = report.tools
-          .map(
-            (tool) =>
-              `${tool.installed ? "installed" : "MISSING"} · ${tool.name}${tool.version ? ` · ${tool.version}` : ""}${
-                !tool.installed && tool.installCommands.length > 0
-                  ? ` · install: ${tool.installCommands.find((item) => item.platform === report.platform)?.command ?? "manual"}`
-                  : ""
-              }`,
-          )
-          .join("\n");
-        log("info", "Toolchains checked", `${report.missing.length} missing`);
         ok = true;
       } else if (action === "install_toolchain") {
         const id = String(args.id ?? "").trim();
@@ -7206,46 +7131,6 @@ ${lessons}` : "",
         evidence.push({ path: created.path, label: "Placeholder asset" });
         observation = `Created ${created.kind} SVG placeholder: ${created.path} (${created.bytes} bytes).`;
         log("success", "Placeholder asset created", created.path);
-        ok = true;
-      } else if (action === "graphic_check") {
-        const graphicPath = normalizeAgentPath(analysis.rootPath, pathFromArgs(args));
-        if (!graphicPath) throw new Error("A graphic path is required.");
-        const result = await checkGraphic(
-          analysis.rootPath,
-          graphicPath,
-          typeof args.expectText === "string" ? args.expectText : undefined,
-        );
-        observation = result.summary;
-        ok = result.ok;
-        log(result.ok ? "success" : "warn", "Graphic check", `${result.format} · ${result.width ?? "?"}×${result.height ?? "?"}`);
-      } else if (action === "create_graphic") {
-        const graphicPath = normalizeAgentPath(analysis.rootPath, pathFromArgs(args));
-        if (!graphicPath) throw new Error("A graphic path is required.");
-        if (isSecretAgentPath(graphicPath)) throw new Error("Writing environment, key or Git internals graphics is denied.");
-        const allowed = await requirePermission(
-          "write",
-          "create_graphic",
-          graphicPath,
-          "Create a deterministic SVG/PNG chart, flow or illustration.",
-          { preview: String(args.kind ?? "bar") },
-        );
-        if (!allowed) throw new Error("The user denied permission to create this graphic.");
-        const created = await createGraphic(analysis.rootPath, {
-          path: graphicPath,
-          kind: args.kind as Parameters<typeof createGraphic>[1]["kind"],
-          title: typeof args.title === "string" ? args.title : undefined,
-          subtitle: typeof args.subtitle === "string" ? args.subtitle : undefined,
-          data: Array.isArray(args.data) ? (args.data as Parameters<typeof createGraphic>[1]["data"]) : undefined,
-          steps: Array.isArray(args.steps) ? args.steps.map(String) : undefined,
-          width: Number(args.width) || undefined,
-          height: Number(args.height) || undefined,
-          colors: Array.isArray(args.colors) ? args.colors.map(String) : undefined,
-          format: args.format === "png" ? "png" : undefined,
-        });
-        if (!changedFiles.includes(created.path)) changedFiles.push(created.path);
-        evidence.push({ path: created.path, label: "Generated graphic" });
-        observation = `Created ${created.kind} graphic: ${created.path} (${created.bytes} bytes, ${created.mime}).`;
-        log("success", "Graphic created", created.path);
         ok = true;
       } else if (action === "web_fetch") {
         const url = String(args.url ?? "").trim();
@@ -8006,6 +7891,7 @@ ${lessons}` : "",
           };
         }
         ok = result.exitCode === 0;
+      }
       }
       if (actionCacheKeyValue && !cachedAction && ok) {
         readOnlyCache.set(actionCacheKeyValue, { step: index, ok });

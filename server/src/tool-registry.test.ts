@@ -50,8 +50,8 @@ test("approval and destructive metadata are rendered", () => {
 
 test("argument schemas accept path aliases and reject missing/typed values", () => {
   assert.equal(validateToolArgs("read_file", { file: "src/app.ts" }), null);
-  assert.match(validateToolArgs("read_file", { startLine: 1 }) ?? "", /requires one of/);
-  assert.match(validateToolArgs("read_file", { path: 3 }) ?? "", /expects path to be string/);
+  assert.match(validateToolArgs("read_file", { startLine: 1 }) ?? "", /allowed shape/);
+  assert.match(validateToolArgs("read_file", { path: 3 }) ?? "", /path must be string/);
   assert.equal(validateToolArgs("write_file", { path: "a.ts", content: "x" }), null);
   assert.match(validateToolArgs("run_command", {}) ?? "", /requires one of: command/);
 });

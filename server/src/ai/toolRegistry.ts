@@ -9,6 +9,16 @@ import type { AgentToolGroup } from "../../../shared/intent";
  * here without touching the prompt builder. Project/generated tools can be
  * layered on top of this list later with the same shape.
  */
+export interface JsonSchema {
+  type?: "object" | "array" | "string" | "number" | "boolean" | "integer";
+  required?: string[];
+  properties?: Record<string, JsonSchema>;
+  anyOf?: JsonSchema[];
+  items?: JsonSchema;
+  enum?: Array<string | number | boolean>;
+  description?: string;
+}
+
 export interface AgentToolSpec {
   action: string;
   groups: AgentToolGroup[];
@@ -21,6 +31,8 @@ export interface AgentToolSpec {
   writeModeOnly?: boolean;
   note?: string;
   extraExamples?: string[];
+  /** Preferred schema for generated/third-party tools; JSON Schema subset. */
+  inputSchema?: JsonSchema;
   args?: {
     /** Each inner array is a group of aliases; at least one key is required. */
     required?: string[][];
@@ -51,9 +63,22 @@ const TOOL_SPECS: AgentToolSpec[] = [
     example: '{"action":"read_file","args":{"path":"src/app.ts","startLine":1,"endLine":200}}',
     description: "Read a file or a focused line range.",
     whenToUse: "Read only the range you need; prefer read_symbol for a known symbol.",
-    args: {
-      required: [["path", "file", "filePath", "target", "filename"]],
-      types: { path: "string", file: "string", filePath: "string", startLine: "number", endLine: "number" },
+    inputSchema: {
+      type: "object",
+      anyOf: [
+        { required: ["path"] },
+        { required: ["file"] },
+        { required: ["filePath"] },
+        { required: ["target"] },
+        { required: ["filename"] },
+      ],
+      properties: {
+        path: { type: "string" },
+        file: { type: "string" },
+        filePath: { type: "string" },
+        startLine: { type: "number" },
+        endLine: { type: "number" },
+      },
     },
   },
   {
@@ -242,7 +267,15 @@ const TOOL_SPECS: AgentToolSpec[] = [
       '{"action":"browser_check","args":{"path":"index.html","steps":[{"action":"fill","selector":"#task-input","value":"Test"},{"action":"click","selector":"#add-task"},{"action":"expectText","selector":"#task-list","text":"Test"}]}}',
     description: "Drive the real preview in a browser and assert UI state.",
     whenToUse: "Use for UI/game behavior, clicks, forms and console errors; prefer DOM-visible checks over unknown globals.",
-    args: { required: [["steps"]], types: { steps: "array", path: "string", url: "string" } },
+    inputSchema: {
+      type: "object",
+      required: ["steps"],
+      properties: {
+        steps: { type: "array", items: { type: "object" } },
+        path: { type: "string" },
+        url: { type: "string" },
+      },
+    },
   },
   {
     action: "run_test_scenario",
@@ -745,11 +778,63 @@ export function allToolSpecs(): AgentToolSpec[] {
   return [...TOOL_SPECS, FINISH_TOOL_SPEC];
 }
 
+function validateJsonSchema(
+  value: unknown,
+  schema: JsonSchema,
+  label: string,
+): string | null {
+  if (schema.enum && !schema.enum.includes(value as string | number | boolean)) {
+    return `${label} must be one of: ${schema.enum.join(", ")}.`;
+  }
+  if (schema.anyOf && schema.anyOf.length > 0) {
+    const match = schema.anyOf.some((candidate) => validateJsonSchema(value, candidate, label) === null);
+    if (!match) return `${label} does not match any allowed shape.`;
+  }
+  if (schema.type) {
+    const actual = Array.isArray(value) ? "array" : typeof value;
+    if (schema.type === "integer") {
+      if (typeof value !== "number" || !Number.isInteger(value)) {
+        return `${label} must be an integer.`;
+      }
+    } else if (actual !== schema.type) {
+      return `${label} must be ${schema.type}, got ${actual}.`;
+    }
+  }
+  if (
+    (schema.type === "object" || schema.required || schema.properties) &&
+    value &&
+    typeof value === "object" &&
+    !Array.isArray(value)
+  ) {
+    const record = value as Record<string, unknown>;
+    for (const key of schema.required ?? []) {
+      if (record[key] === undefined || record[key] === null || record[key] === "") {
+        return `${label} requires ${key}.`;
+      }
+    }
+    for (const [key, child] of Object.entries(schema.properties ?? {})) {
+      if (record[key] === undefined) continue;
+      const error = validateJsonSchema(record[key], child, `${label}.${key}`);
+      if (error) return error;
+    }
+  }
+  if (schema.type === "array" && Array.isArray(value) && schema.items) {
+    for (let index = 0; index < value.length; index += 1) {
+      const error = validateJsonSchema(value[index], schema.items, `${label}[${index}]`);
+      if (error) return error;
+    }
+  }
+  return null;
+}
+
 export function validateToolArgs(
   action: string,
   args: Record<string, unknown>,
 ): string | null {
   const spec = toolSpec(action);
+  if (spec?.inputSchema) {
+    return validateJsonSchema(args, spec.inputSchema, action);
+  }
   const schema = spec?.args;
   if (!schema) return null;
   for (const aliases of schema.required ?? []) {
