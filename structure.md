@@ -455,11 +455,12 @@ full OS-level network/FS sandboxing remains a later hardening step.
 
 Handler modules live in `server/src/ai/tools/` (`types.ts`, `builtins.ts`,
 `registry.ts`). `runRegisteredTool` is called before the legacy switch.
-Forty-two actions are already modular across `documents.ts`, `research.ts`,
+Forty-two actions are modular across `documents.ts`, `research.ts`,
 `skills.ts`, `gitTools.ts`, `gitWriteTools.ts`, `writeTools.ts`, `mobile.ts`,
-`mobileActions.ts` and `builtins.ts`; the remaining core read/edit/browser
-branches stay on the legacy switch because they share read-cache and counter
-state. Try execution adds a 120s timeout, a safe env for project tools, and
+`mobileActions.ts` and `builtins.ts`. The remaining 35 core read/edit/browser
+actions have try-only adapters in `tryTools.ts`; they do not replace the agent
+switch, so read-map/cache/counter behavior is unchanged during real runs while
+the playground can exercise all 77 non-finish actions. Try execution adds a 120s timeout, a safe env for project tools, and
 localStorage history (last 20). `suggestToolsForInstruction` scores capability
 hints from the instruction and selected groups; the result is logged and added
 to the task context. `GET /api/projects/:id/tool-registry` exposes built-in and

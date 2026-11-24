@@ -57,7 +57,7 @@ import { loadQueue, removeTask, reorderTasks, saveQueue, updateTask } from "./ta
 import type { ProjectTask } from "../../shared/tasks";
 import { getPublicSettings, resolveAgentRole, resolveProvider, updateAiSettings } from "./ai/settings";
 import { allToolSpecs } from "./ai/toolRegistry";
-import { registeredToolActions, runRegisteredTool } from "./ai/tools/registry";
+import { runTryTool, tryableToolActions } from "./ai/tools/tryRegistry";
 import { withToolTimeout } from "./ai/tools/sandbox";
 import type { AgentToolContext } from "./ai/tools/types";
 import { getPrompt, getPromptVersion, listPrompts, renderPrompt, resetPrompt, savePrompt } from "./ai/prompts";
@@ -1176,7 +1176,7 @@ app.get("/api/projects/:id/tool-registry", async (req, res) => {
         example: tool.example,
         permission: tool.permission,
         destructive: tool.destructive === true,
-        tryable: registeredToolActions().includes(tool.action),
+        tryable: tryableToolActions().includes(tool.action),
       })),
       project: projectTools.tools,
     });
@@ -1202,7 +1202,7 @@ app.post("/api/projects/:id/tools/try", async (req, res) => {
       res.status(400).json({ error: "A tool action is required." });
       return;
     }
-    if (!registeredToolActions().includes(action)) {
+    if (!tryableToolActions().includes(action)) {
       res.status(400).json({ error: `Tool "${action}" is not tryable from the registry yet.` });
       return;
     }
@@ -1235,7 +1235,7 @@ app.post("/api/projects/:id/tools/try", async (req, res) => {
         input.path ?? input.file ?? input.filePath ?? input.target ?? input.filename,
       isSecretPath: isSecretAgentPath,
     };
-    const result = await withToolTimeout(runRegisteredTool(action, context));
+    const result = await withToolTimeout(runTryTool(action, context));
     if (!result) {
       res.status(400).json({ error: `Tool "${action}" is not tryable from the registry yet.` });
       return;

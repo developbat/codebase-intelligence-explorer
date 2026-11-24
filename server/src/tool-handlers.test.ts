@@ -5,6 +5,7 @@ import path from "node:path";
 import test from "node:test";
 import type { AnalysisResult } from "../../shared/types";
 import { runRegisteredTool } from "./ai/tools/registry";
+import { runTryTool } from "./ai/tools/tryRegistry";
 import { withToolTimeout } from "./ai/tools/sandbox";
 import { safeProcessEnv } from "./editor";
 import type { AgentToolContext } from "./ai/tools/types";
@@ -156,6 +157,30 @@ test("registry handlers create documents, archives and graphics", async () => {
       context(root, { name: "echo-input", input: {} }),
     ).catch((error: unknown) => error);
     assert.match(String(invalidToolRun), /requires input\.url/);
+
+    await fs.writeFile(
+      path.join(root, "data.json"),
+      JSON.stringify({ name: "demo", items: [1, 2] }),
+      "utf8",
+    );
+    const tryRead = await runTryTool(
+      "read_file",
+      context(root, { path: "data.json", startLine: 1, endLine: 1 }),
+    );
+    assert.equal(tryRead?.ok, true);
+    assert.match(tryRead?.observation ?? "", /data\.json/);
+    const tryJson = await runTryTool(
+      "json_query",
+      context(root, { path: "data.json", pointer: "items" }),
+    );
+    assert.match(tryJson?.observation ?? "", /length 2/);
+    const tryList = await runTryTool("list_files", context(root, { path: "", limit: 20 }));
+    assert.match(tryList?.observation ?? "", /data\.json/);
+    const tryCount = await runTryTool(
+      "count_matches",
+      context(root, { path: "data.json", query: "demo" }),
+    );
+    assert.match(tryCount?.observation ?? "", /1 matches/);
 
     const skill = await runRegisteredTool(
       "create_skill",
