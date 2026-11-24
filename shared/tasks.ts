@@ -25,6 +25,8 @@ export interface ProjectTask {
     model: string;
   };
   attempts: number;
+  /** Focused repair passes after a failed verification/incomplete task. */
+  repairAttempts?: number;
   notes?: string;
   resultSummary?: string;
   changedFiles: string[];

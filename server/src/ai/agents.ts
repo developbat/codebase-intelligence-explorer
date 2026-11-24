@@ -275,8 +275,10 @@ export async function pickAlternateAgentModel(exclude?: {
     }
     return true;
   };
+  const hasKnownSuccess = [...health.values()].some((item) => item.successCount > 0);
   const healthyAndAffordable = (candidate: { provider: string; model: string }) => {
     const item = health.get(healthKey(candidate.provider, candidate.model));
+    if (hasKnownSuccess && (!item || item.successCount === 0)) return false;
     return !isModelUnhealthy(item, settings.modelHealth) && priceAllowed(candidate);
   };
 

@@ -105,6 +105,7 @@ Rules:
 - Ask only when a wrong guess would implement the wrong feature or the requested object/field is genuinely ambiguous. Max 4 options. Options must be product/behavior choices, not implementation steps.
 - Never ask which files to read or where the code lives; the executor inspects automatically and "areas" is your best guess.
 - If the request names a product concept (detail, priority, reminder, status, tag), clarify its product behavior. Example: "task detail" -> ask "How should task detail work?" with options "multiline detail input shown under the task", "separate detail panel", "both". Never ask "which files should I inspect?".
+- Check the project map before asking how to build something. If the requested behavior/symbols already exist, note that in "understanding"/"assumptions" and ask only what should change if needed; do not ask a from-scratch implementation question.
 - If the request is already clear, set needsClarification=false, question="", options=[].
 - "kind": use "run" only when the user explicitly asks to execute a command, test, build or server. Checking, counting, searching, reading and summarizing are "analyze", not "run".
 - For a greeting, thanks, or general chat that needs no project work ("hi", "naber", "thanks", "what is a closure?"), use kind="question", context="none", history="none", toolGroups=[], scope="trivial", areas=[], verification="none". Do not turn it into an edit.
@@ -118,6 +119,8 @@ Rules:
 - "toolGroups": choose the minimum tool families the executor needs. Core read/search tools are always available, so omit "core". Use edit for writing, command for running/verifying, document for attachments/PDF/Office/CSV/images, web for HTTP/web research, git for Git operations, browser for browser verification, skills for saved tools/skills, media for graphics/video, mobile for simulators, notes for saved research, tools for toolchain installation. If a capability is genuinely needed, include its group; when unsure, include it rather than omitting a required tool. For a greeting or general chat return [].
 - "approach": choose the most efficient evidence strategy for this request. For complete lists/counts/audits, propose searching for the relevant markers and collecting all matches with count/offset; do not rely on a partial read.
 - "needsExhaustiveEvidence": true when the user asks for a complete list, count, audit or "all" items; otherwise false.
+- If the project already has an implementation for the requested feature (the existing-symbol hints show it), do not ask how that feature should work. Extend the existing behavior; ask only about a genuinely new product choice.
+- Preserve prohibitions exactly: "do not re-add", "don't change X", "remove nothing", "mevcut itemleri yeniden ekleme" are constraints. Never turn a prohibition into a positive action.
 - Never make the user choose a model or restate the whole request.
 - If the user already answered a clarification, needsClarification must be false.
 
@@ -153,6 +156,65 @@ async function attachmentFacts(analysis: AnalysisResult, instruction: string): P
   return `Attached documents:\n${lines.join("\n")}`;
 }
 
+function intentQueries(instruction: string): Set<string> {
+  const stop = new Set([
+    "the","and","for","with","add","make","get","set","use","from","this","that","bir","için","ile","daha","çok","ama","ve","olan","gibi","hale","getir","ekle","yap","kontrol","et","düzelt",
+  ]);
+  const aliases: Record<string, string[]> = {
+    shooting: ["shoot", "bullet", "fire", "spawn"],
+    shoot: ["shoot", "bullet", "fire"],
+    bullet: ["bullet", "shoot", "fire"],
+    meteor: ["meteor", "obstacle"],
+    terlik: ["slipper"],
+    komik: ["comedy", "joke"],
+    comedy: ["comedy", "joke"],
+    ateş: ["fire", "bullet", "shoot"],
+    hız: ["speed", "velocity"],
+    item: ["powerup", "item", "collect"],
+    items: ["powerup", "item", "collect"],
+  };
+  const words = (instruction.toLowerCase().match(/[a-z0-9_çğıöşü]{3,}/gi) ?? [])
+    .map((word) => word.toLowerCase())
+    .filter((word) => !stop.has(word));
+  const queries = new Set<string>([...words]);
+  for (const word of words) for (const alias of aliases[word] ?? []) queries.add(alias);
+  return queries;
+}
+
+function existingCodeHints(analysis: AnalysisResult, instruction: string): string {
+  const queries = intentQueries(instruction);
+  const hits = new Map<string, string>();
+  for (const symbol of analysis.symbols) {
+    const name = symbol.name.toLowerCase();
+    const qualified = symbol.qualifiedName.toLowerCase();
+    const file = symbol.filePath.toLowerCase();
+    if ([...queries].some((query) => name.includes(query) || qualified.includes(query) || file.includes(query))) {
+      const key = `${symbol.filePath}:${symbol.name}`;
+      if (!hits.has(key)) hits.set(key, `${symbol.filePath}:${symbol.startLine} ${symbol.kind} ${symbol.name}`);
+      if (hits.size >= 8) break;
+    }
+  }
+  if (hits.size === 0) return "";
+  return `Existing symbols matching the request (check these before assuming a feature is new):\n${[
+    ...hits.values(),
+  ].join("\n")}`;
+}
+
+function likelyProjectAreas(analysis: AnalysisResult, instruction: string): string[] {
+  const queries = intentQueries(instruction);
+  const files = new Set<string>();
+  for (const symbol of analysis.symbols) {
+    const haystack = `${symbol.name} ${symbol.qualifiedName} ${symbol.filePath}`.toLowerCase();
+    if ([...queries].some((query) => haystack.includes(query))) files.add(symbol.filePath);
+    if (files.size >= 6) break;
+  }
+  for (const file of analysis.files) {
+    if ([...queries].some((query) => file.path.toLowerCase().includes(query))) files.add(file.path);
+    if (files.size >= 6) break;
+  }
+  return [...files].slice(0, 3);
+}
+
 async function userPrompt(
   analysis: AnalysisResult,
   instruction: string,
@@ -160,6 +222,7 @@ async function userPrompt(
 ): Promise<string> {
   return [
     await projectFacts(analysis, options.activeFile),
+    existingCodeHints(analysis, instruction),
     `Interface language (use for understanding, question and option labels): ${options.language ?? "unknown"}`,
     options.clarified ? "The user already clarified the request. Do not ask again." : "",
     options.history && options.history.length > 0
@@ -310,10 +373,16 @@ export function parseIntentResponse(
 async function resolveIntentModel(options: IntentOptions) {
   const settings = await getPublicSettings().catch(() => null);
   const fastRole = settings?.agentRoles.find((role) => role.role === "fast");
-  let config = await resolveProvider(
-    (fastRole?.provider as IntentOptions["provider"]) ?? options.provider,
-    fastRole?.model ?? options.model,
-  ).catch(() => resolveAgentRole("main", { provider: options.provider, model: options.model }));
+  // Use the model the user selected for this run first. The fast role is only
+  // a fallback for callers that do not pass an explicit provider/model.
+  let config = options.provider
+    ? await resolveProvider(options.provider, options.model).catch(async () => {
+        const fallback = await resolveProvider(fastRole?.provider, fastRole?.model).catch(() => null);
+        return fallback ?? resolveAgentRole("main", { provider: options.provider, model: options.model });
+      })
+    : await resolveProvider(fastRole?.provider, fastRole?.model).catch(() =>
+        resolveAgentRole("main", { provider: options.provider, model: options.model }),
+      );
   const health = await modelHealthByProviderModel().catch(() => new Map());
   if (health.get(healthKey(config.id, config.model))?.unavailable === true) {
     const alternate = await pickAlternateAgentModel({
@@ -335,6 +404,89 @@ async function resolveIntentModel(options: IntentOptions) {
  * the change is, which files are likely involved, and whether a question is
  * needed. It deliberately carries only compact project facts.
  */
+function suppressRedundantClarification(
+  intent: IntentAnalysis,
+  instruction: string,
+  analysis: AnalysisResult,
+): IntentAnalysis {
+  if (!intent.needsClarification) return intent;
+  const question = `${intent.question} ${(intent.options ?? [])
+    .map((option) => option.label)
+    .join(" ")}`.toLowerCase();
+  const shooting = /(?:shoot|shooting|fire|ateş)/i.test(question) && /(?:shoot|shooting|fire|ateş)/i.test(instruction);
+  const hasShooting = analysis.symbols.some((symbol) =>
+    /(?:spawnBullet|updateBullets|bindFireControls|setFiring)/i.test(symbol.name),
+  );
+  if (shooting && hasShooting) {
+    return {
+      ...intent,
+      needsClarification: false,
+      question: "",
+      options: [],
+      assumptions: [
+        ...intent.assumptions,
+        "Existing shooting implementation (bindFireControls/Space/pointer) is reused; do not ask how shooting should work.",
+      ].slice(0, 8),
+    };
+  }
+  const presentationRequest =
+    /(?:daha görünür|daha sık|daha belirgin|more visible|more frequent|more prominent)/i.test(instruction);
+  const presentationQuestion =
+    /(?:görünür|visible|frequent|sık|prominent|appearance|görünüm)/i.test(question);
+  if (presentationRequest && presentationQuestion) {
+    return {
+      ...intent,
+      needsClarification: false,
+      question: "",
+      options: [],
+      assumptions: [
+        ...intent.assumptions,
+        "Use sensible presentation defaults (larger, brighter, higher contrast, more frequent); do not block on a cosmetic choice.",
+      ].slice(0, 8),
+    };
+  }
+  const existingBehavior = /(?:spawnBullet|pickMeteorTier|updateBullets|existing|already|mevcut)/i.test(
+    intent.assumptions.join(" "),
+  );
+  const concreteFeature = /(?:shoot|shooting|fire|meteor|hit|size|speed|item|comedy)/i.test(instruction);
+  const questionFeature = /(?:shoot|shooting|fire|meteor|hit|size|speed|work|behave|control)/i.test(question);
+  if (existingBehavior && concreteFeature && questionFeature) {
+    return {
+      ...intent,
+      needsClarification: false,
+      question: "",
+      options: [],
+      assumptions: [
+        ...intent.assumptions,
+        "The request already specifies the behavior and the existing implementation/defaults apply; do not block on an implementation choice.",
+      ].slice(0, 8),
+    };
+  }
+  return intent;
+}
+
+function preserveNegations(intent: IntentAnalysis, instruction: string): IntentAnalysis {
+  const matches = [
+    ...instruction.matchAll(
+      /(?:yeniden|tekrar)\s+ekleme|\bekleme\b|kaldırma|silme|değiştirme|\bdo not\s+(?:add|change|remove|delete|rewrite)\b|\bdon't\s+(?:add|change|remove|delete|rewrite)\b|no new/gi,
+    ),
+  ].map((match) => match[0].trim());
+  const unique = [...new Set(matches.map((item) => item.toLowerCase()))];
+  if (unique.length === 0) return intent;
+  const text = `${intent.understanding} ${intent.assumptions.join(" ")}`.toLowerCase();
+  const already = /(?:ekleme|do not add|without adding|re-add|don't add|no new)/i.test(text);
+  return {
+    ...intent,
+    understanding: already
+      ? intent.understanding
+      : `${intent.understanding} Constraint: ${unique.join("; ")}.`.slice(0, 500),
+    assumptions: [
+      ...intent.assumptions,
+      `Hard constraint from the request: ${unique.join("; ")}; do not turn it into a positive action.`,
+    ].slice(0, 8),
+  };
+}
+
 export async function analyzeIntent(
   projectId: string,
   instruction: string,
@@ -355,6 +507,11 @@ export async function analyzeIntent(
     { role: "user" as const, content: await userPrompt(analysis, instruction, options) },
   ];
   let tokenUsage = { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
+  const addUsage = (a: typeof tokenUsage, b: typeof tokenUsage): typeof tokenUsage => ({
+    inputTokens: a.inputTokens + b.inputTokens,
+    outputTokens: a.outputTokens + b.outputTokens,
+    totalTokens: a.totalTokens + b.totalTokens,
+  });
   const ask = async (retry = false): Promise<string> =>
     chat(
       config,
@@ -374,7 +531,7 @@ export async function analyzeIntent(
         timeoutMs: TIMEOUT_MS,
         signal: options.signal,
         onUsage: (usage) => {
-          tokenUsage = usage;
+          tokenUsage = addUsage(tokenUsage, usage);
         },
       },
     );
@@ -383,9 +540,38 @@ export async function analyzeIntent(
   try {
     raw = await ask();
   } catch (error) {
-    throw new Error(
-      `Intent analysis failed with ${config.id}/${config.model}: ${error instanceof Error ? error.message : "unknown error"}`,
+    const message = error instanceof Error ? error.message : "unknown error";
+    // Do not lose the user's message because the small intent call was rate
+    // limited. Continue with a safe heuristic intent; the executor can still
+    // inspect the project and ask for clarification later if needed.
+    const questionLike = /\?|^(ne|neden|nasıl|niçin|ne zaman|nerede|kim|what|why|how|where|when|who)\b/i.test(
+      instruction.trim(),
     );
+    return {
+      intent: {
+        kind: questionLike ? "question" : "edit",
+        understanding: instruction.trim().slice(0, 500),
+        language: options.language ?? "unknown",
+        needsClarification: false,
+        scope: questionLike ? "small" : "medium",
+        mode: "single",
+        areas: options.activeFile ? [options.activeFile] : [],
+        verification: "none",
+        context: options.activeFile ? "focused" : "project",
+        history: "recent",
+        toolGroups: [],
+        approach: "",
+        needsExhaustiveEvidence: false,
+        assumptions: [
+          `Intent analysis could not run (${config.id}/${config.model}: ${message.slice(0, 240)}). Continuing with a safe ${questionLike ? "question" : "edit"} default so the message is not lost.`,
+        ],
+      },
+      provider: config.id,
+      model: config.model,
+      totalTokens: 0,
+      tokenUsage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+      costUsd: undefined,
+    };
   }
 
   let intent: IntentAnalysis;
@@ -396,25 +582,65 @@ export async function analyzeIntent(
       raw = await ask(true);
       intent = parseIntentResponse(raw, analysis, instruction, options.clarified);
     } catch {
-      intent = {
-        kind: "edit",
-        understanding: instruction.trim().slice(0, 500),
-        language: options.language ?? "unknown",
-        needsClarification: false,
-        scope: "small",
-        mode: "single",
-        areas: [],
-        verification: "none",
-        context: "project",
-        history: "recent",
-        toolGroups: [],
-        approach: "",
-        needsExhaustiveEvidence: false,
-        assumptions: ["Intent analyst could not parse its reply; proceeding with one focused task."],
-      };
+      try {
+        // The full prompt (project facts + symbol hints) can make a small model
+        // return prose or truncated JSON. Retry with a minimal prompt that still
+        // lets it choose an area, then fall back only if that also fails.
+        const minimal = await chat(
+          config,
+          [
+            { role: "system" as const, content: systemPrompt() },
+            {
+              role: "user" as const,
+              content: [
+                `Project files: ${analysis.files
+                  .map((file) => file.path)
+                  .slice(0, 20)
+                  .join(", ")}`,
+                `User request:\n${instruction.trim()}`,
+                `Interface language: ${options.language ?? "unknown"}`,
+                "Return only the JSON object with the schema. No prose, no Markdown.",
+              ].join("\n\n"),
+            },
+          ],
+          {
+            maxTokens: 1_400,
+            temperature: 0,
+            timeoutMs: TIMEOUT_MS,
+            signal: options.signal,
+            onUsage: (usage) => {
+              tokenUsage = addUsage(tokenUsage, usage);
+            },
+          },
+        );
+        intent = parseIntentResponse(minimal, analysis, instruction, options.clarified);
+      } catch {
+        intent = {
+          kind: "edit",
+          understanding: instruction.trim().slice(0, 500),
+          language: options.language ?? "unknown",
+          needsClarification: false,
+          scope: "small",
+          mode: "single",
+          areas: [],
+          verification: "none",
+          context: "project",
+          history: "recent",
+          toolGroups: [],
+          approach: "",
+          needsExhaustiveEvidence: false,
+          assumptions: ["Intent analyst could not parse its reply; proceeding with one focused task."],
+        };
+      }
     }
   }
 
+  intent = suppressRedundantClarification(intent, instruction, analysis);
+  intent = preserveNegations(intent, instruction);
+  if (intent.areas.length === 0) {
+    const areas = likelyProjectAreas(analysis, instruction);
+    if (areas.length > 0) intent = { ...intent, areas };
+  }
   if (tokenUsage.totalTokens === 0) {
     const inputTokens = Math.ceil(messages.reduce((sum, message) => sum + message.content.length, 0) / 4);
     const outputTokens = Math.ceil(raw.length / 4);

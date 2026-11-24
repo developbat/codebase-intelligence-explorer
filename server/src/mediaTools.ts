@@ -151,3 +151,84 @@ export async function compressVideo(
     command: `ffmpeg -i "${source.relative}" -vf "scale='min(${maxWidth},iw)':-2" -crf ${crf} -preset ${preset} "${outputRelative}"`,
   };
 }
+
+
+export interface VideoTransformInput {
+  path: string;
+  outputPath?: string;
+  action: "trim" | "convert" | "resize" | "extract-audio";
+  startSeconds?: number;
+  endSeconds?: number;
+  format?: "mp4" | "webm" | "mov" | "gif" | "mp3" | "m4a";
+  maxWidth?: number;
+}
+
+export interface VideoTransformResult {
+  input: VideoInfo;
+  output: VideoInfo;
+  command: string;
+}
+
+export async function transformVideo(
+  rootPath: string,
+  input: VideoTransformInput,
+): Promise<VideoTransformResult> {
+  const source = await resolveExisting(rootPath, input.path);
+  const before = await probeVideo(source.absolute, source.relative);
+  const base = source.relative.replace(/\.[^.]+$/, "");
+  const format =
+    input.format ??
+    (input.action === "extract-audio"
+      ? "mp3"
+      : input.action === "resize" || input.action === "trim"
+        ? "mp4"
+        : "mp4");
+  const outputRelative = safeRelative(
+    input.outputPath || `${base}-${input.action}.${format}`,
+  );
+  const outputAbsolute = path.resolve(rootPath, outputRelative);
+  if (!isWithin(rootPath, outputAbsolute)) throw new Error("Output path is outside the project.");
+  if (outputAbsolute === source.absolute) throw new Error("Output path must differ from the input path.");
+  await fs.mkdir(path.dirname(outputAbsolute), { recursive: true });
+
+  const args: string[] = ["-y"];
+  if (input.action === "trim") {
+    const start = Math.max(0, Number(input.startSeconds) || 0);
+    const end = Math.max(start + 0.1, Number(input.endSeconds) || (before.durationSeconds ?? start + 5));
+    args.push("-ss", String(start), "-to", String(end));
+  }
+  args.push("-i", source.absolute);
+
+  if (input.action === "extract-audio") {
+    args.push("-vn");
+    if (format === "m4a") args.push("-c:a", "aac", "-b:a", "192k");
+    else args.push("-c:a", "libmp3lame", "-q:a", "4");
+  } else if (format === "gif") {
+    const width = Math.max(160, Math.min(1280, Number(input.maxWidth) || 640));
+    args.push("-vf", `fps=12,scale=${width}:-1:flags=lanczos`);
+  } else if (format === "webm") {
+    args.push("-c:v", "libvpx-vp9", "-crf", "32", "-b:v", "0", "-c:a", "libopus");
+  } else {
+    const width = Math.max(160, Math.min(7680, Number(input.maxWidth) || 0));
+    if (input.action === "resize" || width > 0) {
+      args.push("-vf", `scale='min(${width || 1920},iw)':-2`);
+    }
+    args.push("-c:v", "libx264", "-crf", "23", "-preset", "medium");
+    if (format === "mp4" || format === "mov") args.push("-c:a", "aac", "-b:a", "160k");
+    if (format === "mp4") args.push("-movflags", "+faststart");
+  }
+  args.push(outputAbsolute);
+
+  const command = `ffmpeg ${args
+    .map((value) => (/\s/.test(value) ? `"${value}"` : value))
+    .join(" ")}`;
+  await execFileAsync("ffmpeg", args, {
+    timeout: COMPRESS_TIMEOUT_MS,
+    maxBuffer: 8 * 1024 * 1024,
+  }).catch((error: unknown) => {
+    const message = error instanceof Error ? error.message : "Video transform failed.";
+    throw new Error(`ffmpeg failed: ${message.slice(-1_200)}`);
+  });
+  const after = await probeVideo(outputAbsolute, path.relative(rootPath, outputAbsolute));
+  return { input: before, output: after, command };
+}

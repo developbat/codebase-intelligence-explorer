@@ -10,6 +10,7 @@ import {
   GitBranch,
   GitCommitHorizontal,
   GitCompareArrows,
+  Image as ImageIcon,
   Loader2,
   Lock,
   MessageSquare,
@@ -38,13 +39,14 @@ import { ShowcaseDemo, type ShowcaseActions } from "./components/ShowcaseDemo";
 import { BusinessFlowPanel } from "./components/BusinessFlowPanel";
 import { TourButton } from "./components/TourButton";
 import { IndexStatusBadge } from "./components/IndexStatusBadge";
-import type { SettingsTab } from "./components/SettingsScreen";
+import { SettingsScreen, type SettingsTab } from "./components/SettingsScreen";
 import type { AiSettingsPublic } from "../../shared/ai";
 import { buildViewGraph, findDataFlowStart, type CommitHighlight, type ViewMode } from "./lib/viewGraph";
 import { build3DGraph } from "./lib/threeGraph";
 import { formatNumber } from "./lib/constants";
 import { useI18n } from "./i18n";
 import { activeProvider } from "./lib/ai";
+import { updateStudioPrefs, useStudioPrefs } from "./lib/prefs";
 import type { GitChangedFile, GitCommit, GraphNode, ProjectTemplateId } from "../../shared/types";
 
 const LAST_PROJECT_KEY = "cie:last-project";
@@ -52,6 +54,15 @@ const LAST_PATH_KEY = "cie:last-path";
 const Universe3D = lazy(() => import("./components/Universe3D"));
 const CodeStudio = lazy(() =>
   import("./components/CodeStudio").then((module) => ({ default: module.CodeStudio })),
+);
+const ChatStudio = lazy(() =>
+  import("./components/ChatStudio").then((module) => ({ default: module.ChatStudio })),
+);
+const ImageStudio = lazy(() =>
+  import("./components/ImageStudio").then((module) => ({ default: module.ImageStudio })),
+);
+const VideoStudio = lazy(() =>
+  import("./components/VideoStudio").then((module) => ({ default: module.VideoStudio })),
 );
 
 const MODE_LABEL: Record<ViewMode, string> = {
@@ -96,9 +107,12 @@ export default function App() {
   const { t, tn, locale, localeInfo, locales, setLocale } = useI18n();
   const analysisSteps = ANALYSIS_STEP_KEYS.map((key) => t(key));
   const [logoVersion] = useState(() => Date.now().toString(36));
-  const [product, setProduct] = useState<"intelligence" | "studio">(() =>
-    localStorage.getItem("cie:product") === "studio" ? "studio" : "intelligence",
-  );
+  const [product, setProduct] = useState<"intelligence" | "studio" | "chat" | "image" | "video">(() => {
+    const stored = localStorage.getItem("cie:product");
+    return stored === "studio" || stored === "chat" || stored === "image" || stored === "video"
+      ? stored
+      : "intelligence";
+  });
 
   useEffect(() => {
     for (const link of document.querySelectorAll<HTMLLinkElement>('link[rel="icon"], link[rel="apple-touch-icon"]')) {
@@ -122,10 +136,12 @@ export default function App() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [studioInitialPrompt, setStudioInitialPrompt] = useState("");
   const [studioAutoRunPrompt, setStudioAutoRunPrompt] = useState(false);
-  const [settingsRequest, setSettingsRequest] = useState<{
-    tab: SettingsTab;
-    nonce: number;
-  } | null>(null);
+  const prefs = useStudioPrefs();
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsTab, setSettingsTab] = useState<SettingsTab>(
+    () => (localStorage.getItem("cie:settings-tab") as SettingsTab | null) ?? "general",
+  );
+  const [settingsModelsAdd, setSettingsModelsAdd] = useState(false);
   const [gitStatus, setGitStatus] = useState<GitStatus | null>(null);
   const [changeReport, setChangeReport] = useState<ChangeReport | null>(null);
   const [gitLoading, setGitLoading] = useState(false);
@@ -554,7 +570,7 @@ export default function App() {
     setInspectorOpen(true);
   }
 
-  function changeProduct(next: "intelligence" | "studio") {
+  function changeProduct(next: "intelligence" | "studio" | "chat" | "image" | "video") {
     setProduct(next);
     if (next === "studio") {
       setShowcaseOpen(false);
@@ -795,6 +811,30 @@ export default function App() {
             <Code2 size={13} />
             <span>{t("Code Studio")}</span>
           </button>
+          <button
+            className={product === "chat" ? "is-active" : ""}
+            onClick={() => changeProduct("chat")}
+            title={t("Chat Studio")}
+          >
+            <MessageSquare size={13} />
+            <span>{t("Chat Studio")}</span>
+          </button>
+          <button
+            className={product === "image" ? "is-active" : ""}
+            onClick={() => changeProduct("image")}
+            title={t("Image Studio")}
+          >
+            <ImageIcon size={13} />
+            <span>{t("Image Studio")}</span>
+          </button>
+          <button
+            className={product === "video" ? "is-active" : ""}
+            onClick={() => changeProduct("video")}
+            title={t("Video Studio")}
+          >
+            <Clapperboard size={13} />
+            <span>{t("Video Studio")}</span>
+          </button>
         </div>
 
         <div className="breadcrumbs">
@@ -803,6 +843,24 @@ export default function App() {
               <Code2 size={12} className="breadcrumb-sep" />
               <span className="is-current">{analysis?.projectName ?? t("Code Studio")}</span>
               <span className="studio-top-pill">{t("Write mode")}</span>
+            </span>
+          ) : product === "chat" ? (
+            <span className="breadcrumb-item">
+              <MessageSquare size={12} className="breadcrumb-sep" />
+              <span className="is-current">{t("Chat Studio")}</span>
+              <span className="studio-top-pill">{t("No code edits")}</span>
+            </span>
+          ) : product === "image" ? (
+            <span className="breadcrumb-item">
+              <ImageIcon size={12} className="breadcrumb-sep" />
+              <span className="is-current">{t("Image Studio")}</span>
+              <span className="studio-top-pill">{t("Free generator")}</span>
+            </span>
+          ) : product === "video" ? (
+            <span className="breadcrumb-item">
+              <Clapperboard size={12} className="breadcrumb-sep" />
+              <span className="is-current">{t("Video Studio")}</span>
+              <span className="studio-top-pill">{t("Model required")}</span>
             </span>
           ) : (
             <>
@@ -889,14 +947,12 @@ export default function App() {
           <button
             className="ghost-button topbar-settings-button"
             onClick={() => {
-              if (!analysis) return;
-              changeProduct("studio");
-              setSettingsRequest({
-                tab: (localStorage.getItem("cie:settings-tab") as SettingsTab | null) ?? "general",
-                nonce: Date.now(),
-              });
+              setSettingsTab(
+                (localStorage.getItem("cie:settings-tab") as SettingsTab | null) ?? "general",
+              );
+              setSettingsModelsAdd(false);
+              setSettingsOpen(true);
             }}
-            disabled={!analysis}
             title={t("Settings")}
             aria-label={t("Settings")}
           >
@@ -922,8 +978,11 @@ export default function App() {
             onSettingsSaved={setAiSettings}
             onRescan={rescan}
             onOpenProject={() => setDialogOpen(true)}
-            settingsRequest={settingsRequest}
-            onSettingsRequestConsumed={() => setSettingsRequest(null)}
+            onOpenSettings={(tab, addModel) => {
+              setSettingsTab(tab);
+              setSettingsModelsAdd(addModel === true);
+              setSettingsOpen(true);
+            }}
             onLoadRecent={loadRecent}
             onRemoveRecent={removeRecent}
             initialPrompt={studioInitialPrompt}
@@ -931,6 +990,93 @@ export default function App() {
             onInitialPromptConsumed={() => {
               setStudioInitialPrompt("");
               setStudioAutoRunPrompt(false);
+            }}
+          />
+        </Suspense>
+      ) : product === "chat" ? (
+        <Suspense
+          fallback={
+            <div className="app-loading">
+              <Loader2 size={20} className="spin" />
+              <span>{t("Preparing Chat Studio…")}</span>
+            </div>
+          }
+        >
+          <ChatStudio
+            aiSettings={aiSettings}
+            projectId={analysis?.id}
+            analysis={analysis}
+            recent={recent}
+            onLoadRecent={loadRecent}
+            onRemoveRecent={removeRecent}
+            onOpenProject={() => setDialogOpen(true)}
+            onOpenCodeStudio={() => changeProduct("studio")}
+            onOpenSettings={() => {
+              setSettingsTab("general");
+              setSettingsModelsAdd(false);
+              setSettingsOpen(true);
+            }}
+            onOpenReports={() => {
+              setSettingsTab("reports");
+              setSettingsOpen(true);
+            }}
+          />
+        </Suspense>
+      ) : product === "image" ? (
+        <Suspense
+          fallback={
+            <div className="app-loading">
+              <Loader2 size={20} className="spin" />
+              <span>{t("Preparing Image Studio…")}</span>
+            </div>
+          }
+        >
+          <ImageStudio
+            aiSettings={aiSettings}
+            projectId={analysis?.id}
+            analysis={analysis}
+            recent={recent}
+            onLoadRecent={loadRecent}
+            onRemoveRecent={removeRecent}
+            onOpenProject={() => setDialogOpen(true)}
+            onOpenCodeStudio={() => changeProduct("studio")}
+            onOpenSettings={() => {
+              setSettingsTab("general");
+              setSettingsOpen(true);
+            }}
+            onOpenReports={() => {
+              setSettingsTab("reports");
+              setSettingsOpen(true);
+            }}
+          />
+        </Suspense>
+      ) : product === "video" ? (
+        <Suspense
+          fallback={
+            <div className="app-loading">
+              <Loader2 size={20} className="spin" />
+              <span>{t("Preparing Video Studio…")}</span>
+            </div>
+          }
+        >
+          <VideoStudio
+            aiSettings={aiSettings}
+            projectId={analysis?.id}
+            analysis={analysis}
+            recent={recent}
+            onLoadRecent={loadRecent}
+            onRemoveRecent={removeRecent}
+            onOpenProject={() => setDialogOpen(true)}
+            onOpenCodeStudio={() => changeProduct("studio")}
+            onSettingsSaved={setAiSettings}
+            onOpenSettings={() => {
+              setSettingsTab("general");
+              setSettingsModelsAdd(false);
+              setSettingsOpen(true);
+            }}
+            onOpenReports={() => {
+              setSettingsTab("reports");
+              setSettingsOpen(true);
             }}
           />
         </Suspense>
@@ -1256,9 +1402,49 @@ export default function App() {
       </div>
       )}
 
+      <SettingsScreen
+        open={settingsOpen}
+        initialTab={settingsTab}
+        modelsAddMode={settingsModelsAdd}
+        projectId={analysis?.id}
+        projectName={analysis?.projectName}
+        projectRoot={analysis?.rootPath}
+        aiSettings={aiSettings}
+        onSettingsSaved={setAiSettings}
+        agentAllowWrite={prefs.agentAllowWrite}
+        onAgentAllowWriteChange={(value) => updateStudioPrefs({ agentAllowWrite: value })}
+        agentAllowCommands={prefs.agentAllowCommands}
+        onAgentAllowCommandsChange={(value) => updateStudioPrefs({ agentAllowCommands: value })}
+        autoFormat={prefs.autoFormat}
+        onAutoFormatChange={(value) => updateStudioPrefs({ autoFormat: value })}
+        autoSyntax={prefs.autoSyntax}
+        onAutoSyntaxChange={(value) => updateStudioPrefs({ autoSyntax: value })}
+        autoCheck={prefs.autoCheck}
+        onAutoCheckChange={(value) => updateStudioPrefs({ autoCheck: value })}
+        testTimeout={prefs.testTimeout}
+        onTestTimeoutChange={(value) => updateStudioPrefs({ testTimeout: value })}
+        onRescan={() => void rescan()}
+        onClose={() => setSettingsOpen(false)}
+      />
+
       <footer className="statusbar">
         <span className="status-left">
-          {analysis ? (
+          {product === "chat" ? (
+            <>
+              <span className="status-dot" />
+              {t("Chat Studio")} · {t("No code edits")}
+            </>
+          ) : product === "image" ? (
+            <>
+              <span className="status-dot" />
+              {t("Image Studio")} · {t("Free generator")}
+            </>
+          ) : product === "video" ? (
+            <>
+              <span className="status-dot" />
+              {t("Video Studio")} · {t("Model required")}
+            </>
+          ) : analysis ? (
             product === "studio" ? (
               <>
                 <span className="status-dot" />

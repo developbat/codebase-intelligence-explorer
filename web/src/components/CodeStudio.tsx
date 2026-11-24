@@ -94,6 +94,7 @@ import {
   GripVertical,
   History,
   Info,
+  Library,
   ListChecks,
   Loader2,
   Maximize2,
@@ -139,11 +140,14 @@ import { ProjectSwitcher } from "./ProjectSwitcher";
 import { MarkdownText } from "./MarkdownText";
 import { formatTokens } from "./UsageDialog";
 import { formatUsd } from "../../../shared/pricing";
+import { modelSupportsStudio } from "../../../shared/modelCapabilities";
+import { updateStudioPrefs, useStudioPrefs } from "../lib/prefs";
 import { AgentPermissionDialog } from "./AgentPermissionDialog";
-import { SettingsScreen, type SettingsTab } from "./SettingsScreen";
+import type { SettingsTab } from "./SettingsScreen";
 import { AgentPlanCard } from "./AgentPlanCard";
 import { ShellTerminalView } from "./ShellTerminalView";
 import { TaskQueueCard } from "./TaskQueueCard";
+import { LibraryPicker } from "./LibraryPicker";
 import type { ProjectTaskQueue } from "../../../shared/tasks";
 import type { ClarificationRequest, IntentAnalysis } from "../../../shared/intent";
 import type { BrowserCheckResult } from "../../../shared/browserCheck";
@@ -193,8 +197,7 @@ interface CodeStudioProps {
   onSettingsSaved: (settings: AiSettingsPublic) => void;
   onRescan: () => void;
   onOpenProject?: () => void;
-  settingsRequest?: { tab: SettingsTab; nonce: number } | null;
-  onSettingsRequestConsumed?: () => void;
+  onOpenSettings?: (tab: SettingsTab, addModel?: boolean) => void;
   onLoadRecent?: (project: RecentProject) => void;
   onRemoveRecent?: (id: string) => void;
   initialPrompt?: string;
@@ -305,6 +308,62 @@ function languageExtension(filePath: string) {
 function agentStepTarget(step: AiAgentStep): string {
   const value = step.args.path ?? step.args.query ?? step.args.command;
   return typeof value === "string" ? value : "";
+}
+
+const MOOD_ACTIONS: Record<string, string> = {
+  search_code: "searching",
+  find_in_file: "searching",
+  find_symbols: "searching",
+  count_matches: "searching",
+  project_search: "searching",
+  search_document: "searching",
+  search_notes: "searching",
+  search_conversations: "searching",
+  list_items: "searching",
+  read_file: "reading",
+  read_symbol: "reading",
+  read_document: "reading",
+  read_note: "reading",
+  list_files: "reading",
+  json_query: "reading",
+  sqlite_query: "reading",
+  csv_query: "reading",
+  git_blame: "reading",
+  git_info: "reading",
+  diagnostics: "reading",
+  lsp_hover: "reading",
+  lsp_completion: "reading",
+  write_file: "editing",
+  replace_in_file: "editing",
+  replace_many: "editing",
+  append_text: "editing",
+  rename_path: "editing",
+  delete_file: "editing",
+  format_file: "editing",
+  placeholder_asset: "editing",
+  transform_image: "editing",
+  convert_document: "editing",
+  run_command: "running",
+  install_toolchain: "running",
+  run_project_tool: "running",
+  run_skill_script: "running",
+  compress_video: "running",
+  browser_check: "testing",
+  run_test_scenario: "testing",
+  game_check: "testing",
+  graphic_check: "testing",
+  mobile_check: "testing",
+  mobile_screenshot: "testing",
+  mobile_logs: "testing",
+  install_mobile_app: "testing",
+  launch_mobile_app: "testing",
+  boot_mobile_device: "testing",
+  open_mobile_url: "testing",
+  finish: "finishing",
+};
+
+function agentMoodForAction(action: string): string {
+  return MOOD_ACTIONS[action] ?? (action === "invalid" ? "thinking" : "working");
 }
 
 const FILE_TEMPLATES = [
@@ -427,7 +486,7 @@ function StudioTree({
 
 function CollapsibleAnswer({ value }: { value: string }) {
   const { t } = useI18n();
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(true);
   const long = value.length > 420 || value.split("\n").filter((line) => line.trim()).length > 5;
   if (!long) return <MarkdownText value={value} />;
   return (
@@ -544,8 +603,7 @@ export function CodeStudio({
   onSettingsSaved,
   onRescan,
   onOpenProject,
-  settingsRequest,
-  onSettingsRequestConsumed,
+  onOpenSettings,
   onLoadRecent,
   onRemoveRecent,
   initialPrompt,
@@ -554,6 +612,7 @@ export function CodeStudio({
 }: CodeStudioProps) {
   const { t, locale } = useI18n();
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
+  const [libraryOpen, setLibraryOpen] = useState(false);
   const [intentOpenIndex, setIntentOpenIndex] = useState<number | null>(null);
   const [pendingContinue, setPendingContinue] = useState<{ goal: string } | null>(null);
   const [chainBusy, setChainBusy] = useState(false);
@@ -575,9 +634,12 @@ export function CodeStudio({
   const modelChain = aiSettings?.fallback?.chain ?? [];
   // Settings are the single source of truth: the first selected model is the
   // active model, then the saved default, then the first configured provider.
-  const settingsActive = modelChain[0]
-    ? { provider: modelChain[0].provider as AiProviderId, model: modelChain[0].model }
-    : aiSettings
+  const codeChain = modelChain.filter((item) =>
+    modelSupportsStudio("code", item.provider, item.model),
+  );
+  const settingsActive = codeChain[0]
+    ? { provider: codeChain[0].provider as AiProviderId, model: codeChain[0].model }
+    : aiSettings && modelSupportsStudio("code", aiSettings.defaultProvider, aiSettings.defaultModel)
       ? { provider: aiSettings.defaultProvider, model: aiSettings.defaultModel }
       : null;
   const codeModel =
@@ -647,20 +709,19 @@ export function CodeStudio({
   const [testResult, setTestResult] = useState<TestRunResult | null>(null);
   const [testOutput, setTestOutput] = useState("");
   const testAbortRef = useRef<AbortController | null>(null);
-  const [testTimeout, setTestTimeout] = useState(
-    () => Number(localStorage.getItem("cie:test-timeout")) || 300,
-  );
+  const prefs = useStudioPrefs();
+  const testTimeout = prefs.testTimeout;
+  const setTestTimeout = (value: number) => updateStudioPrefs({ testTimeout: value });
   const [testGenInstruction, setTestGenInstruction] = useState("");
   const [testGenBusy, setTestGenBusy] = useState(false);
   const [testGenResult, setTestGenResult] = useState<AiTestGenerationResult | null>(null);
   const agentAbortRef = useRef<AbortController | null>(null);
   const agentStopRequestedRef = useRef(false);
-  const [agentAllowWrite, setAgentAllowWrite] = useState(() =>
-    localStorage.getItem("cie:agent-write") !== "off",
-  );
-  const [agentAllowCommands, setAgentAllowCommands] = useState(() =>
-    localStorage.getItem("cie:agent-commands") === "on",
-  );
+  const agentAllowWrite = prefs.agentAllowWrite;
+  const setAgentAllowWrite = (value: boolean) => updateStudioPrefs({ agentAllowWrite: value });
+  const agentAllowCommands = prefs.agentAllowCommands;
+  const setAgentAllowCommands = (value: boolean) =>
+    updateStudioPrefs({ agentAllowCommands: value });
   const [permissionQueue, setPermissionQueue] = useState<AiAgentPermissionRequest[]>([]);
   const [permissionBusy, setPermissionBusy] = useState(false);
   const permissionRequest = permissionQueue[0] ?? null;
@@ -729,27 +790,18 @@ export function CodeStudio({
   const [previewFullscreen, setPreviewFullscreen] = useState(false);
   const [rightTab, setRightTab] = useState<"preview" | string>("preview");
   const [consoleOpen, setConsoleOpen] = useState(false);
-  const [settingsOpen, setSettingsOpen] = useState(false);
-
-  const [settingsTab, setSettingsTab] = useState<SettingsTab>("general");
-
-  useEffect(() => {
-    if (!settingsRequest) return;
-    setSettingsTab(settingsRequest.tab);
-    setSettingsOpen(true);
-    onSettingsRequestConsumed?.();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [settingsRequest?.nonce]);
-  const [settingsModelsAdd, setSettingsModelsAdd] = useState(false);
   const [indexStatus, setIndexStatus] = useState<ProjectIndexStatus | null>(null);
   const [environmentAlert, setEnvironmentAlert] = useState<{ names: string[] } | null>(null);
   const [checkCommand, setCheckCommand] = useState("");
   const [checkOutput, setCheckOutput] = useState("");
   const [checkBusy, setCheckBusy] = useState(false);
   const [checkResult, setCheckResult] = useState<RunCommandResult | null>(null);
-  const [autoCheck, setAutoCheck] = useState(() => localStorage.getItem("cie:auto-check") === "on");
-  const [autoSyntax, setAutoSyntax] = useState(() => localStorage.getItem("cie:auto-syntax") !== "off");
-  const [autoFormat, setAutoFormat] = useState(() => localStorage.getItem("cie:auto-format") === "on");
+  const autoCheck = prefs.autoCheck;
+  const setAutoCheck = (value: boolean) => updateStudioPrefs({ autoCheck: value });
+  const autoSyntax = prefs.autoSyntax;
+  const setAutoSyntax = (value: boolean) => updateStudioPrefs({ autoSyntax: value });
+  const autoFormat = prefs.autoFormat;
+  const setAutoFormat = (value: boolean) => updateStudioPrefs({ autoFormat: value });
   const [syntaxBusy, setSyntaxBusy] = useState(false);
   const [duplication, setDuplication] = useState<DuplicationReport | null>(null);
   const [duplicationBusy, setDuplicationBusy] = useState(false);
@@ -914,17 +966,6 @@ export function CodeStudio({
   }, [pendingLine, activeFile]);
 
   useEffect(() => {
-    localStorage.setItem("cie:test-timeout", String(testTimeout));
-  }, [testTimeout]);
-
-  useEffect(() => {
-    localStorage.setItem("cie:agent-write", agentAllowWrite ? "on" : "off");
-  }, [agentAllowWrite]);
-
-  useEffect(() => {
-    localStorage.setItem("cie:agent-commands", agentAllowCommands ? "on" : "off");
-  }, [agentAllowCommands]);
-  useEffect(() => {
     void api
       .toolchains(false, analysis.id)
       .then((report) => {
@@ -961,18 +1002,6 @@ export function CodeStudio({
         : studioMode === "research"
           ? t("Research the web, a document, or this project…")
           : t("Ask, edit, run, or build something in this project…");
-
-  useEffect(() => {
-    localStorage.setItem("cie:auto-check", autoCheck ? "on" : "off");
-  }, [autoCheck]);
-
-  useEffect(() => {
-    localStorage.setItem("cie:auto-syntax", autoSyntax ? "on" : "off");
-  }, [autoSyntax]);
-
-  useEffect(() => {
-    localStorage.setItem("cie:auto-format", autoFormat ? "on" : "off");
-  }, [autoFormat]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1162,6 +1191,7 @@ export function CodeStudio({
         "",
     };
     if (!next.model) return;
+    if (!modelSupportsStudio("code", next.provider, next.model)) return;
     setChainBusy(true);
     try {
       const rest = modelChain.filter(
@@ -1240,7 +1270,9 @@ export function CodeStudio({
     setModelCatalogProvider(provider);
     try {
       const response = await api.ai.models(provider, refresh);
-      setModelCatalog(response.models);
+      setModelCatalog(
+        response.models.filter((model) => modelSupportsStudio("code", provider, model)),
+      );
     } catch {
       setModelCatalog([]);
     } finally {
@@ -1324,6 +1356,13 @@ export function CodeStudio({
   const liveActivity = (() => {
     if (!chatBusy) return null;
     const receiving = liveLog?.label.startsWith("Receiving response") === true;
+    if (liveStep && liveStep.ok === false && !receiving) {
+      return {
+        label: t("Retrying after a tool error…"),
+        target: agentStepTarget(liveStep),
+        mood: "error",
+      };
+    }
     if (liveLog && (!liveStep || receiving || liveLog.level === "model")) {
       const isModel = liveLog.level === "model";
       return {
@@ -1333,10 +1372,22 @@ export function CodeStudio({
             ? liveLog.detail ?? ""
             : `${t("Waiting for model response")} · ${waitSeconds}s`
           : liveLog.detail ?? "",
+        mood:
+          liveLog.level === "error"
+            ? "error"
+            : receiving
+              ? "writing"
+              : isModel
+                ? "thinking"
+                : "working",
       };
     }
     if (!liveStep) {
-      return { label: t("Understanding your request…"), target: `${waitSeconds}s` };
+      return {
+        label: t("Understanding your request…"),
+        target: "",
+        mood: "thinking",
+      };
     }
     const target = agentStepTarget(liveStep);
     const labels: Record<string, string> = {
@@ -1356,7 +1407,11 @@ export function CodeStudio({
       finish: t("Writing the answer…"),
       invalid: t("Thinking…"),
     };
-    return { label: labels[liveStep.action] ?? t("Thinking…"), target };
+    return {
+      label: labels[liveStep.action] ?? t("Thinking…"),
+      target,
+      mood: liveStep.ok === false ? "error" : agentMoodForAction(liveStep.action),
+    };
   })();
 
   useEffect(() => {
@@ -1492,9 +1547,7 @@ export function CodeStudio({
   }, [consoleOpen, bottomTab, analysis.id]);
 
   function openSettings(tab: SettingsTab, addModel = false) {
-    setSettingsTab(tab);
-    setSettingsModelsAdd(addModel);
-    setSettingsOpen(true);
+    onOpenSettings?.(tab, addModel);
   }
 
   async function openFile(filePath: string, force = false) {
@@ -2460,6 +2513,7 @@ export function CodeStudio({
       ? `${baseText}${baseText ? "\n\n" : ""}Ek dosya: ${attachment.path}`
       : baseText;
     const userMessage = { role: "user" as const, content: text };
+    const sentAttachment = attachment;
     let history = chatMessages.map((message) => ({ role: message.role, content: message.content }));
     if (appendUser) {
       setChatMessages((current) => [...current, userMessage]);
@@ -2490,13 +2544,30 @@ export function CodeStudio({
     const controller = new AbortController();
     agentAbortRef.current = controller;
     const liveSteps: AiAgentStep[] = [];
+    let runStarted = false;
+    let failedBeforeStart = false;
+    const restoreUnsentMessage = () => {
+      if (appendUser) {
+        setChatMessages((current) => {
+          const last = current[current.length - 1];
+          return last?.role === "user" && last.content === text ? current.slice(0, -1) : current;
+        });
+        setChatInput(baseText);
+        if (sentAttachment) setAttachment(sentAttachment);
+      }
+      setChatRetryQuestion(null);
+    };
     const holder: { result: AiAgentResult | null } = { result: null };
     const useTaskLoop = true;
     setTaskQueue(null);
     setDismissedQueueAt(null);
 
     const handleEvent = (event: AiAgentEvent) => {
+      if (event.type === "intent" || event.type === "plan" || event.type === "start") {
+        runStarted = true;
+      }
       if (event.type === "step") {
+        runStarted = true;
         liveSteps.push(event.step);
         setChatLiveSteps([...liveSteps]);
         appendAgentTerminal(event.step);
@@ -2509,17 +2580,21 @@ export function CodeStudio({
       } else if (event.type === "intent") {
         lastIntentRef.current = event.intent;
       } else if (event.type === "clarify") {
+        runStarted = true;
         setClarification({ request: event.request, original: text });
       } else if (event.type === "model") {
         setModelNotice({ from: event.from, to: event.to, reason: event.reason });
       } else if (event.type === "task") {
+        runStarted = true;
         setTaskQueue(event.queue);
       } else if (event.type === "token") {
+        runStarted = true;
         setChatLiveAnswer((current) => current + event.text);
       } else if (event.type === "done") {
         holder.result = event.result;
         if (event.result.taskQueue) setTaskQueue(event.result.taskQueue);
       } else if (event.type === "error") {
+        if (!runStarted) failedBeforeStart = true;
         setChatError(event.message);
       }
     };
@@ -2591,10 +2666,18 @@ export function CodeStudio({
         );
       } else {
         setChatError(requestError instanceof Error ? requestError.message : t("Project chat failed"));
-        setChatRetryQuestion(text);
+        if (!runStarted) {
+          restoreUnsentMessage();
+        } else {
+          setChatRetryQuestion(text);
+        }
       }
     } finally {
       agentAbortRef.current = null;
+    }
+
+    if (!holder.result && failedBeforeStart) {
+      restoreUnsentMessage();
     }
 
     if (holder.result) {
@@ -2913,6 +2996,14 @@ export function CodeStudio({
                   if (file) void uploadAsset(file);
                 }}
               />
+              <button
+                className="studio-tree-icon"
+                onClick={() => setLibraryOpen(true)}
+                title={t("Asset library")}
+                aria-label={t("Asset library")}
+              >
+                <Library size={11} />
+              </button>
               <button onClick={() => setExpanded(new Set(collectFolderPaths(tree, 50)))}>
                 {t("Expand all")}
               </button>
@@ -3440,6 +3531,17 @@ export function CodeStudio({
                 >
                   {t("Main entry points")}
                 </button>
+                <button
+                  onClick={() =>
+                    void askProject(
+                      t(
+                        "Diagnose why the requested behavior is not working. Inspect the real entry points and asset wiring, run browser_check or a saved test scenario, identify the root cause with file:line evidence, then apply the minimal fix and verify it.",
+                      ),
+                    )
+                  }
+                >
+                  <AlertTriangle size={11} /> {t("Diagnose")}
+                </button>
               </div>
             </div>
           ) : (
@@ -3865,20 +3967,59 @@ export function CodeStudio({
         })()}
 
         {chatBusy ? (
-          <div className="studio-run-status" role="status" aria-live="polite">
-            <div className="studio-run-status-orb">
+          <div
+            className={`studio-run-status is-${liveActivity?.mood ?? "thinking"}`}
+            data-mood={liveActivity?.mood ?? "thinking"}
+            role="status"
+            aria-live="polite"
+          >
+            <div
+              key={`orb-${liveActivity?.mood ?? "thinking"}`}
+              className="studio-run-status-orb"
+              aria-hidden="true"
+            >
               <span />
               <span />
               <span />
-              <Bot size={13} />
+              <i className="studio-run-status-spark" />
+              <Bot size={15} />
             </div>
             <div className="studio-run-status-body">
-              <strong>{liveActivity?.label ?? t("Thinking…")}</strong>
-              <small>
-                {active ? `${active.provider}/${active.model}` : ""}
-                {chatLiveSteps.length > 0 ? ` · ${chatLiveSteps.length} ${t("steps")}` : ""}
-                {liveTokens > 0 ? ` · ${formatTokens(liveTokens)} tok` : ""}
-                {liveActivity?.target ? ` · ${liveActivity.target}` : ""}
+              <strong
+                key={`label-${liveActivity?.label ?? "thinking"}`}
+                className="studio-run-status-label"
+              >
+                {liveActivity?.label ?? t("Thinking…")}
+              </strong>
+              <small className="studio-run-status-meta">
+                {active ? (
+                  <span className="run-chip is-model">
+                    <Server size={8} />
+                    {active.provider}/{active.model}
+                  </span>
+                ) : null}
+                {chatLiveSteps.length > 0 ? (
+                  <span key={`steps-${chatLiveSteps.length}`} className="run-chip is-steps">
+                    <ListChecks size={8} />
+                    {chatLiveSteps.length} {t("steps")}
+                  </span>
+                ) : null}
+                {liveTokens > 0 ? (
+                  <span key={`tokens-${Math.round(liveTokens / 500)}`} className="run-chip is-tokens">
+                    {formatTokens(liveTokens)} tok
+                  </span>
+                ) : null}
+                {liveActivity?.target ? (
+                  <span
+                    key={`target-${liveActivity.target}`}
+                    className="run-chip is-target"
+                    title={liveActivity.target}
+                  >
+                    <FileCode2 size={8} />
+                    <span>{liveActivity.target}</span>
+                  </span>
+                ) : null}
+                <span className="run-chip is-time">{waitSeconds}s</span>
               </small>
             </div>
             <div className="studio-run-status-bars" aria-hidden="true">
@@ -5342,34 +5483,21 @@ export function CodeStudio({
           </div>
         </div>
       ) : null}
+      <LibraryPicker
+        open={libraryOpen}
+        projectId={analysis.id}
+        mode="copy"
+        onClose={() => setLibraryOpen(false)}
+        onCopied={(path) => {
+          setLibraryOpen(false);
+          setMessage(t("Copied {path} into the project.", { path }));
+          void openFile(path);
+        }}
+      />
       <AgentPermissionDialog
         request={permissionRequest}
         busy={permissionBusy}
         onDecide={(decision) => void decidePermission(decision)}
-      />
-      <SettingsScreen
-        open={settingsOpen}
-        initialTab={settingsTab}
-        modelsAddMode={settingsModelsAdd}
-        projectId={analysis.id}
-        projectName={analysis.projectName}
-        projectRoot={analysis.rootPath}
-        aiSettings={aiSettings}
-        onSettingsSaved={onSettingsSaved}
-        agentAllowWrite={agentAllowWrite}
-        onAgentAllowWriteChange={setAgentAllowWrite}
-        agentAllowCommands={agentAllowCommands}
-        onAgentAllowCommandsChange={setAgentAllowCommands}
-        autoFormat={autoFormat}
-        onAutoFormatChange={setAutoFormat}
-        autoSyntax={autoSyntax}
-        onAutoSyntaxChange={setAutoSyntax}
-        autoCheck={autoCheck}
-        onAutoCheckChange={setAutoCheck}
-        testTimeout={testTimeout}
-        onTestTimeoutChange={setTestTimeout}
-        onRescan={onRescan}
-        onClose={() => setSettingsOpen(false)}
       />
     </div>
   );

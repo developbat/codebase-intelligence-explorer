@@ -6,8 +6,11 @@ export type BrowserCheckAction =
   | "expectValue"
   | "expectVisible"
   | "expectCount"
+  | "expectStable"
   | "waitForText"
+  | "waitForSelector"
   | "reload"
+  | "eval"
   | "storageGet";
 
 export interface BrowserCheckStep {
@@ -15,9 +18,15 @@ export interface BrowserCheckStep {
   selector?: string;
   value?: string;
   text?: string;
+  /** Expected substring of the page script result for an eval step. */
+  expectText?: string;
   key?: string;
   count?: number;
   timeoutMs?: number;
+  /** expectStable: how long to sample the element. Default 1000ms. */
+  durationMs?: number;
+  /** expectStable: allowed number of value changes during the sample. Default 0. */
+  maxChanges?: number;
 }
 
 export interface BrowserCheckOptions {

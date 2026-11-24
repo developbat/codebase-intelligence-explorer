@@ -14,18 +14,26 @@ import type {
   ProjectTaskQueue,
   ProjectTaskRole,
 } from "../../../shared/tasks";
-import { loadAnalysis } from "../store";
+import fs from "node:fs/promises";
+import path from "node:path";
+import { getDataDir, loadAnalysis } from "../store";
 import { readSourceFile } from "../editor";
 import { checkFileSyntax } from "../syntax";
 import {
+  appendAgentRunEvent,
+  appendLesson,
   appendTaskContext,
   createQueue,
   loadQueue,
+  emptyQueue,
   markTask,
   nextPendingTask,
+  saveAgentRun,
   saveQueue,
+  startAgentRunLive,
 } from "../tasks";
 import { chat, type ChatMessage } from "./providers";
+import { ensureProjectMap } from "../projectMap";
 import { recordUsage } from "./usage";
 import { getPublicSettings, resolveAgentRole, resolveProvider } from "./settings";
 import { pickAlternateAgentModel } from "./agents";
@@ -35,9 +43,12 @@ import {
   recordModelFallback,
 } from "./modelStats";
 import { estimateUsageCost } from "./pricing";
+import { removeIndexedPath } from "../indexer";
 import { formatUsd } from "../../../shared/pricing";
 import {
+  continuationFindings,
   looksLikePlanningText,
+  queryProjectSymbols,
   preferredVerificationCommand,
   reportsRemainingWork,
   runAgentTask,
@@ -138,20 +149,102 @@ Schema:
 {"tasks":[{"title":"short imperative title","detail":"exact work, files/areas if known","acceptance":"how to verify this task","effort":"simple|standard|hard"}]}
 Rules:
 - 2-8 tasks. Each task must be independently verifiable.
-- Order tasks so later tasks depend on earlier ones.
+- Split multi-feature goals: if the goal asks for several independent changes (add X, replace Y, change Z, check W), return one task per feature. Never put the whole goal in one task.
+- Each task must describe one behavior change with its own acceptance check. A task that says "and" for two unrelated features must be split.
+- Do not create tasks that only edit tests, scenarios, test hooks or verification scripts. Fold that work into the behavior task it verifies. A task must change runtime behavior or fix a bug.
+- Order tasks by dependency and value: correctness and item effects first, then spawn frequency, then visual/feedback polish.
+- Never create a task only to deduplicate or normalize existing definitions. Put the "do not re-add existing items" constraint in the relevant behavior task's acceptance instead.
 - Small mechanical edits are "simple"; normal implementation is "standard"; broad refactors/debugging are "hard".
-- Include a final verification task when tests, typecheck or build commands exist.
+- Fold verification into the last behavior task. Do not create a separate verification-only task; the executor runs the project's verification command itself.
 - Do not invent files that do not exist; inspect is allowed later by the executor.
+- Use the project map and goal-relevant symbols to name the correct file/function. If a symbol hint points to a file, use that file as the primary edit target. Prefer files loaded by the HTML entry or imported by it. Do not add runtime behavior to a file that is not loaded; verify an import before using an unreferenced file.
+- Do not invent cleanup/dedup tasks unless the project map or a concrete duplicate shows it is needed. Verify first.
 - The context notes in .cie/agent/context.md and .cie/agent/TASKS.md are for continuity; you may mention them.
+- Write task titles, details and acceptance in English. Keep quoted user text, file paths, function names and code identifiers unchanged.
+- Never return placeholder tasks such as "...", "TODO", "TBD" or "fill me". Every task must contain a real title, detail and acceptance.
 - Work in any programming language.`;
 
-function fallbackTasks(goal: string, verification?: string): ProjectTask[] {
+export function splitLargeGoal(goal: string, verification?: string): ProjectTask[] | null {
+  if (goal.length < 160) return null;
+  if (/```|\{\s*"|https?:\/\//.test(goal)) return null;
+  // Goals that contain constraints, verification or "do not re-add" rules are
+  // one instruction, not a list of independent features. Splitting them
+  // produces fragments like "zaten var olan itemleri yeniden ekleme" as tasks.
+  if (
+    /(?:yeniden ekleme|ekleme\b|bozma|kanıtla|doğrula|raporla|göster|listele|kullanılmıyorsa|zaten var|mevcut .{0,30}koru|sadece .{0,30}bakma)/i.test(
+      goal,
+    )
+  ) {
+    return null;
+  }
+  const sentences = goal
+    .split(/(?:[.!?;]+|\n+)\s*/)
+    .map((sentence) => sentence.trim())
+    .filter((sentence) => sentence.length >= 12 && sentence.split(/\s+/).length >= 4);
+  if (sentences.length < 3) return null;
+  const at = nowIso();
+  const tasks: ProjectTask[] = sentences.slice(0, 6).map((sentence, index) => ({
+    id: `task-${index + 1}`,
+    title: sentence.slice(0, 140),
+    detail: sentence,
+    acceptance: `The behavior described in "${sentence.slice(0, 100)}" works and the affected files are verified.`,
+    status: "pending",
+    effort: "standard",
+    role: "main",
+    dependsOn: index === 0 ? [] : [`task-${index}`],
+    attempts: 0,
+    changedFiles: [],
+    commands: [],
+    createdAt: at,
+    updatedAt: at,
+  }));
+  if (verification) {
+    tasks.push({
+      id: `task-${tasks.length + 1}`,
+      title: "Verify and fix",
+      detail: `Run ${verification}, inspect failures, and fix them without reverting completed work.`,
+      acceptance: "The verification command exits successfully.",
+      status: "pending",
+      effort: "standard",
+      role: "main",
+      dependsOn: [tasks[tasks.length - 1].id],
+      attempts: 0,
+      changedFiles: [],
+      commands: [],
+      verification: { command: verification },
+      createdAt: at,
+      updatedAt: at,
+    });
+  }
+  return tasks;
+}
+
+function fallbackTasks(
+  goal: string,
+  verification?: string,
+  context: { projectMap?: string; intent?: IntentAnalysis } = {},
+): ProjectTask[] {
+  const split = splitLargeGoal(goal, verification);
+  if (split) return split;
   const at = nowIso();
   const first: ProjectTask = {
     id: "task-1",
     title: goal.length > 90 ? `${goal.slice(0, 87)}…` : goal,
-    detail: goal,
-    acceptance: "The requested work is implemented and the relevant files are updated.",
+    detail: [
+      goal,
+      context.intent?.areas?.length ? `Likely areas: ${context.intent.areas.join(", ")}` : "",
+      context.projectMap
+        ? `Project map (use it to identify the exact file and symbols):\n${context.projectMap.slice(
+            0,
+            1_800,
+          )}`
+        : "",
+    ]
+      .filter(Boolean)
+      .join("\n\n")
+      .slice(0, 4_000),
+    acceptance:
+      "Implement the requested behavior in the files identified above, preserve existing working behavior, and verify the real page. Do not add duplicate items or test-only UI.",
     status: "pending",
     effort: "standard",
     role: "main",
@@ -182,6 +275,87 @@ function fallbackTasks(goal: string, verification?: string): ProjectTask[] {
     });
   }
   return tasks;
+}
+
+function isVerificationOnlyTask(task: ProjectTask): boolean {
+  const text = `${task.title} ${task.detail}`;
+  if (
+    /^(verify|verify and fix|final verification|run .*verification)/i.test(task.title.trim()) &&
+    /(tsc|typecheck|test|build|verify|check|eslint|lint|format)/i.test(task.detail) &&
+    !/[A-Za-z0-9_./-]+\.(?:js|mjs|cjs|jsx|ts|tsx|php|py|go|rs|java|kt|swift|dart|rb|html?|css|vue|svelte)/i.test(
+      task.detail,
+    )
+  ) {
+    return true;
+  }
+  const verify =
+    /\b(verify|verification|validate|runtime check|test the|run the test|doğrula|kontrol et|test et|çalışma zamanı)/i.test(
+      text,
+    );
+  const write =
+    /\b(add|fix|update|change|implement|create|remove|delete|rename|refactor|move|write|repair|wire|restore|ensure|enable|tune|adjust|enforce|report|expose|register|route|convert|support|extend|validate|return|reject|handle|respond)\b|düzelt|ekle|güncelle|değiştir|kaldır|sil|taşı|yaz|onar|bağla/i.test(
+      text,
+    );
+  return verify && !write;
+}
+
+function foldTrailingVerification(tasks: ProjectTask[]): ProjectTask[] {
+  if (tasks.length < 2) return tasks;
+  const last = tasks[tasks.length - 1];
+  if (!isVerificationOnlyTask(last)) return tasks;
+  const previous = tasks[tasks.length - 2];
+  const merged: ProjectTask = {
+    ...previous,
+    detail: `${previous.detail}\nVerification: ${last.detail}`.slice(0, 4_000),
+    acceptance: [previous.acceptance, last.acceptance].filter(Boolean).join(" ").slice(0, 1_000),
+    updatedAt: nowIso(),
+  };
+  return [...tasks.slice(0, -2), merged];
+}
+
+function isCleanupOnlyTask(task: ProjectTask): boolean {
+  const text = `${task.title} ${task.detail}`;
+  const cleanup = /(duplicate|dedup|tekilleştir|tekrarı engelle|normalleştir|normalize)/i.test(text);
+  const behavior =
+    /\b(add|fix|update|change|implement|create|increase|decrease|make|render|draw|spawn|collect|apply|speed|score|effect|repair|wire|restore|ensure|enable|tune|adjust|enforce|report|expose|register|route|convert|support|extend|validate|return|reject|handle|respond)\b|görünür|sıklık|etki|hız|puan|çiz|topla|uygula|artır|azalt|onar|bağla/i.test(
+      text,
+    );
+  return cleanup && !behavior;
+}
+
+function foldTrailingCleanup(tasks: ProjectTask[]): ProjectTask[] {
+  if (tasks.length < 2) return tasks;
+  const last = tasks[tasks.length - 1];
+  if (!isCleanupOnlyTask(last)) return tasks;
+  const previous = tasks[tasks.length - 2];
+  return [
+    ...tasks.slice(0, -2),
+    {
+      ...previous,
+      acceptance: [previous.acceptance, last.acceptance, "Do not introduce duplicate item definitions."]
+        .filter(Boolean)
+        .join(" ")
+        .slice(0, 1_000),
+      updatedAt: nowIso(),
+    },
+  ];
+}
+
+function usableRawPlannerTasks(raw: unknown): Record<string, unknown>[] | null {
+  const list = (raw as { tasks?: unknown } | undefined)?.tasks;
+  if (!Array.isArray(list) || list.length === 0) return null;
+  const placeholder = /^(?:\.{2,}|…|todo|tbd|placeholder|n\/a|fix me|fill me|<[^>]*>)$/i;
+  const usable: Record<string, unknown>[] = [];
+  for (const item of list) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) return null;
+    const value = item as Record<string, unknown>;
+    const title = typeof value.title === "string" ? value.title.trim() : "";
+    const detail = typeof value.detail === "string" ? value.detail.trim() : "";
+    if (title.length < 8 || detail.length < 12) return null;
+    if (placeholder.test(title) || placeholder.test(detail)) return null;
+    usable.push(value);
+  }
+  return usable.length === list.length ? usable : null;
 }
 
 function normalizeTasks(raw: unknown, goal: string, verification?: string): ProjectTask[] {
@@ -251,17 +425,41 @@ export async function planProjectTasks(
     replan?: boolean;
     intent?: IntentAnalysis;
     history?: { role: "user" | "assistant"; content: string }[];
+    /** Build a queue for inspection without writing it to the project. */
+    dryRun?: boolean;
   } = {},
 ): Promise<ProjectTaskQueue> {
   const analysis = await loadAnalysis(projectId);
   const verification = preferredVerificationCommand(analysis.tooling);
   const config = await resolveAgentRole("planner");
+  const projectMap = await ensureProjectMap(analysis).catch(() => "");
+  const goalTokens = [...new Set((goal.toLowerCase().match(/[a-z0-9_]{3,}/g) ?? []))].filter(
+    (token) => !["the", "and", "for", "with", "add", "fix", "make", "get", "set", "use", "from", "this", "that", "var", "let", "const"].includes(token),
+  );
+  const goalFiles = analysis.files
+    .map((file) => file.path)
+    .filter((file) => goalTokens.some((token) => file.toLowerCase().includes(token)))
+    .slice(0, 12);
+  const allFiles = analysis.files.map((file) => file.path).join(", ");
+  const goalHints = featureExistenceHints(analysis, {
+    title: goal,
+    detail: goal,
+  } as ProjectTask);
   const messages: ChatMessage[] = [
     { role: "system", content: PLANNER_SYSTEM },
     {
       role: "user",
       content: [
         projectFacts(analysis),
+        `Project files (all): ${allFiles}`,
+        goalFiles.length > 0 ? `Goal-relevant files: ${goalFiles.join(", ")}` : "",
+        goalHints.length > 0
+          ? `Goal-relevant existing symbols (use these files as primary edit targets): ${goalHints.join(
+              "; ",
+            )}`
+          : "",
+        projectMap ? `Project map (use it for file and symbol ownership):\n${projectMap.slice(0, 14_000)}` : "",
+        "Write task titles, details and acceptance in English. Keep quoted user text, file paths and code identifiers unchanged.",
         `Verification command: ${verification ?? "none detected"}`,
         options.intent
           ? [
@@ -294,54 +492,172 @@ export async function planProjectTasks(
   ];
   let tokenUsage: AiTokenUsage | undefined;
   let tasks: ProjectTask[] | undefined;
-  try {
-    const text = await chat(config, messages, {
-      maxTokens: 2200,
-      temperature: 0.1,
-      timeoutMs: 120_000,
-      signal: options.signal,
-      onUsage: (usage) => {
-        tokenUsage = usage;
-      },
-    });
-    const inputChars = messages.reduce((sum, message) => sum + message.content.length, 0);
-    tokenUsage = tokenUsage ?? {
-      inputTokens: Math.ceil(inputChars / 4),
-      outputTokens: Math.ceil(text.length / 4),
-      totalTokens: Math.ceil(inputChars / 4) + Math.ceil(text.length / 4),
-    };
-    await recordUsage({
-      projectId,
-      provider: config.id,
-      model: config.model,
-      kind: "tasks.plan",
-      inputTokens: tokenUsage.inputTokens,
-      outputTokens: tokenUsage.outputTokens,
-      totalTokens: tokenUsage.totalTokens,
-    });
-    tasks = normalizeTasks(extractJson(text), goal, verification);
-    if (options.intent && tasks.length > 0) {
-      const limit =
-        options.intent.scope === "small"
-          ? 3
-          : options.intent.scope === "medium"
-            ? 5
-            : options.intent.scope === "large"
-              ? 8
-              : 2;
-      if (tasks.length > limit) {
-        const verificationTask = [...tasks]
-          .reverse()
-          .find((task) => taskLooksLikeVerification(task) && !taskLooksLikeWrite(task));
-        const kept = tasks.slice(0, limit);
-        if (verificationTask && !kept.includes(verificationTask)) {
-          kept[limit - 1] = verificationTask;
-        }
-        tasks = kept;
+  let plannerError: string | undefined;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      // eslint-disable-next-line no-await-in-loop
+      const text = await chat(config, messages, {
+        maxTokens: 4_000,
+        temperature: 0.1,
+        timeoutMs: 120_000,
+        signal: options.signal,
+        onUsage: (usage) => {
+          tokenUsage = usage;
+        },
+      });
+      const inputChars = messages.reduce((sum, message) => sum + message.content.length, 0);
+      const attemptUsage: AiTokenUsage =
+        tokenUsage ?? {
+          inputTokens: Math.ceil(inputChars / 4),
+          outputTokens: Math.ceil(text.length / 4),
+          totalTokens: Math.ceil(inputChars / 4) + Math.ceil(text.length / 4),
+        };
+      tokenUsage = attemptUsage;
+      // eslint-disable-next-line no-await-in-loop
+      await recordUsage({
+        projectId,
+        provider: config.id,
+        model: config.model,
+        kind: "tasks.plan",
+        inputTokens: attemptUsage.inputTokens,
+        outputTokens: attemptUsage.outputTokens,
+        totalTokens: attemptUsage.totalTokens,
+      });
+      const raw = extractJson(text) as { tasks?: unknown } | undefined;
+      const usableRaw = usableRawPlannerTasks(raw);
+      if (!usableRaw) {
+        throw new Error("The planner reply did not contain a non-empty, non-placeholder tasks array.");
+      }
+      tasks = normalizeTasks({ tasks: usableRaw }, goal, verification);
+      if (tasks.length === 0) throw new Error("The planner returned no usable tasks.");
+      break;
+    } catch (error) {
+      plannerError = error instanceof Error ? error.message : String(error);
+      if (attempt === 0) {
+        messages.push({
+          role: "user",
+          content:
+            "Your previous reply was not valid planner JSON. Return ONLY the JSON object with a non-empty tasks array. No prose, no markdown fences.",
+        });
       }
     }
-  } catch {
-    tasks = fallbackTasks(goal, verification);
+  }
+  if (!tasks || tasks.length === 0) {
+    try {
+      const minimalPrompt = [
+        `Project files: ${analysis.files
+          .map((file) => file.path)
+          .slice(0, 20)
+          .join(", ")}`,
+        `User goal:\n${goal.trim()}`,
+        "Return ONLY the JSON object with 1-6 tasks. Each task must describe one behavior change with acceptance criteria. No prose, no Markdown fences.",
+      ].join("\n\n");
+      const minimalText = await chat(
+        config,
+        [
+          { role: "system", content: PLANNER_SYSTEM },
+          { role: "user", content: minimalPrompt },
+        ],
+        {
+          maxTokens: 3_000,
+          temperature: 0.1,
+          timeoutMs: 120_000,
+          signal: options.signal,
+          onUsage: (usage) => {
+            tokenUsage = usage;
+          },
+        },
+      );
+      const minimalRaw = extractJson(minimalText) as { tasks?: unknown } | undefined;
+      const usableMinimal = usableRawPlannerTasks(minimalRaw);
+      if (usableMinimal) {
+        tasks = normalizeTasks({ tasks: usableMinimal }, goal, verification);
+        const minimalInput = Math.ceil(minimalPrompt.length / 4);
+        const minimalUsage: AiTokenUsage = tokenUsage ?? {
+          inputTokens: minimalInput,
+          outputTokens: Math.ceil(minimalText.length / 4),
+          totalTokens: minimalInput + Math.ceil(minimalText.length / 4),
+        };
+        await recordUsage({
+          projectId,
+          provider: config.id,
+          model: config.model,
+          kind: "tasks.plan",
+          inputTokens: minimalUsage.inputTokens,
+          outputTokens: minimalUsage.outputTokens,
+          totalTokens: minimalUsage.totalTokens,
+        }).catch(() => undefined);
+        if (!options.dryRun) {
+          await appendTaskContext(
+            analysis.rootPath,
+            "Planner minimal retry",
+            "The full planner prompt failed twice; a minimal file-list retry produced the task queue.",
+          ).catch(() => undefined);
+        }
+      }
+    } catch (error) {
+      plannerError = error instanceof Error ? error.message : String(error);
+    }
+  }
+  if (!tasks || tasks.length === 0) {
+    tasks = fallbackTasks(goal, verification, {
+      projectMap,
+      intent: options.intent,
+    });
+    if (!options.dryRun) {
+      await appendTaskContext(
+        analysis.rootPath,
+        "Planner fallback",
+        `The planner did not return valid tasks: ${(plannerError ?? "unknown").slice(
+          0,
+          500,
+        )}. A single fallback task was created; re-plan when the model is healthy.`,
+      ).catch(() => {});
+    }
+  }
+
+  if (tasks.length === 1) {
+    const split = splitLargeGoal(goal, verification);
+    if (split) {
+      tasks = split;
+      if (!options.dryRun) {
+        await appendTaskContext(
+          analysis.rootPath,
+          "Plan split",
+          `The goal contained multiple independent changes; it was split into ${split.length} tasks instead of one large task.`,
+        );
+      }
+    }
+  }
+  tasks = foldTrailingVerification(tasks);
+  tasks = foldTrailingCleanup(tasks);
+  if (options.intent && tasks.length > 0) {
+    const limit =
+      options.intent.scope === "small"
+        ? 3
+        : options.intent.scope === "medium"
+          ? 5
+          : options.intent.scope === "large"
+            ? 8
+            : 2;
+    if (tasks.length > limit) {
+      const verificationTask = [...tasks]
+        .reverse()
+        .find((task) => taskLooksLikeVerification(task) && !taskLooksLikeWrite(task));
+      const kept = tasks.slice(0, limit);
+      if (verificationTask && !kept.includes(verificationTask)) {
+        kept[limit - 1] = verificationTask;
+      }
+      tasks = kept;
+    }
+  }
+
+  if (options.dryRun) {
+    return {
+      ...emptyQueue(projectId, goal.trim()),
+      tasks,
+      updatedAt: nowIso(),
+    };
   }
 
   const queue = await createQueue(analysis.rootPath, projectId, goal.trim(), tasks);
@@ -367,11 +683,11 @@ export function taskLooksLikeWrite(task: ProjectTask): boolean {
     /\b(inspect|read|review|verify|check|analy[sz]e|research|understand|plan)\b|incele|oku|gözden geçir|doğrula|kontrol et|araştır/i.test(
       task.title,
     ) &&
-    !/\b(fix|update|add|create|write|implement|change|remove)\b|düzelt|ekle|oluştur|yaz|güncelle/i.test(task.title)
+    !/\b(fix|update|add|create|write|implement|change|remove|repair|wire|restore|ensure|enable|tune|adjust|enforce|report|expose|register|route|convert|support|extend|validate|return|reject|handle|respond)\b|düzelt|ekle|oluştur|yaz|güncelle|onar|bağla/i.test(task.title)
   ) {
     return false;
   }
-  return /\b(add|create|implement|update|change|edit|write|refactor|fix|remove|delete|rename|move|append|replace|insert|build|generate)\b|oluştur|ekle|güncelle|değiştir|düzelt|sil|taşı|yaz|kaldır/i.test(
+  return /\b(add|create|implement|update|change|edit|write|refactor|fix|remove|delete|rename|move|append|replace|insert|build|generate|repair|wire|restore|ensure|enable|tune|adjust|enforce|report|expose|register|route|convert|support|extend|validate|return|reject|handle|respond)\b|oluştur|ekle|güncelle|değiştir|düzelt|sil|taşı|yaz|kaldır|onar|bağla/i.test(
     text,
   );
 }
@@ -410,8 +726,8 @@ export function blockDependentsOf(
 export function taskLooksLikeInspection(task: ProjectTask): boolean {
   const title = task.title;
   const inspection =
-    /\b(inspect|read|review|analy[sz]e|research|understand|explore|audit|list|enumerate|count)\b|incele|oku|gözden geçir|araştır|analiz et|listele|listeler|listeleme|liste|kaç/i;
-  const write = /\b(fix|update|add|create|write|implement|change|remove|delete|rename|move|refactor)\b|düzelt|ekle|oluştur|yaz|güncelle|değiştir|sil|taşı/i;
+    /\b(inspect|read|review|analy[sz]e|research|understand|explore|audit|list|enumerate|count)\b|incele|oku|gözden geçir|araştır|analiz et|listele|listeler|listeleme|liste|kaç|kontrol et|kontrol/i;
+  const write = /\b(fix|update|add|create|write|implement|change|remove|delete|rename|move|refactor|repair|wire|restore|ensure|enable|tune|adjust|enforce|report|expose|register|route)\b|düzelt|ekle|oluştur|yaz|güncelle|değiştir|sil|taşı|onar|bağla/i;
   return inspection.test(title) && !write.test(title);
 }
 
@@ -436,11 +752,86 @@ function summaryReportsBlocker(summary: string): boolean {
   );
 }
 
+const FEATURE_SYNONYMS: Record<string, string[]> = {
+  "ateş": ["bullet", "fire", "shoot"],
+  "atış": ["bullet", "fire", "shoot"],
+  "uçağa": ["bullet", "fire", "player"],
+  "meteor": ["meteor", "obstacle"],
+  "engel": ["obstacle", "meteor"],
+  "hız": ["speed", "velocity"],
+  "hızlı": ["speed", "velocity"],
+  "komik": ["comedy", "joke"],
+  "şaka": ["joke", "comedy"],
+  "can": ["life", "lives"],
+  "puan": ["score", "points"],
+  "ses": ["sound", "audio"],
+};
+
+function featureExistenceHints(analysis: AnalysisResult, task: ProjectTask): string[] {
+  const stop = new Set([
+    "ekle", "değiştir", "olsun", "daha", "kontrol", "edin", "bir", "için", "farklı",
+    "atışta", "patlasın", "hareket", "etsin", "hala", "gelmedi", "onuda", "uçağa",
+    "edebilme", "özelliği", "küçüğüne", "büyüğü", "büyüğe", "göre", "hızlı",
+  ]);
+  const text = `${task.title} ${task.detail ?? ""}`.toLowerCase();
+  const words = (text.match(/[a-zçğıöşü0-9_]+/gi) ?? [])
+    .map((word) => word.toLowerCase())
+    .filter((word) => word.length >= 4 && !stop.has(word));
+  const queries = new Set<string>();
+  for (const word of words) {
+    queries.add(word);
+    for (const synonym of FEATURE_SYNONYMS[word] ?? []) queries.add(synonym);
+  }
+  const hints = new Map<string, string>();
+  for (const query of queries) {
+    for (const symbol of queryProjectSymbols(analysis, query, undefined, 6)) {
+      const key = `${symbol.filePath}:${symbol.qualifiedName}`;
+      if (!hints.has(key)) hints.set(key, `${symbol.filePath}:${symbol.name} (${symbol.kind}, line ${symbol.startLine})`);
+      if (hints.size >= 8) break;
+    }
+    if (hints.size >= 8) break;
+  }
+  return [...hints.values()];
+}
+
+async function filesChangedSince(
+  analysis: AnalysisResult,
+  sinceIso: string | undefined,
+): Promise<string[]> {
+  if (!sinceIso) return [];
+  const since = Date.parse(sinceIso);
+  if (!Number.isFinite(since)) return [];
+  const found: string[] = [];
+  for (const file of analysis.files.slice(0, 4_000)) {
+    if (/^(?:\.cie|node_modules|dist|build|\.git)\//.test(file.path)) continue;
+    if (
+      !/\.(?:js|mjs|cjs|ts|tsx|jsx|css|scss|sass|less|html?|php|py|go|rs|java|kt|swift|dart|rb|vue|svelte)$/i.test(
+        file.path,
+      )
+    ) {
+      continue;
+    }
+    try {
+      // eslint-disable-next-line no-await-in-loop
+      const stat = await fs.stat(path.join(analysis.rootPath, file.path));
+      if (stat.mtimeMs > since + 1_000) found.push(file.path);
+    } catch {
+      // missing file
+    }
+    if (found.length >= 20) break;
+  }
+  return found;
+}
+
 function taskInstruction(
   task: ProjectTask,
   total: number,
   verification?: string,
   priorTasks: ProjectTask[] = [],
+  continuation = false,
+  changedSinceGoal: string[] = [],
+  existingCode: string[] = [],
+  inspection = false,
 ): string {
   const prior = priorTasks
     .filter((item) => item.status === "done" && item.resultSummary)
@@ -457,15 +848,56 @@ function taskInstruction(
     task.acceptance ? `Acceptance: ${task.acceptance}` : "",
     task.notes ? `Retry note: ${task.notes}` : "",
     prior ? `Previous task summaries (use this before reading context.md):\n${prior}` : "",
-    "Read .cie/agent/context-digest.md first for compact prior context. Read .cie/agent/context.md only when the digest and summaries are insufficient; if it is large, search it with find_in_file or read only the relevant tail. Append useful durable context if you learn something new.",
+    continuation
+      ? "This is a continuation of your previous answer. Its findings are authoritative. Do not rescan or re-read the project; read only the exact lines you will edit, then apply the change and verify it on the real app."
+      : "Read .cie/agent/context-digest.md first for compact prior context. Read .cie/agent/context.md only when the digest and summaries are insufficient; if it is large, search it with find_in_file or read only the relevant tail. Append useful durable context if you learn something new.",
+    inspection
+      ? "This is a read-only inspection/diagnosis task. Do not edit files. Collect the minimum evidence, then finish with a compact diagnosis: root cause, file:line evidence, runtime proof, and the exact fix that would be needed. Do not keep reading after you have evidence."
+      : "Before editing, check whether the requested behavior already exists. If it does, verify it and finish with evidence instead of adding a duplicate implementation.",
+    existingCode.length > 0
+      ? `Existing code that may already implement this task: ${existingCode.join(
+          "; ",
+        )}. Inspect these exact symbols first. If they satisfy the request, verify and finish without editing.`
+      : "",
     "For a field/control change, wire all layers: data model, creation form/markup, rendering and persistence. A selector referenced in JS but absent from the markup is incomplete; run browser_check when the change is visual and available.",
+    changedSinceGoal.length > 0
+      ? `Files changed since this goal started: ${changedSinceGoal.join(
+          ", ",
+        )}. They may contain partial work from an interrupted run. Inspect them first. If the requested behavior already exists, verify it and finish with evidence; do not rewrite or duplicate it.`
+      : "",
     "Do not re-read files already fully read by a previous task unless the current task needs exact content after a change.",
+    "Batch up to 4 independent read-only calls in one reply (read_file, find_in_file, search_code, list_files). One context round-trip per batch instead of one per read.",
+    "Read the smallest range you need. Do not read a whole large file before planning; read the relevant functions, then edit. If you have read the same file twice without editing, stop reading and make the smallest change.",
     "Stay scoped to this task. Do not do later tasks. Do not revert earlier work.",
     verification ? `Verification command: ${verification}` : "",
     "Run tests/typecheck/build when relevant. If the task includes validation, permissions, errors or limits, verify both the accepted and rejected path. Finish only when this task is complete, or report the exact blocker.",
   ]
     .filter(Boolean)
     .join("\n");
+}
+
+export function actionableRepairInstruction(summary: string): string | null {
+  const text = summary.trim();
+  if (!text) return null;
+  if (/(?:blocker|kalan|tamamlanmadı|incomplete|remaining|not done)/i.test(text) === false &&
+      /(?:fazla|silinmeli|kaldır|remove|delete|duplicate|tekrar|ekle|add|düzelt|fix|change|replace|rename|missing|eksik)/i.test(text) === false) {
+    return null;
+  }
+  const lines = text
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const actionable = lines.filter(
+    (line) =>
+      /(?:fazla|silinmeli|kaldır|remove|delete|duplicate|tekrar|ekle|add|düzelt|fix|change|replace|rename|missing|eksik|should|must)/i.test(
+        line,
+      ) &&
+      /(?:[\w./-]+\.(?:js|mjs|cjs|ts|tsx|jsx|css|html?|php|py|go|rs|java|kt|swift|dart|rb)|[\w./-]+:\d+)/i.test(
+        line,
+      ),
+  );
+  const chosen = actionable.length > 0 ? actionable : lines;
+  return chosen.join(" ").slice(0, 900) || null;
 }
 
 export function taskBudgetForEffort(effort: ProjectTaskEffort): {
@@ -475,6 +907,167 @@ export function taskBudgetForEffort(effort: ProjectTaskEffort): {
   if (effort === "simple") return { tokens: 80_000, costUsd: 0.05 };
   if (effort === "hard") return { tokens: 320_000, costUsd: 0.25 };
   return { tokens: 160_000, costUsd: 0.12 };
+}
+
+interface RetryRecovery {
+  note: string;
+  quarantined: string[];
+  restored: string[];
+}
+
+async function findRecoveryBackup(
+  projectId: string,
+  relativePath: string,
+  startedAt?: string,
+): Promise<{ path: string; content: string } | null> {
+  if (!startedAt) return null;
+  const backupDir = path.join(getDataDir(), "editor-backups", projectId);
+  const safeName = relativePath.replace(/[\\/]/g, "__");
+  let entries: string[] = [];
+  try {
+    entries = await fs.readdir(backupDir);
+  } catch {
+    return null;
+  }
+  const startStamp = new Date(startedAt).toISOString().replace(/[:.]/g, "-");
+  const candidates = entries
+    .filter((name) => name.endsWith(`-${safeName}`))
+    .map((name) => ({
+      name,
+      stamp: name.slice(0, name.length - safeName.length - 1),
+    }))
+    .filter((entry) => entry.stamp < startStamp)
+    .sort((a, b) => b.stamp.localeCompare(a.stamp));
+  const best = candidates[0];
+  if (!best) return null;
+  try {
+    const backupPath = path.join(backupDir, best.name);
+    return { path: backupPath, content: await fs.readFile(backupPath, "utf8") };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Before re-running a failed task, inspect files that were written during the
+ * failed attempt. Broken new files are moved to .cie/agent/recovery instead of
+ * being left in the project. Broken existing files are restored from the last
+ * backup taken before the task started. The retry then starts from a coherent
+ * project state rather than half-written JSON/JS.
+ */
+export async function prepareTaskRetry(
+  analysis: AnalysisResult,
+  task: ProjectTask,
+): Promise<RetryRecovery> {
+  const startedMs = Date.parse(task.startedAt ?? task.createdAt);
+  const candidates = new Set(
+    task.changedFiles.filter((file) => !file.startsWith(".cie/")),
+  );
+  // Previous failure notes often mention the exact partial file (for example
+  // comedy.js). Pull those paths from the task text and recent context so a
+  // stale half-written file is cleaned even when changedFiles was not recorded.
+  let mentioned = `${task.notes ?? ""}\n${task.resultSummary ?? ""}\n${task.detail ?? ""}`;
+  for (const contextFile of [".cie/agent/context.md", ".cie/agent/context-digest.md"]) {
+    try {
+      // eslint-disable-next-line no-await-in-loop
+      const text = await fs.readFile(path.join(analysis.rootPath, contextFile), "utf8");
+      mentioned += `\n${text.slice(-20_000)}`;
+      for (const match of `${mentioned}`.matchAll(
+        /(?:^|[\s`"'(])([A-Za-z0-9_@./-]+\.(?:js|mjs|cjs|jsx|ts|tsx|css|html|py|php|go|rs|java|kt|swift|dart|rb|lua))(?=$|[\s`"'),:])/gm,
+      )) {
+        const candidate = match[1].replace(/^\.\//, "");
+        if (candidate.startsWith(".cie/")) continue;
+        // eslint-disable-next-line no-await-in-loop
+        const exists = await fs.stat(path.join(analysis.rootPath, candidate)).then(() => true).catch(() => false);
+        if (exists) candidates.add(candidate);
+      }
+    } catch {
+      // context files may not exist
+    }
+  }
+  for (const file of analysis.files) {
+    if (
+      file.path.startsWith(".cie/") ||
+      file.path.includes("node_modules/") ||
+      file.path.startsWith("dist/") ||
+      file.path.startsWith("build/")
+    ) {
+      continue;
+    }
+    try {
+      // eslint-disable-next-line no-await-in-loop
+      const stat = await fs.stat(path.join(analysis.rootPath, file.path));
+      if (Number.isFinite(startedMs) && stat.mtimeMs >= startedMs - 1_000) {
+        candidates.add(file.path);
+      }
+    } catch {
+      // deleted files are handled through changedFiles
+    }
+  }
+
+  const quarantined: string[] = [];
+  const restored: string[] = [];
+  const notes: string[] = [];
+  for (const relative of [...candidates].slice(0, 24)) {
+    const absolute = path.join(analysis.rootPath, relative);
+    const syntax = await checkFileSyntax(analysis, relative).catch(() => null);
+    if (!syntax || !syntax.supported || syntax.ok) continue;
+    const backup = await findRecoveryBackup(analysis.id, relative, task.startedAt);
+    if (backup) {
+      try {
+        await fs.writeFile(absolute, backup.content, "utf8");
+        restored.push(relative);
+        notes.push(`${relative}: restored the pre-task backup before retrying.`);
+        continue;
+      } catch {
+        // Fall through to quarantine/leave in place.
+      }
+    }
+    let stat: Awaited<ReturnType<typeof fs.stat>> | null = null;
+    try {
+      stat = await fs.stat(absolute);
+    } catch {
+      stat = null;
+    }
+    const isNewOrTouched = Boolean(
+      stat && (!Number.isFinite(startedMs) || stat.mtimeMs >= startedMs - 1_000),
+    );
+    if (!backup && isNewOrTouched) {
+      const recoveryDir = path.join(
+        analysis.rootPath,
+        ".cie",
+        "agent",
+        "recovery",
+        `${task.id}-${Date.now().toString(36)}`,
+      );
+      const target = path.join(recoveryDir, relative);
+      try {
+        await fs.mkdir(path.dirname(target), { recursive: true });
+        await fs.rename(absolute, target);
+        quarantined.push(relative);
+        notes.push(
+          `${relative}: moved to ${path.relative(analysis.rootPath, target)} because the previous attempt left invalid syntax. The retry should recreate it cleanly.`,
+        );
+        await removeIndexedPath(analysis.id, relative).catch(() => undefined);
+      } catch {
+        notes.push(`${relative}: still has invalid syntax and could not be quarantined.`);
+      }
+    } else {
+      notes.push(
+        `${relative}: still has invalid syntax. Repair it before adding new features.`,
+      );
+    }
+  }
+
+  if (quarantined.length > 0) {
+    analysis.files = analysis.files.filter((file) => !quarantined.includes(file.path));
+  }
+
+  return {
+    note: notes.length > 0 ? `Retry recovery: ${notes.join(" ")}` : "",
+    quarantined,
+    restored,
+  };
 }
 
 export function shouldRetryWithEditFirst(
@@ -684,6 +1277,45 @@ export async function runProjectLoop(
   const workspaceMode: AiWorkspaceMode = options.workspaceMode ?? "build";
   let queue = await loadQueue(analysis.rootPath, projectId);
   const sameGoal = queue?.goal.trim() === goal.trim();
+  if (queue && sameGoal) {
+    const stalled = queue.tasks.filter(
+      (task) =>
+        (task.status === "pending" || task.status === "in_progress") &&
+        (task.tokenUsage?.totalTokens ?? 0) >= 300_000 &&
+        (task.changedFiles?.length ?? 0) === 0,
+    );
+    if (stalled.length > 0 && stalled.length === queue.tasks.length) {
+      const split = splitLargeGoal(queue.goal, verification);
+      if (split && split.length > 1) {
+        queue = { ...queue, tasks: split, status: "idle", updatedAt: nowIso() };
+        queue = await saveQueue(analysis.rootPath, queue);
+        await appendTaskContext(
+          analysis.rootPath,
+          "Stalled task auto-split",
+          `A task spent 300k+ tokens without changing a file. It was replaced by ${split.length} smaller tasks so the next run has a single behavior and edit target.`,
+        );
+        emit({ type: "task", queue });
+      } else {
+        queue = {
+          ...queue,
+          tasks: queue.tasks.map((task) =>
+            stalled.includes(task)
+              ? {
+                  ...task,
+                  status: "blocked",
+                  notes:
+                    "Blocked: this task spent 300k+ tokens without changing a file. Split it into smaller tasks or narrow the scope before retrying.",
+                  updatedAt: nowIso(),
+                }
+              : task,
+          ),
+          updatedAt: nowIso(),
+        };
+        queue = await saveQueue(analysis.rootPath, queue);
+        emit({ type: "task", queue });
+      }
+    }
+  }
   const intent = options.intent;
   const intentSingle = workspaceMode !== "build" || intent?.mode === "single";
   if (
@@ -720,23 +1352,84 @@ export async function runProjectLoop(
     }
   }
 
+  const readOnlyRequest = workspaceMode === "ask" || workspaceMode === "research";
+  const questionGoal =
+    intent?.kind === "question" ||
+    /\?|\bnasıl\b|\bneden\b|\bne zaman\b|\bnerede\b/i.test(goal);
+  if (readOnlyRequest && !questionGoal && queue.tasks.some((task) => taskLooksLikeWrite(task))) {
+    throw new Error(
+      "This goal changes the project, but the current workspace mode is read-only. Switch to Build (Geliştir) mode before running it; read-only mode only inspects and cannot apply edits.",
+    );
+  }
+
   if (options.retryFailed) {
+    const stalled = queue.tasks.filter(
+      (task) =>
+        task.status === "blocked" &&
+        /no file change|kept reading|token safety|endless loop/i.test(task.notes ?? ""),
+    );
+    if (stalled.length > 0 && stalled.length === queue.tasks.length) {
+      const split = splitLargeGoal(queue.goal, verification);
+      if (split && split.length > 1) {
+        queue = {
+          ...queue,
+          tasks: split,
+          status: "idle",
+          updatedAt: nowIso(),
+        };
+        queue = await saveQueue(analysis.rootPath, queue);
+        await appendTaskContext(
+          analysis.rootPath,
+          "Auto-split on retry",
+          `The stalled goal was split into ${split.length} smaller tasks so each run has one behavior and one edit target.`,
+        );
+        emit({ type: "task", queue });
+      }
+    }
+    const recoveries = new Map<string, RetryRecovery>();
+    for (const task of queue.tasks) {
+      if (task.status !== "failed" && task.status !== "blocked") continue;
+      // eslint-disable-next-line no-await-in-loop
+      const recovery = await prepareTaskRetry(analysis, task);
+      recoveries.set(task.id, recovery);
+      if (recovery.note) {
+        emit({
+          type: "log",
+          entry: {
+            id: `log-${Date.now()}-recovery-${task.id}`,
+            at: nowIso(),
+            level: "warn",
+            label: "Retry recovery",
+            detail: recovery.note.slice(0, 300),
+          },
+        });
+        // eslint-disable-next-line no-await-in-loop
+        await appendTaskContext(analysis.rootPath, `Retry recovery · ${task.id}`, recovery.note);
+        await appendLesson(analysis.rootPath, `Retry recovery ${task.id}: ${recovery.note}`);
+      }
+    }
     queue = {
       ...queue,
-      tasks: queue.tasks.map((task) =>
-        task.status === "failed" || task.status === "blocked"
-          ? {
-              ...task,
-              status: "pending",
-              attempts: 0,
-              modelOverride: undefined,
-              completedAt: undefined,
-              resultSummary: undefined,
-              verification: undefined,
-              updatedAt: nowIso(),
-            }
-          : task,
-      ),
+      tasks: queue.tasks.map((task) => {
+        if (task.status !== "failed" && task.status !== "blocked") return task;
+        const recovery = recoveries.get(task.id);
+        const notes = [recovery?.note, task.notes].filter(Boolean).join("\n\n");
+        return {
+          ...task,
+          status: "pending",
+          attempts: 0,
+          repairAttempts: 0,
+          modelOverride: undefined,
+          completedAt: undefined,
+          resultSummary: undefined,
+          verification: undefined,
+          notes: notes || undefined,
+          changedFiles: (task.changedFiles ?? []).filter(
+            (file) => !recovery?.quarantined.includes(file),
+          ),
+          updatedAt: nowIso(),
+        };
+      }),
     };
   }
   queue = await saveQueue(analysis.rootPath, { ...queue, status: "running" });
@@ -776,6 +1469,7 @@ export async function runProjectLoop(
     });
     const current = queue.tasks.find((item) => item.id === task.id);
     if (!current) break;
+    await startAgentRunLive(analysis.rootPath, task.id, current.attempts).catch(() => {});
     emit({ type: "task", queue, task: current });
 
     let taskConfig = current.modelOverride
@@ -821,40 +1515,51 @@ export async function runProjectLoop(
           : current.notes,
     });
     emit({ type: "task", queue, task: queue.tasks.find((item) => item.id === task.id) });
+    const changedSinceGoal = await filesChangedSince(analysis, queue.createdAt);
+    const existingCode = featureExistenceHints(analysis, current);
+    const inspectionRun = !forceWrite && taskLooksLikeInspection(current);
+    if (changedSinceGoal.length > 0) {
+      emit({
+        type: "log",
+        entry: {
+          id: `log-${Date.now()}-changed`,
+          at: nowIso(),
+          level: "info",
+          label: "Interrupted-run files",
+          detail: changedSinceGoal.join(", "),
+        },
+      });
+    }
     let result: AiAgentResult | null = null;
     try {
       result = await runAgentTask(
         projectId,
-        taskInstruction(current, queue.tasks.length, verification, queue.tasks),
+        taskInstruction(
+          current,
+          queue.tasks.length,
+          verification,
+          queue.tasks,
+          Boolean(continuationFindings(options.history, goal)),
+          changedSinceGoal,
+          existingCode,
+          inspectionRun,
+        ),
         {
           activeFile: options.activeFile,
           provider: taskConfig.id,
           model: taskConfig.model,
+          workspaceMode: inspectionRun ? "ask" : workspaceMode,
+          mode: inspectionRun ? "ask" : "auto",
           allowWrite: options.allowWrite === true,
           allowCommands: options.allowCommands === true,
           language: options.language,
-          maxSteps:
-            workspaceMode === "plan"
-              ? 8
-              : workspaceMode === "research"
-                ? 12
-                : workspaceMode === "ask"
-                  ? 6
-                  : taskLooksLikeInspection(current)
-                  ? 5
-                  : current.effort === "simple"
-                    ? 6
-                    : current.effort === "hard"
-                      ? 16
-                      : 10,
-          mode: "auto",
-          workspaceMode,
           interactive: true,
           forceFast: current.effort === "simple",
           forceWrite,
           tokenBudget,
           costBudgetUsd,
           budgetMode: settings?.taskBudgetMode ?? "off",
+          maxOutputTokens: settings?.agentMaxOutputTokens ?? 16_000,
           startingUsage: current.tokenUsage,
           intent: options.intent,
           history: options.history?.slice(-8),
@@ -864,6 +1569,9 @@ export async function runProjectLoop(
             result = event.result;
             return;
           }
+          void appendAgentRunEvent(analysis.rootPath, task.id, current.attempts, event).catch(
+            () => {},
+          );
           emit(event);
         },
         signal,
@@ -888,6 +1596,31 @@ export async function runProjectLoop(
     }
 
     executed.push(result);
+    const failedToolSteps = result.steps.filter(
+      (step) => !step.ok && step.action !== "invalid" && step.action !== "finish",
+    );
+    const lastFailedTool = [...failedToolSteps].reverse()[0];
+    const runLogPath = await saveAgentRun(analysis.rootPath, {
+      taskId: task.id,
+      attempt: current.attempts,
+      goal: queue.goal,
+      stoppedReason: result.stoppedReason,
+      summary: result.summary,
+      changedFiles: result.changedFiles,
+      steps: result.steps,
+    }).catch(() => null);
+    const readBudgetStalled = result.steps.some(
+      (step) => !step.ok && /Read budget exhausted/i.test(step.observation),
+    );
+    const failedToolNote = lastFailedTool
+      ? /Read budget exhausted/i.test(lastFailedTool.observation)
+        ? "The previous attempt kept reading and was stopped. Do not re-read. Apply the smallest edit now with replace_in_file or write_file, or report the exact blocker. If the task contains several independent changes, split it into smaller tasks."
+        : `The previous attempt's ${lastFailedTool.action} call failed: ${lastFailedTool.observation.slice(
+            0,
+            500,
+          )}. Correct the arguments and re-issue the same tool; the file path key is "path" and the text key is "content". Do not stop while a correctable tool call is failing.`
+      : "";
+    const runLogNote = runLogPath ? ` Full step log: ${runLogPath}` : "";
     const verificationLog = result.logs?.find(
       (entry) => entry.label === "Verification passed" || entry.label === "Verification failed",
     );
@@ -901,6 +1634,11 @@ export async function runProjectLoop(
     const malformedToolReply = /provider-native tool call omitted|use the JSON action protocol/i.test(
       result.summary,
     );
+    const protocolFailure =
+      malformedToolReply ||
+      /invalid tool protocol|Unknown action|DSML|commentary/i.test(
+        `${result.summary ?? ""} ${result.error ?? ""}`,
+      );
     const mutatingCommand = result.steps.some(
       (step) =>
         step.action === "run_command" &&
@@ -942,12 +1680,15 @@ export async function runProjectLoop(
             pendingWork
           ? "failed"
           : "done";
-    if (status === "failed" && (malformedToolReply || /invalid tool protocol/i.test(result.summary))) {
-      avoidModels.add(`${taskConfig.id}::${taskConfig.model}`);
-    }
     const unavailableModel = /error 410\b|end of life|no longer available|model_not_found|model .* not found|does not exist/i.test(
       result.summary,
     );
+    const modelFailure =
+      unavailableModel ||
+      malformedToolReply ||
+      /request failed|fetch failed|econnreset|timed out|timeout|rate limit|empty response|invalid tool protocol|DSML|503/i.test(
+        `${result.summary ?? ""} ${result.error ?? ""}`,
+      );
     if (unavailableModel) {
       avoidModels.add(`${taskConfig.id}::${taskConfig.model}`);
       await appendTaskContext(
@@ -1114,6 +1855,39 @@ export async function runProjectLoop(
     );
     emit({ type: "task", queue, task: queue.tasks.find((item) => item.id === task.id) });
 
+    const changedBefore = (task.changedFiles?.length ?? 0) + result.changedFiles.length;
+    const taskSpentTokens = addUsage(
+      task.tokenUsage ?? emptyUsage(),
+      result.tokenUsage,
+    ).totalTokens;
+    const noEditTokenBurn = changedBefore === 0 && taskSpentTokens >= 300_000;
+    if (
+      status !== "done" &&
+      result.stoppedReason !== "aborted" &&
+      (readBudgetStalled || noEditTokenBurn)
+    ) {
+      const reason = readBudgetStalled
+        ? "kept reading instead of editing"
+        : "produced no file change";
+      queue = markTask(queue, task.id, {
+        status: "blocked",
+        completedAt: nowIso(),
+        notes: `Blocked: the previous attempt ${reason} after ${taskSpentTokens.toLocaleString()} tokens. Automatic retry was stopped to prevent an endless loop. Split this goal into smaller single-behavior tasks, or retry manually with a narrower scope.`,
+      });
+      await appendTaskContext(
+        analysis.rootPath,
+        `Blocked · ${task.id}`,
+        `The task ${reason} after ${taskSpentTokens.toLocaleString()} tokens. Automatic retry stopped; split the goal or narrow the scope.`,
+      );
+      await appendLesson(
+        analysis.rootPath,
+        `${task.id} ${reason} after ${taskSpentTokens.toLocaleString()} tokens. Split multi-feature goals into one behavior per task; do not re-read the same file ranges.`,
+      ).catch(() => {});
+      queue = await saveQueue(analysis.rootPath, queue);
+      emit({ type: "task", queue, task: queue.tasks.find((item) => item.id === task.id) });
+      continue;
+    }
+
     if (status !== "done" && result.stoppedReason !== "aborted" && task.attempts === 0) {
       const burnedStepsWithoutEdit =
         !inspectionTask &&
@@ -1148,12 +1922,35 @@ export async function runProjectLoop(
           changedFiles: [],
           commands: [],
           notes:
-            "Previous attempt used its whole step budget without editing. Start with the edit now; read at most 2 files or exact ranges, then make the change.",
+            "Previous attempt kept reading without editing. Start with the edit now; read at most 2 files or exact ranges, then make the change.",
         });
         await appendTaskContext(
           analysis.rootPath,
           `Retry · ${task.id}`,
-          "Previous attempt hit the step limit with no file changes. Retrying with the fast profile and an edit-first instruction.",
+          "Previous attempt ended with no file changes. Retrying with the fast profile and an edit-first instruction.",
+        );
+      } else if (protocolFailure) {
+        // A protocol failure is usually the model's output formatting, not an
+        // unavailable provider. Retry the SAME model with a strict JSON note
+        // instead of spending the task on an unrelated fallback model.
+        queue = markTask(queue, task.id, {
+          status: "pending",
+          effort: task.effort,
+          role: task.role,
+          modelOverride: { provider: taskConfig.id, model: taskConfig.model },
+          provider: taskConfig.id,
+          model: taskConfig.model,
+          resultSummary: undefined,
+          verification: undefined,
+          changedFiles: task.changedFiles ?? [],
+          commands: task.commands ?? [],
+          notes:
+            "Retry the same model: the previous reply was not a valid JSON tool call (provider-native DSML, commentary or malformed JSON). Reply with exactly one complete JSON object using action and args. Do not use <commentary>, <analysis>, <thinking>, DSML or markdown fences.",
+        });
+        await appendTaskContext(
+          analysis.rootPath,
+          `Protocol retry · ${task.id}`,
+          `Kept ${taskConfig.id}/${taskConfig.model} instead of switching models. The previous reply used an invalid tool protocol.${runLogNote}`,
         );
       } else if (!autoSwitchModels) {
         queue = markTask(queue, task.id, {
@@ -1161,6 +1958,29 @@ export async function runProjectLoop(
           notes:
             "Automatic model switching is disabled. Choose another model or enable it in Settings → General.",
         });
+      } else if (!modelFailure) {
+        // The provider answered normally; the task itself was incomplete.
+        // Do not switch models for task-quality failures.
+        queue = markTask(queue, task.id, {
+          status: "pending",
+          effort: task.effort,
+          role: task.role,
+          modelOverride: { provider: taskConfig.id, model: taskConfig.model },
+          provider: taskConfig.id,
+          model: taskConfig.model,
+          resultSummary: undefined,
+          verification: undefined,
+          changedFiles: task.changedFiles ?? [],
+          commands: task.commands ?? [],
+          notes: `Retry the same model: the provider worked, but the task was incomplete. Continue from the current files, complete the missing work and verify it. Do not restart from scratch.${
+            failedToolNote ? ` ${failedToolNote}` : ""
+          }${runLogNote}`,
+        });
+        await appendTaskContext(
+          analysis.rootPath,
+          `Same-model retry · ${task.id}`,
+          `Kept ${taskConfig.id}/${taskConfig.model}; the failure was incomplete work, not a model/provider error.`,
+        );
       } else {
         const alternate = await pickAlternateAgentModel({
           provider: taskConfig.id,
@@ -1207,6 +2027,49 @@ export async function runProjectLoop(
       emit({ type: "task", queue, task: queue.tasks.find((item) => item.id === task.id) });
     }
     let finalTask = queue.tasks.find((item) => item.id === task.id);
+    if (
+      finalTask &&
+      finalTask.status === "failed" &&
+      (finalTask.repairAttempts ?? 0) < 2 &&
+      result.stoppedReason !== "aborted" &&
+      result.stoppedReason !== "budget" &&
+      !protocolFailure &&
+      !modelFailure &&
+      !readBudgetStalled
+    ) {
+      const repairInstruction =
+        (failedToolNote ? `${failedToolNote} Apply the fix, verify it, then finish.` : "") ||
+        actionableRepairInstruction(result.summary) ||
+        (result.stoppedReason === "max_steps"
+          ? "The step limit was reached before finishing. Continue from the files that already exist instead of restarting: complete the remaining edit, verify it, then finish."
+          : null);
+      if (repairInstruction) {
+        queue = markTask(queue, task.id, {
+          status: "pending",
+          repairAttempts: (finalTask.repairAttempts ?? 0) + 1,
+          provider: taskConfig.id,
+          model: taskConfig.model,
+          modelOverride: { provider: taskConfig.id, model: taskConfig.model },
+          resultSummary: undefined,
+          verification: undefined,
+          changedFiles: task.changedFiles ?? [],
+          commands: task.commands ?? [],
+          notes: `Repair pass — the previous attempt identified a concrete remaining fix. Apply only this fix, verify it, then finish: ${repairInstruction}${runLogNote}`,
+        });
+        await appendTaskContext(
+          analysis.rootPath,
+          `Repair pass · ${task.id}`,
+          `The model found an actionable remaining fix. Re-running the same model in repair mode: ${repairInstruction}`,
+        );
+        await appendLesson(
+          analysis.rootPath,
+          `${task.id} repair pass: ${repairInstruction.slice(0, 500)}`,
+        );
+        queue = await saveQueue(analysis.rootPath, queue);
+        emit({ type: "task", queue, task: queue.tasks.find((item) => item.id === task.id) });
+        continue;
+      }
+    }
     if (finalTask && (finalTask.status === "failed" || finalTask.status === "blocked")) {
       if (!finalTask.notes?.trim()) {
         const reason =
@@ -1253,6 +2116,10 @@ export async function runProjectLoop(
         }
       }
       if (finalTask) {
+        await appendLesson(
+          analysis.rootPath,
+          `${finalTask.id} ${finalTask.title}: ${(finalTask.notes || result.summary || result.stoppedReason || "failed").slice(0, 600)}`,
+        );
         queue = blockDependentsOf(queue, finalTask.id);
       }
       queue = await saveQueue(analysis.rootPath, queue);

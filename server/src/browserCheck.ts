@@ -53,9 +53,16 @@ function stepTimeout(step: BrowserCheckStep): number {
 }
 
 function isSelectorStep(step: BrowserCheckStep): boolean {
-  return ["click", "fill", "press", "expectText", "expectValue", "expectVisible", "expectCount"].includes(
-    step.action,
-  );
+  return [
+    "click",
+    "fill",
+    "press",
+    "expectText",
+    "expectValue",
+    "expectVisible",
+    "expectCount",
+    "expectStable",
+  ].includes(step.action);
 }
 
 async function availableSelectors(page: Page): Promise<string[]> {
@@ -85,7 +92,11 @@ async function availableSelectors(page: Page): Promise<string[]> {
 async function runStep(page: Page, step: BrowserCheckStep): Promise<string> {
   const selector = step.selector?.trim();
   const value = step.value ?? "";
-  if (["click", "fill", "press", "expectText", "expectValue", "expectVisible", "expectCount"].includes(step.action)) {
+  if (
+    ["click", "fill", "press", "expectText", "expectValue", "expectVisible", "expectCount", "expectStable"].includes(
+      step.action,
+    )
+  ) {
     if (!selector) throw new Error("selector is required for this step.");
   }
   if (step.action === "click") {
@@ -129,6 +140,27 @@ async function runStep(page: Page, step: BrowserCheckStep): Promise<string> {
     }
     return `${selector} count is ${actual}`;
   }
+  if (step.action === "expectStable") {
+    const duration = Math.max(300, Math.min(10_000, Number(step.durationMs) || 1_000));
+    const maxChanges = Math.max(0, Math.min(50, Number(step.maxChanges ?? 0) || 0));
+    const values: string[] = [];
+    const startedAt = Date.now();
+    while (Date.now() - startedAt < duration) {
+      const text = ((await page.locator(selector!).first().textContent()) ?? "").trim();
+      if (values.length === 0 || values[values.length - 1] !== text) values.push(text);
+      await page.waitForTimeout(100);
+    }
+    const changes = Math.max(0, values.length - 1);
+    if (changes > maxChanges) {
+      throw new Error(
+        `${selector} changed ${changes} times in ${duration}ms (allowed ${maxChanges}). Values: ${values
+          .slice(0, 6)
+          .map((item) => `"${item.slice(0, 80)}"`)
+          .join(" → ")}`,
+      );
+    }
+    return `${selector} stayed stable for ${duration}ms${maxChanges > 0 ? ` (${changes} changes)` : ""}`;
+  }
   if (step.action === "waitForText") {
     const text = step.text ?? value;
     if (!text) throw new Error("text is required for waitForText.");
@@ -139,9 +171,31 @@ async function runStep(page: Page, step: BrowserCheckStep): Promise<string> {
     );
     return `Saw text "${text}"`;
   }
+  if (step.action === "waitForSelector") {
+    if (!selector) throw new Error("selector is required for waitForSelector.");
+    await page.locator(selector).first().waitFor({ state: "visible", timeout: stepTimeout(step) });
+    return `${selector} appeared`;
+  }
   if (step.action === "reload") {
     await page.reload({ waitUntil: "load", timeout: stepTimeout(step) });
     return "Reloaded page";
+  }
+  if (step.action === "eval") {
+    const code = (step.value ?? step.text ?? "").trim();
+    if (!code) throw new Error("value is required for eval.");
+    if (code.length > 8_000) throw new Error("eval code is limited to 8000 characters.");
+    const result = await page.evaluate(code).catch((error: unknown) => {
+      throw new Error(`Page script failed: ${error instanceof Error ? error.message : String(error)}`);
+    });
+    const text =
+      typeof result === "string" ? result : result === undefined ? "" : JSON.stringify(result);
+    const expected = step.expectText ?? step.text;
+    if (expected && !text.includes(expected)) {
+      throw new Error(
+        `Eval expected "${expected}" but got: ${text.slice(0, 400) || "(empty)"}`,
+      );
+    }
+    return `Page script result: ${text.slice(0, 600) || "(empty)"}`;
   }
   if (step.action === "storageGet") {
     const key = step.key ?? step.selector ?? "";

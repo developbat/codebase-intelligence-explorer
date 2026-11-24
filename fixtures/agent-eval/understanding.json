@@ -1,0 +1,104 @@
+{
+  "projectId": "4541796f07101515",
+  "provider": "deepseek",
+  "model": "deepseek-flash",
+  "cases": [
+    {
+      "id": "where-slipper",
+      "language": "tr",
+      "instruction": "terlik kodu nerede? hangi dosya ve sat\u0131rda?",
+      "expect": {
+        "kind": [
+          "analyze"
+        ],
+        "needsWrite": false,
+        "areas": [
+          "comedy.js"
+        ],
+        "clarify": false
+      }
+    },
+    {
+      "id": "item-frequency-negation",
+      "language": "tr",
+      "instruction": "komik itemleri daha s\u0131k ve daha g\u00f6r\u00fcn\u00fcr hale getir; mevcut itemleri yeniden ekleme",
+      "expect": {
+        "kind": [
+          "edit"
+        ],
+        "needsWrite": true,
+        "areas": [
+          "comedy.js"
+        ],
+        "clarify": false,
+        "understandingIncludes": [
+          "ekleme"
+        ]
+      }
+    },
+    {
+      "id": "shooting-existing-en",
+      "language": "en",
+      "instruction": "add shooting and three meteor sizes; small is faster, 1/2/3 hits to destroy",
+      "expect": {
+        "kind": [
+          "edit"
+        ],
+        "needsWrite": true,
+        "areas": [
+          "app.js"
+        ],
+        "clarify": false,
+        "assumptionsIncludeAny": [
+          "spawnBullet",
+          "existing",
+          "already"
+        ]
+      }
+    },
+    {
+      "id": "comedy-bug-tr",
+      "language": "tr",
+      "instruction": "komik sahneler neden g\u00f6r\u00fcnm\u00fcyor? kontrol et ve d\u00fczelt",
+      "expect": {
+        "kind": [
+          "edit",
+          "analyze"
+        ],
+        "areas": [
+          "comedy.js"
+        ],
+        "clarify": false
+      }
+    },
+    {
+      "id": "general-question-en",
+      "language": "en",
+      "instruction": "what is a closure?",
+      "expect": {
+        "kind": [
+          "question"
+        ],
+        "needsWrite": false,
+        "clarify": false,
+        "areas": []
+      }
+    },
+    {
+      "id": "multi-feature-en",
+      "language": "en",
+      "instruction": "add shooting, three meteor sizes and make comedy items more frequent; do not re-add existing items",
+      "expect": {
+        "kind": [
+          "edit"
+        ],
+        "needsWrite": true,
+        "areas": [
+          "app.js",
+          "comedy.js"
+        ],
+        "clarify": false
+      }
+    }
+  ]
+}

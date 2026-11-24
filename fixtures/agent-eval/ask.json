@@ -1,0 +1,78 @@
+{
+  "provider": "deepseek",
+  "model": "deepseek-flash",
+  "cases": [
+    {
+      "id": "cbe-task-form",
+      "projectId": "2f97a1dcd90d1acf",
+      "language": "tr",
+      "instruction": "G\u00f6rev ekleme formu ve addTask fonksiyonu nerede? Hangi dosya ve sat\u0131rda? K\u0131sa cevap ver.",
+      "expect": [
+        "js/script.js"
+      ]
+    },
+    {
+      "id": "sample-order",
+      "projectId": "7651e1e027cf6d46",
+      "language": "en",
+      "instruction": "Where is OrderService.createOrder? Give the file and line.",
+      "expect": [
+        "src/services/order.service.ts"
+      ]
+    },
+    {
+      "id": "cie-loop",
+      "projectId": "0751de9f2296c3d1",
+      "language": "en",
+      "instruction": "Where is runProjectLoop defined? Give the file and line.",
+      "expect": [
+        "server/src/ai/loop.ts"
+      ]
+    },
+    {
+      "id": "laravel-gate",
+      "projectId": "5b42c28a16dd210a",
+      "language": "tr",
+      "instruction": "AdminGate s\u0131n\u0131f\u0131 nerede? Hangi dosya ve sat\u0131rda? K\u0131sa cevap ver.",
+      "expect": [
+        "app/Admin/AdminGate.php"
+      ]
+    },
+    {
+      "id": "python-usecase",
+      "projectId": "375385130b822e59",
+      "language": "en",
+      "instruction": "Where is AddTodoDataUseCase defined? Give the file and line.",
+      "expect": [
+        "add_todo_data.py"
+      ]
+    },
+    {
+      "id": "go-test",
+      "projectId": "8e52dcf5f8efe1f5",
+      "language": "en",
+      "instruction": "Where is TestEmptyName defined? Give the file and line.",
+      "expect": [
+        "hello_test.go"
+      ]
+    },
+    {
+      "id": "rn-navigation",
+      "projectId": "71fbb9c7782b339b",
+      "language": "en",
+      "instruction": "Where is AppNavigation defined? Give the file and line.",
+      "expect": [
+        "App.tsx"
+      ]
+    },
+    {
+      "id": "python-list-usecases",
+      "projectId": "375385130b822e59",
+      "language": "en",
+      "instruction": "List the todo use-case classes and the files that define them.",
+      "expect": [
+        "app/data/todo/usecases"
+      ]
+    }
+  ]
+}

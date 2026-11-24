@@ -36,3 +36,7 @@ yarn-error.log*
 # Temporary files
 *.tmp
 *.bak
+
+# Agent-generated project state and evaluation reports
+.cie/
+fixtures/agent-eval/reports/

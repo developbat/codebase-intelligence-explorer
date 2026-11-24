@@ -378,6 +378,141 @@ export const api = {
       ),
   },
 
+  saveStudioNote: (projectId: string, input: { title: string; content: string }) =>
+    request<{ path: string; title: string; bytes: number }>(
+      `/api/projects/${projectId}/studio/notes`,
+      { method: "POST", body: JSON.stringify(input) },
+    ),
+
+  library: {
+    list: (kind?: "image" | "video") =>
+      request<{
+        assets: {
+          id: string;
+          kind: "image" | "video";
+          title: string;
+          prompt?: string;
+          url: string;
+          fileName?: string;
+          mime?: string;
+          bytes?: number;
+          provider?: string;
+          model?: string;
+          createdAt: string;
+        }[];
+      }>(`/api/library${kind ? `?kind=${kind}` : ""}`),
+    import: (input: {
+      url: string;
+      kind: "image" | "video";
+      title?: string;
+      prompt?: string;
+      fileName?: string;
+      mime?: string;
+      bytes?: number;
+      provider?: string;
+      model?: string;
+      projectId?: string;
+    }) =>
+      request<{ id: string; url: string; title: string }>("/api/library/import", {
+        method: "POST",
+        body: JSON.stringify(input),
+      }),
+    copy: (input: { assetId: string; projectId: string; targetPath?: string }) =>
+      request<{ path: string; bytes: number }>("/api/library/copy", {
+        method: "POST",
+        body: JSON.stringify(input),
+      }),
+    remove: (id: string) =>
+      request<{ ok: boolean }>(`/api/library/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  },
+
+  chatStudio: (
+    input: {
+      messages: { role: "user" | "assistant"; content: string }[];
+      provider?: string;
+      model?: string;
+      language?: string;
+      web?: boolean;
+    },
+    signal?: AbortSignal,
+  ) =>
+    request<{
+      ok: boolean;
+      provider: string;
+      model: string;
+      text: string;
+      tokenUsage?: { inputTokens: number; outputTokens: number; totalTokens: number };
+      costUsd?: number;
+      sources: { url: string; title?: string; status?: number; error?: string }[];
+    }>("/api/ai/studio/chat", {
+      method: "POST",
+      body: JSON.stringify(input),
+      signal,
+    }),
+
+  imageStudio: (input: {
+    prompt: string;
+    provider?: string;
+    model?: string;
+    width?: number;
+    height?: number;
+    seed?: number;
+    referenceUrl?: string;
+  }) =>
+    request<{
+      ok: boolean;
+      url: string;
+      fileName: string;
+      bytes: number;
+      provider: string;
+      model: string;
+      width: number;
+      height: number;
+      seed: number;
+    }>("/api/ai/studio/image", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+
+  videoStudio: (input: {
+    prompt: string;
+    provider?: string;
+    model?: string;
+    duration?: number;
+    referenceUrl?: string;
+  }) =>
+    request<{
+      ok: boolean;
+      url: string;
+      fileName: string;
+      bytes: number;
+      provider: string;
+      model: string;
+      duration: number;
+    }>("/api/ai/studio/video", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+
+  videoTransform: (input: {
+    projectId: string;
+    path: string;
+    outputPath?: string;
+    action: "trim" | "convert" | "resize" | "extract-audio";
+    startSeconds?: number;
+    endSeconds?: number;
+    format?: "mp4" | "webm" | "mov" | "gif" | "mp3" | "m4a";
+    maxWidth?: number;
+  }) =>
+    request<{
+      input: { path: string; bytes: number; durationSeconds?: number; width?: number; height?: number };
+      output: { path: string; bytes: number; durationSeconds?: number; width?: number; height?: number };
+      command: string;
+    }>("/api/ai/studio/video/transform", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+
   runTests: (id: string, command?: string) =>
     request<TestRunResult>(`/api/projects/${id}/tests/run`, {
       method: "POST",

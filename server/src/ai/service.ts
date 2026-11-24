@@ -36,7 +36,8 @@ import type {
 } from "../../../shared/ai";
 import { aiLanguageInstruction } from "../../../shared/ai";
 import { getGitBlame, getGitStatus, getFileDiff } from "../git";
-import { getDataDir, loadAnalysis } from "../store";
+import { getDataDir, loadAnalysis, saveAnalysis } from "../store";
+import { analyzeProject } from "../analyzer";
 import { isWithin } from "../scanner";
 import { formatProjectFile } from "../formatter";
 import { detectProjectProfile } from "../projectProfile";
@@ -112,6 +113,8 @@ import { AGENT_TOOL_GROUPS } from "../../../shared/intent";
 import { pickAlternateAgentModel } from "./agents";
 import { getPrompt, renderPrompt } from "./prompts";
 import { listSkills, loadSkillsForPrompt, renderSkillsForPrompt, runSkillScript, setSkillEnabled } from "../skills";
+import { appendLesson, readLessons } from "../tasks";
+import { ensureProjectMap } from "../projectMap";
 import {
   createSkill,
   installSkills,
@@ -122,6 +125,7 @@ import { requestPermission } from "./permissions";
 import {
   recordConversation,
   removeIndexedPath,
+  startProjectIndexBuild,
   renameIndexedPath,
   searchConversations,
   searchProjectIndex,
@@ -136,12 +140,17 @@ async function chatTracked(
   messages: ChatMessage[],
   options: Parameters<typeof chat>[2],
   kind: string,
-): Promise<{ text: string; tokenUsage?: AiTokenUsage }> {
+): Promise<{ text: string; tokenUsage?: AiTokenUsage; finishReason?: string }> {
   let tokenUsage: AiTokenUsage | undefined;
+  let finishReason: string | undefined;
   const text = await chat(config, messages, {
     ...options,
     onUsage: (usage) => {
       tokenUsage = usage;
+    },
+    onFinishReason: (reason) => {
+      finishReason = reason;
+      options?.onFinishReason?.(reason);
     },
   });
   if (!tokenUsage) {
@@ -159,7 +168,7 @@ async function chatTracked(
     outputTokens: tokenUsage.outputTokens,
     totalTokens: tokenUsage.totalTokens,
   });
-  return { text, tokenUsage };
+  return { text, tokenUsage, finishReason };
 }
 
 interface CacheEntry<T> {
@@ -1772,8 +1781,6 @@ export async function answerGeneralChat(
 /* Agent mode: read, search, write and run commands in a controlled loop */
 /* ------------------------------------------------------------------ */
 
-const AGENT_MAX_STEPS = 12;
-const AGENT_MAX_ACTIONS = 40;
 const AGENT_MAX_VERIFY_ATTEMPTS = 3;
 const ACTION_INTENT =
   /\b(ekle|ekley|eklen|ekleme|oluştur|olustur|düzelt|duzelt|güncelle|guncelle|değiştir|degistir|taşı|tasi|sil|yap|yapal|ayarla|renklendir|boya|çevir|cevir|create|add|implement|fix|update|change|refactor|move|delete|build)\w*/i;
@@ -1812,7 +1819,13 @@ const READ_ONLY_ACTIONS = new Set([
   "preview_skill_source",
   "list_mobile_devices",
 ]);
-const AGENT_MAX_WRITES = 10;
+const AGENT_MAX_WRITES = 60;
+// Runaway guard, not a step budget: a write task that has spent this many
+// tokens without changing a file is stuck, and a read-only task that has spent
+// this much without finishing is not making useful progress.
+const NO_PROGRESS_TOKEN_LIMIT = 300_000;
+const READ_ONLY_TOKEN_LIMIT = 500_000;
+const WORKING_TOKEN_LIMIT = 900_000;
 const AGENT_MAX_COMMANDS = 5;
 const AGENT_READ_CHARS = 18_000;
 const NARROW_EDIT_MAX_READ_LINES = 160;
@@ -1936,6 +1949,101 @@ export function readRangeCovered(
   );
 }
 
+function pathFromArgs(args: Record<string, unknown>): unknown {
+  return (
+    args.path ??
+    args.file ??
+    args.filePath ??
+    args.file_path ??
+    args.target ??
+    args.filename ??
+    fallbackPathFromArgs(args)
+  );
+}
+
+function firstStringArg(args: Record<string, unknown>, keys: string[]): string {
+  for (const key of keys) {
+    const value = args[key];
+    if (typeof value === "string") return value;
+  }
+  return "";
+}
+
+function findFromArgs(args: Record<string, unknown>): string {
+  return firstStringArg(args, ["find", "search", "old", "oldText", "old_string", "oldString", "target", "from"]);
+}
+
+function replaceFromArgs(args: Record<string, unknown>): string {
+  return firstStringArg(args, ["replace", "replacement", "new", "newText", "new_string", "newString", "to", "with"]);
+}
+
+function contentFromArgs(args: Record<string, unknown>): string {
+  for (const key of ["content", "text", "code", "body", "value", "source"]) {
+    const value = args[key];
+    if (typeof value === "string") return value;
+  }
+  return "";
+}
+
+function looksLikePathValue(value: string): boolean {
+  const text = value.trim();
+  if (!text || text.length > 240 || text.includes("\n")) return false;
+  return /^(?:\.\/)?[\w@./ -]+\.[A-Za-z0-9]{1,12}$/.test(text) || /^[\w@./-]+\/[\w@./-]+$/.test(text);
+}
+
+function fallbackPathFromArgs(args: Record<string, unknown>): string {
+  for (const value of Object.values(args)) {
+    if (typeof value === "string" && looksLikePathValue(value)) return value;
+  }
+  return "";
+}
+
+const TOOL_ARG_TEMPLATES: Record<string, string> = {
+  write_file: '{"action":"write_file","args":{"path":"relative/file.ext","content":"..."}}',
+  append_text: '{"action":"append_text","args":{"path":"relative/file.ext","content":"..."}}',
+  replace_in_file:
+    '{"action":"replace_in_file","args":{"path":"relative/file.ext","find":"exact text","replace":"new text"}}',
+  replace_many:
+    '{"action":"replace_many","args":{"path":"relative/file.ext","edits":[{"find":"...","replace":"..."}]}}',
+  read_file: '{"action":"read_file","args":{"path":"relative/file.ext"}}',
+  find_in_file: '{"action":"find_in_file","args":{"path":"relative/file.ext","query":"text"}}',
+  delete_file: '{"action":"delete_file","args":{"path":"relative/file.ext"}}',
+  rename_path: '{"action":"rename_path","args":{"path":"old/path","to":"new/path"}}',
+};
+
+export const VERIFICATION_ACTIONS = new Set([
+  "browser_check",
+  "run_test_scenario",
+  "game_check",
+  "graphic_check",
+  "mobile_check",
+  "diagnostics",
+]);
+
+export function isSyntheticCheckPath(value: string | undefined): boolean {
+  if (!value) return false;
+  const normalized = value.replace(/\\/g, "/").replace(/^\.\//, "");
+  return normalized.startsWith(".cie/") || normalized.includes("/.cie/") || normalized.startsWith("tmp/");
+}
+
+const CHECK_ASSERTION_ACTIONS = new Set([
+  "expectText",
+  "expectValue",
+  "expectCount",
+  "expectStable",
+]);
+
+export function countCheckAssertions(steps: { action: string }[] | undefined): number {
+  return (steps ?? []).filter((step) => CHECK_ASSERTION_ACTIONS.has(step.action)).length;
+}
+
+function toolArgHint(action: string): string {
+  const template = TOOL_ARG_TEMPLATES[action];
+  return template
+    ? ` Correct call shape: ${template} (the file path key is "path"; "file", "filePath", "filename" and "target" are also accepted).`
+    : "";
+}
+
 function normalizeAgentPath(rootPath: string, input: unknown): string {
   let value = typeof input === "string" ? input.trim() : "";
   if (!value) return "";
@@ -2009,6 +2117,19 @@ export function isToolCallLeak(text: string): boolean {
   return /DSML|<\|?\|?tool_call|<\/?tool_call|\binvoke\s+name\s*=|\bparameter\s+name\s*=|"tool_calls"\s*:/i.test(
     text,
   );
+}
+
+export function stripCommentaryTags(text: string): string {
+  return text
+    .replace(/<commentary\b[^>]*>[\s\S]*?<\/commentary\s*>/gi, " ")
+    .replace(/<analysis\b[^>]*>[\s\S]*?<\/analysis\s*>/gi, " ")
+    .replace(/<thinking\b[^>]*>[\s\S]*?<\/thinking\s*>/gi, " ")
+    .replace(/<\/?commentary\b[^>]*>/gi, " ")
+    .replace(/<\/?analysis\b[^>]*>/gi, " ")
+    .replace(/<\/?thinking\b[^>]*>/gi, " ")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
 }
 
 export function stripToolCallMarkup(text: string): string {
@@ -2729,7 +2850,7 @@ export async function listDiskFiles(
   return results;
 }
 
-async function agentSearch(
+export async function agentSearch(
   analysis: AnalysisResult,
   query: string,
   limit: number,
@@ -2738,7 +2859,12 @@ async function agentSearch(
   if (!needle) return { results: [], source: "index" };
   const indexed = await searchProjectIndex(analysis.id, query, limit, analysis.rootPath);
   const indexedHits = indexed
-    .filter((hit) => hit.kind !== "conversation" && hit.path)
+    .filter(
+      (hit) =>
+        hit.kind !== "conversation" &&
+        hit.path &&
+        !/^(?:\.cie|node_modules|dist|build|\.git)\//.test(hit.path),
+    )
     .map((hit) => ({
       path: hit.path!,
       line: hit.line ?? 1,
@@ -2759,6 +2885,7 @@ async function agentSearch(
   const candidates = await listDiskFiles(analysis.rootPath, "", 500);
   for (const file of candidates) {
     if (results.length >= limit) break;
+    if (/^(?:\.cie|node_modules|dist|build|\.git)\//.test(file.path)) continue;
     if (file.bytes > 600_000) continue;
     if (isSecretAgentPath(file.path)) continue;
     const absolute = path.resolve(analysis.rootPath, file.path);
@@ -2805,6 +2932,7 @@ const ACTION_TOOL_GROUPS: Partial<Record<string, AgentToolGroup[]>> = {
   git_remote: ["git"],
   git_push: ["git"],
   browser_check: ["browser"],
+  run_test_scenario: ["browser", "skills"],
   game_check: ["browser"],
   graphic_check: ["browser"],
   list_project_tools: ["skills"],
@@ -2832,11 +2960,53 @@ const ACTION_TOOL_GROUPS: Partial<Record<string, AgentToolGroup[]>> = {
   read_note: ["notes"],
   search_notes: ["notes"],
   check_toolchains: ["tools"],
+  rescan_project: ["core"],
   install_toolchain: ["tools"],
 };
 
 function actionToolGroups(action: string): AgentToolGroup[] {
   return ACTION_TOOL_GROUPS[action] ?? ["core"];
+}
+
+export async function auditUnreferencedAssets(
+  analysis: AnalysisResult,
+  changedFiles: string[],
+): Promise<string[]> {
+  const htmlFiles = analysis.files
+    .map((file) => file.path)
+    .filter((file) => /\.html?$/i.test(file));
+  if (htmlFiles.length === 0) return [];
+  const referenced = new Set<string>();
+  for (const htmlPath of htmlFiles.slice(0, 12)) {
+    try {
+      // eslint-disable-next-line no-await-in-loop
+      const html = await readSourceFile(analysis.rootPath, htmlPath);
+      for (const match of html.content.matchAll(/(?:src|href)\s*=\s*["']([^"']+)["']/gi)) {
+        referenced.add(
+          match[1]
+            .split("?")[0]
+            .split("#")[0]
+            .replace(/^\.\//, "")
+            .replace(/^\//, ""),
+        );
+      }
+    } catch {
+      // ignore unreadable HTML
+    }
+  }
+  if (referenced.size === 0) return [];
+  const warnings: string[] = [];
+  for (const filePath of changedFiles) {
+    if (!/\.(?:js|mjs|cjs|css)$/i.test(filePath)) continue;
+    if (filePath.startsWith(".cie/") || filePath.includes("node_modules/")) continue;
+    const normalized = filePath.replace(/^\.\//, "");
+    const fileName = path.basename(normalized);
+    if (referenced.has(normalized) || referenced.has(fileName)) continue;
+    warnings.push(
+      `${normalized} is not loaded by any HTML (no <script src> or <link href> points to it).`,
+    );
+  }
+  return warnings.slice(0, 8);
 }
 
 export function resolveToolGroups(
@@ -2918,11 +3088,13 @@ export function agentToolCatalog(
     '{"action":"csv_query","args":{"path":"data/users.csv","columns":["name","email"],"limit":10}}',
     '{"action":"git_blame","args":{"path":"src/app.ts","startLine":10,"endLine":25}}',
     '{"action":"browser_check","args":{"path":"index.html","steps":[{"action":"fill","selector":"#task-input","value":"Test"},{"action":"click","selector":"#add-task"},{"action":"expectText","selector":"#task-list","text":"Test"}]}}',
+    '{"action":"run_test_scenario","args":{"name":"comedy-events"}}',
     '{"action":"list_project_tools","args":{}}',
     '{"action":"list_mobile_devices","args":{}}',
     '{"action":"list_skills","args":{}}',
     '{"action":"preview_skill_source","args":{"source":"owner/repo","ref":"main"}}',
     '{"action":"check_toolchains","args":{}}',
+    '{"action":"rescan_project","args":{}}',
     '{"action":"game_check","args":{"path":"index.html","steps":[{"action":"expectVisible","selector":"canvas"}]}}',
     '{"action":"create_graphic","args":{"path":"assets/report.svg","kind":"bar","title":"Weekly progress","data":[{"label":"Mon","value":4},{"label":"Tue","value":7},{"label":"Wed","value":5}]}}',
     '{"action":"graphic_check","args":{"path":"assets/report.svg","expectText":"Weekly progress"}}',
@@ -2940,7 +3112,7 @@ export function agentToolCatalog(
   ];
   if (!readOnly) {
     const approval = writeApproved ? "" : "  // requires user approval";
-    tools.push(`{"action":"write_file","args":{"path":"src/new-file.ts","content":"complete final file content"}}${approval}`);
+    tools.push(`{"action":"write_file","args":{"path":"src/new-file.ts","content":"complete file content, max ~12k chars"}}${approval}  // for larger files write the first part, then append_text`);
     tools.push(`{"action":"replace_in_file","args":{"path":"src/app.ts","find":"exact existing snippet","replace":"replacement snippet"}}${approval}`);
     tools.push(`{"action":"replace_many","args":{"path":"src/app.ts","edits":[{"find":"first exact snippet","replace":"first replacement"},{"find":"second exact snippet","replace":"second replacement"}]}}${approval}`);
     tools.push(`{"action":"append_text","args":{"path":"css/styles.css","content":"/* new self-contained section */\n.new-rule { display: block; }"}}${approval}  // append without reading the whole file`);
@@ -2996,6 +3168,43 @@ export function agentToolCatalog(
     })
     .map((tool) => `- ${tool}`)
     .join("\n");
+}
+
+function buildInspectionSummary(steps: AiAgentStep[]): string {
+  const describe = (step: AiAgentStep): string => {
+    const target = agentActionTarget(step.args);
+    return `- ${step.action}${target ? ` ${target}` : ""}: ${step.observation
+      .replace(/\s+/g, " ")
+      .slice(0, 320)}`;
+  };
+  const runtime = steps
+    .filter(
+      (step) =>
+        /browser_check|run_test_scenario|game_check|graphic_check|mobile_check/.test(step.action) ||
+        /PASS|FAIL|painted|banner|visible|"count"|expectStable/i.test(step.observation),
+    )
+    .slice(-4);
+  const code = steps
+    .filter(
+      (step) =>
+        ["read_file", "read_symbol", "find_in_file", "search_code", "project_search"].includes(
+          step.action,
+        ) &&
+        step.ok &&
+        !/No matches|Cached read|already read|already searched|already executed/i.test(
+          step.observation,
+        ),
+    )
+    .slice(-3);
+  const evidence = [...runtime, ...code];
+  return [
+    "Read-only inspection stopped after enough evidence was collected. Findings:",
+    runtime.length > 0 ? `Runtime evidence:\n${runtime.map(describe).join("\n")}` : "",
+    code.length > 0 ? `Code evidence:\n${code.map(describe).join("\n")}` : "",
+    "The next step is to apply the minimal fix identified above, or confirm the behavior with a saved scenario.",
+  ]
+    .filter(Boolean)
+    .join("\n\n");
 }
 
 function clampObservation(text: string, limit = AGENT_OBSERVATION_CHARS): string {
@@ -3340,6 +3549,28 @@ export function selectHistory(
   }));
 }
 
+const CONTINUATION_REQUEST =
+  /(?:uygula|düzelt|fix\b|apply\b|implement|devam et|continue|bunu yap|şunu yap|bağla|yansıt)/i;
+
+export function continuationFindings(
+  history: { role: "user" | "assistant"; content: string }[] | undefined,
+  instruction: string,
+): string | null {
+  if (!history || history.length === 0) return null;
+  const scope = instruction.trim().slice(0, 800);
+  if (!scope || !CONTINUATION_REQUEST.test(scope)) return null;
+  const lastAssistant = [...history].reverse().find((message) => message.role === "assistant");
+  if (!lastAssistant) return null;
+  const text = lastAssistant.content.trim();
+  if (text.length < 200) return null;
+  const hasEvidence =
+    /(?:[\w./@-]+\.(?:js|mjs|cjs|ts|tsx|jsx|css|scss|html?|php|py|go|rs|java|kt|swift|dart|rb|vue|svelte)|[\w./@-]+:\d+)/i.test(
+      text,
+    );
+  if (!hasEvidence) return null;
+  return text.length > 8_000 ? `${text.slice(0, 8_000)}\n[prior answer truncated]` : text;
+}
+
 export async function runAgentTask(
   projectId: string,
   instruction: string,
@@ -3360,6 +3591,7 @@ export async function runAgentTask(
     tokenBudget?: number;
     costBudgetUsd?: number;
     budgetMode?: "off" | "warn" | "stop";
+    maxOutputTokens?: number;
     startingUsage?: AiTokenUsage;
     intent?: IntentAnalysis;
   } = {},
@@ -3383,25 +3615,12 @@ export async function runAgentTask(
     (options.intent
       ? options.intent.scope === "trivial" || options.intent.scope === "small"
       : false);
-  // maxSteps limits model turns, not individual tool actions from a multi-call reply.
-  const maxSteps = Math.max(
-    2,
-    Math.min(
-      20,
-      options.maxSteps ??
-        (workspaceMode === "plan"
-          ? 8
-          : workspaceMode === "research"
-            ? 12
-            : workspaceMode === "ask"
-              ? 6
-              : readOnlyMode
-                ? 8
-              : fastTask
-                ? 10
-                : AGENT_MAX_STEPS),
-    ),
-  );
+  // No fixed step budget: a task runs until it finishes or stops making
+  // progress. Callers can still pass an explicit cap for short internal runs.
+  const maxSteps =
+    options.maxSteps && Number.isFinite(options.maxSteps) && options.maxSteps > 0
+      ? Math.max(2, options.maxSteps)
+      : Number.POSITIVE_INFINITY;
   const createdAt = new Date().toISOString();
   const evidence: AiContextFile[] = [];
   const steps: AiAgentStep[] = [];
@@ -3699,6 +3918,15 @@ export async function runAgentTask(
     (options.intent?.scope === "trivial" || options.intent?.scope === "small");
   const contextMode = options.intent?.context ?? "project";
   const historyMode = options.intent?.history ?? "recent";
+  const projectMap =
+    contextMode === "none"
+      ? ""
+      : await ensureProjectMap(analysis).catch(() => "");
+  if (projectMap) {
+    log("info", "Project map loaded", `${projectMap.length} chars`);
+  }
+  const continuation = continuationFindings(options.history, instruction);
+  const continuationMode = Boolean(continuation);
   const latestProjectPlan =
     contextMode !== "none" && (workspaceMode === "plan" || workspaceMode === "build")
       ? await readLatestProjectPlan(
@@ -3730,6 +3958,7 @@ export async function runAgentTask(
       ),
     ),
   ].slice(0, 8);
+  const lessons = await readLessons(analysis.rootPath).catch(() => "");
   const projectContext =
     contextMode === "none"
       ? ""
@@ -3747,6 +3976,12 @@ export async function runAgentTask(
   const conversation = selectHistory(options.history, historyMode);
   const context = [
     projectContext,
+    projectMap
+      ? `Project map (file roles, indexed symbols and search hints — use it before scanning):\n${projectMap.slice(
+          0,
+          3_500,
+        )}`
+      : "",
     "",
     options.intent?.approach ? `Intent approach: ${options.intent.approach}` : "",
     options.intent?.needsExhaustiveEvidence
@@ -3759,6 +3994,11 @@ export async function runAgentTask(
           commandsApproved ? "pre-approved" : "ask the user before running commands"
         }; delete and rename always need confirmation.`,
     seedText,
+    continuation
+      ? `Continuation of your previous answer — implement these findings directly.\nDo not re-research or rescan the project. The findings below are authoritative. Read only the exact lines you will edit or confirm, then make the change and verify it on the real app.\n\n${continuation}`
+      : "",
+    lessons ? `Lessons from previous failures (do not repeat):
+${lessons}` : "",
     latestProjectPlan
       ? `${
           workspaceMode === "plan"
@@ -3834,6 +4074,18 @@ export async function runAgentTask(
       language: languageInstruction,
     }) +
     (skillsPrompt ? `\n\n${skillsPrompt}` : "") +
+    "\n\nOutput protocol: reply with one JSON object per turn using action and args. For independent read-only work (read_file, find_in_file, search_code, list_files, diagnostics) you may batch up to 4 calls in one reply as {\"actions\":[{...},{...}]}; this saves a full context round-trip. Keep mutating actions to one per reply. Never use <commentary>, <analysis>, <thinking> tags, markdown fences, or prose outside the JSON. The JSON must be complete." +
+    "\n\nVerification protocol: when the user asks why something is missing or broken, trace the real wiring (HTML <script>/<link>, imports, event handlers, selectors) and use browser_check/run_test_scenario for runtime proof. State the root cause with file:line evidence; never guess from feature names. For UI or game behavior, save a reusable scenario in .cie/agent/scenarios/<name>.json and run it with run_test_scenario. Do not repeat failures recorded in .cie/agent/LESSONS.md. If a tool call fails, correct its arguments (the file path key is \"path\") and retry the same tool in this run; never finish with a blocker for an error you can fix yourself. If a needed tool does not exist, create a project tool or a small script and use it. Before retrying a failed task, read the newest file under .cie/agent/runs/ to see the exact failed action and error instead of guessing. For timers, counters, toasts or end-screen text, verify stability with a browser_check step {\"action\":\"expectStable\",\"selector\":\"...\",\"durationMs\":800}; text that changes every animation frame means it is being rewritten inside requestAnimationFrame, not that the timer is too fast. Verify the REAL project entry page: a synthetic harness under .cie/ is not proof, even when it passes. If the target state is hard to reach, use an eval step on the real page to put it in that state, wait for delayed elements with waitForSelector, then assert them. When the user asks to apply your previous answer, treat its findings as authoritative and start editing; do not rescan the project." +
+    "\n\nRuntime UI playbook:" +
+    "\n- A file that no HTML <script>/<link> loads does nothing; check the tags and duplicate tags before editing behavior." +
+    "\n- Text that changes every frame is usually rewritten inside requestAnimationFrame or a loop; write one-time values once (guard with a flag), not on every tick." +
+    "\n- Prove runtime behavior with browser_check and expectStable (800-1200ms), then save the steps to .cie/agent/scenarios/<name>.json and run them with run_test_scenario." +
+    "\n- A failed tool call is not a blocker: fix its arguments (path/content) and retry in the same run. Read .cie/agent/runs/ to see the exact failed action." +
+    "\n- Do not claim a feature from a config or variable that is never read at runtime. Wire it into the update/draw path or remove it." +
+    "\n- For each new item or effect, prove the effect itself with a runtime step (state before/after, expectText/expectStable, canvas/state probe); an event counter alone is not proof." +
+    "\n- If PROJECT_MAP reports code files missing from the index, call rescan_project before trusting symbol search." +
+    "\n- Test-only artifacts (debug hooks, stable markers, scenario files) must never change the visible game UI. Keep them hidden or under .cie/." +
+    "\n- Preserve the direction of a frequency request: if the user says the layer is too sparse, make it more frequent and report the before → after intervals." +
     fastSuffix +
     narrowEditSuffix +
     readOnlySuffix;
@@ -3842,6 +4094,9 @@ export async function runAgentTask(
     "Prompt selected",
     `${prompt.id} v${prompt.version}${prompt.source !== "default" ? ` · ${prompt.source}` : ""}`,
   );
+  if (lessons) {
+    log("info", "Lessons loaded", `${lessons.length} chars from LESSONS.md`);
+  }
   log(
     "info",
     "Context profile",
@@ -3889,19 +4144,19 @@ export async function runAgentTask(
    * long run does not pay for the same file excerpt twenty times.
    */
   const compactTranscript = () => {
-    const cutoff = transcript.length - 8;
+    const cutoff = transcript.length - 6;
     if (cutoff <= 2) return;
     let compacted = 0;
     for (let i = 2; i < cutoff; i += 1) {
       const message = transcript[i];
       if (message.role !== "user" || !message.content.startsWith("Observation (step")) continue;
-      if (message.content.length <= 700) continue;
+      if (message.content.length <= 450) continue;
       const headerEnd = message.content.indexOf("\n");
       const header = headerEnd >= 0 ? message.content.slice(0, headerEnd) : "Observation";
       const body = headerEnd >= 0 ? message.content.slice(headerEnd + 1) : message.content;
       transcript[i] = {
         role: "user",
-        content: `${header}\n${body.slice(0, 700)}\n… older observation compacted; re-read only the exact range if still needed.`,
+        content: `${header}\n${body.slice(0, 450)}\n… older observation compacted; use the earlier conclusion or re-read only the exact range if still needed.`,
       };
       compacted += 1;
     }
@@ -3919,7 +4174,10 @@ export async function runAgentTask(
   const startingUsage = options.startingUsage ?? { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
   const tokenTotal: AiTokenUsage = { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
   const queuedActions: ParsedToolAction[] = [];
-  const readCoverage = new Map<string, { start: number; end: number; wholeFile: boolean; step: number }[]>();
+  const readCoverage = new Map<
+    string,
+    { start: number; end: number; wholeFile: boolean; step: number; observation?: string }[]
+  >();
   const readOnlyCache = new Map<string, { step: number; ok: boolean }>();
   const findCounts = new Map<string, number>();
   const invalidateReadCaches = () => {
@@ -3937,8 +4195,30 @@ export async function runAgentTask(
   let syntaxNudges = 0;
   let syntaxFailures: { file: string; output: string }[] = [];
   let missingSelectors: MissingSelector[] = [];
+  let unreferencedAssets: string[] = [];
+  let assetNudges = 0;
   let browserCheckCalls = 0;
+  let realBrowserChecks = 0;
+  let syntheticBrowserChecks = 0;
+  let realScenarioRuns = 0;
+  let realCheckAssertions = 0;
+  let verifyNudges = 0;
+  let claimNudges = 0;
+  let lastBrowserKey = "";
+  let browserFailureRepeat = 0;
   let remainingWorkRejected = false;
+  let unproductiveTurns = 0;
+  let progressNudged = false;
+  let largeContextLogged = false;
+  let readOnlyStepsSinceChange = 0;
+  let readDecisionNudged = false;
+  let inspectionNudged = false;
+  let inspectionReadRejections = 0;
+  let codeChangeCount = 0;
+  let tokensAtLastCodeChange = 0;
+  let postChangeNudged = false;
+  let lastToolFailure: { action: string; observation: string; index: number } | null = null;
+  let toolFailureNudges = 0;
   let transientRetries = 0;
   let budgetWarned = false;
   let budgetWarning: string | undefined;
@@ -4004,28 +4284,45 @@ export async function runAgentTask(
       );
     } else {
     if (!readOnlyMode && plan.needsWrite && changedFiles.length === 0) {
-      const turnsLeft = maxSteps - modelTurns;
-      if (modelTurns >= 4 && writeNudges === 0) {
+      if (continuationMode && modelTurns >= 2 && writeNudges === 0) {
         writeNudges = 1;
         transcript.push({
           role: "system",
           content:
-            "Step budget notice: no file has been changed yet. You have enough context. Perform the requested edit now with replace_in_file or write_file. Do not read more files unless a single exact line is essential; read only that range.",
+            "This is a continuation of your own prior analysis. The findings are already in context. Stop researching and apply the fix now: read at most one or two exact ranges to confirm line numbers, then use replace_in_file or write_file. Do not rescan the project.",
+        });
+        log("warn", "Continuation: start editing", "prior findings available; no rescan needed");
+      } else if (modelTurns >= 4 && writeNudges === 0) {
+        writeNudges = 1;
+        transcript.push({
+          role: "system",
+          content:
+            "No file has been changed yet. You have enough context. If the requested behavior already exists, verify it and finish with evidence instead of editing. Otherwise perform the requested edit now with replace_in_file or write_file. Do not read more files unless a single exact line is essential; read only that range.",
         });
         log("warn", "Write reminder", "No files changed yet; asking the model to edit now.");
-      } else if (turnsLeft <= 3 && writeNudges === 1) {
+      } else if (modelTurns >= 12 && writeNudges === 1) {
         writeNudges = 2;
         transcript.push({
           role: "system",
-          content: `Only ${Math.max(1, turnsLeft)} model turn(s) remain and no file has changed. Make the edit now. If it is truly impossible, finish with the exact blocker instead of reading more files.`,
+          content:
+            "No file has been changed after further reading. If the requested behavior already exists, verify it and finish with evidence. Otherwise make the edit now with the smallest safe change, then verify it. If it is truly impossible, finish with the exact blocker instead of reading more files.",
         });
-        log("warn", "Final write reminder", `${Math.max(1, turnsLeft)} turn(s) left · no edits yet`);
+        log("warn", "Final write reminder", "Still no edits; asking for the smallest change");
       }
     }
     log("model", "Model is thinking…", "Planning the next tool call");
     compactTranscript();
+    let truncatedReply = false;
     try {
       inputChars += transcript.reduce((total, message) => total + message.content.length, 0);
+      if (inputChars > 90_000 && !largeContextLogged) {
+        largeContextLogged = true;
+        log(
+          "warn",
+          "Large context",
+          `${Math.round(inputChars / 4).toLocaleString()} estimated input tokens; batched reads and shorter ranges keep this down.`,
+        );
+      }
       let receivedChars = 0;
       let lastStreamLog = 0;
       const completion = await chatTracked(
@@ -4033,7 +4330,7 @@ export async function runAgentTask(
         config,
         transcript,
         {
-          maxTokens: 6000,
+          maxTokens: Math.max(4_000, Math.min(64_000, options.maxOutputTokens ?? 16_000)),
           temperature: 0.1,
           timeoutMs: 120_000,
           signal,
@@ -4049,6 +4346,10 @@ export async function runAgentTask(
       );
       reply = completion.text;
       stepUsage = completion.tokenUsage;
+      const finishReason = completion.finishReason;
+      truncatedReply =
+        /length|max.?tokens/i.test(finishReason ?? "") ||
+        (stepUsage !== undefined && stepUsage.outputTokens >= 7_800);
       if (stepUsage) {
         tokenTotal.inputTokens += stepUsage.inputTokens;
         tokenTotal.outputTokens += stepUsage.outputTokens;
@@ -4063,6 +4364,18 @@ export async function runAgentTask(
       }
       consecutiveFailures += 1;
       const message = requestError instanceof Error ? requestError.message : "The model request failed.";
+      const maxTokenError =
+        /max_tokens|max.?output|maximum.*token|too many tokens|token limit/i.test(message);
+      if (maxTokenError && (options.maxOutputTokens ?? 16_000) > 8_000) {
+        log(
+          "warn",
+          "Output limit rejected · retrying lower",
+          `${message.slice(0, 180)} · using 8000 tokens`,
+        );
+        options.maxOutputTokens = 8_000;
+        modelTurns = Math.max(0, modelTurns - 1);
+        continue;
+      }
       const transient =
         /fetch failed|econnreset|etimedout|timed out|timeout|network|socket|429|rate limit|502|503|504|overloaded|temporarily unavailable|service unavailable|connection reset/i.test(
           message,
@@ -4075,7 +4388,7 @@ export async function runAgentTask(
           `Transient model error · retry ${transientRetries}/3`,
           `${message.slice(0, 180)} · waiting ${Math.round(delay / 1_000)}s`,
         );
-        // A failed socket request should not consume the task's step budget.
+        // A failed socket request should not consume a model turn.
         modelTurns = Math.max(0, modelTurns - 1);
         await new Promise((resolve) => setTimeout(resolve, delay));
         continue;
@@ -4124,16 +4437,49 @@ export async function runAgentTask(
     transientRetries = 0;
     log("info", "Plan received", `${reply.length} characters`);
 
-    const cleanReply = stripToolCallMarkup(reply);
+    const cleanReply = stripCommentaryTags(stripToolCallMarkup(reply));
     transcript.push({
       role: "assistant",
       content: cleanReply || "[provider-native tool call omitted; use the JSON action protocol]",
     });
 
     try {
-      parsed = parseAgentReply(reply);
+      parsed = parseAgentReply(cleanReply || reply);
     } catch {
       log("error", "Response was not valid tool JSON", reply.replace(/\s+/g, " ").slice(0, 180));
+      const commentaryOnly = /<commentary\b|<analysis\b|<thinking\b/i.test(reply);
+      if (commentaryOnly) {
+        const observation =
+          "Remove <commentary>/<analysis>/<thinking> tags. Reply with exactly one complete JSON object using action and args. Do not explain your next move; perform it.";
+        log("warn", "Commentary instead of tool JSON", "Correcting the output protocol.");
+        recordStep({
+          index,
+          action: "invalid",
+          args: {},
+          observation,
+          ok: false,
+          durationMs: Date.now() - started,
+          tokenUsage: stepUsage,
+        });
+        transcript.push({ role: "user", content: `Observation (step ${index}) [commentary]: ${observation}` });
+        continue;
+      }
+      if (truncatedReply) {
+        const observation =
+          "Your last reply was cut off by the output limit (8000 tokens). Do not write an entire large file in one tool call. Use write_file for the first small section, then append_text for the rest, or use replace_in_file/replace_many. Keep every JSON reply complete and small enough to finish.";
+        log("warn", "Response truncated", "Write in smaller chunks and keep the JSON valid.");
+        recordStep({
+          index,
+          action: "invalid",
+          args: {},
+          observation,
+          ok: false,
+          durationMs: Date.now() - started,
+          tokenUsage: stepUsage,
+        });
+        transcript.push({ role: "user", content: `Observation (step ${index}) [truncated]: ${observation}` });
+        continue;
+      }
       const looksLikeToolText =
         isToolCallLeak(reply) || /"action"\s*:|"function"\s*:|"tool_calls"\s*:/i.test(reply);
       if ((askMode || autoMode) && !looksLikeToolText && steps.some((step) => step.ok) && reply.trim().length > 30) {
@@ -4229,6 +4575,7 @@ export async function runAgentTask(
       "csv_query",
       "git_blame",
       "browser_check",
+      "run_test_scenario",
       "list_project_tools",
       "run_project_tool",
       "delegate_research",
@@ -4242,6 +4589,7 @@ export async function runAgentTask(
       "launch_mobile_app",
       "mobile_check",
       "check_toolchains",
+      "rescan_project",
       "install_toolchain",
       "game_check",
       "list_skills",
@@ -4251,6 +4599,26 @@ export async function runAgentTask(
       "remove_skill",
       "create_graphic",
       "graphic_check",
+      "project_search",
+      "search_conversations",
+      "read_document",
+      "search_document",
+      "convert_document",
+      "transform_image",
+      "web_fetch",
+      "http_request",
+      "git_info",
+      "git_commit",
+      "git_create_branch",
+      "git_remote",
+      "git_push",
+      "compress_video",
+      "save_note",
+      "list_notes",
+      "read_note",
+      "search_notes",
+      "create_project_tool",
+      "create_skill",
       "write_file",
       "replace_in_file",
       "replace_many",
@@ -4292,6 +4660,7 @@ export async function runAgentTask(
         csv_query: "Querying CSV…",
         git_blame: "Reading git blame…",
         browser_check: "Inspecting the preview in a browser…",
+        run_test_scenario: "Running a saved test scenario…",
         list_project_tools: "Listing saved project tools…",
         list_mobile_devices: "Listing mobile devices…",
         boot_mobile_device: "Booting a mobile device…",
@@ -4302,6 +4671,7 @@ export async function runAgentTask(
         launch_mobile_app: "Launching a mobile app…",
         mobile_check: "Checking a mobile device…",
         check_toolchains: "Checking toolchains…",
+        rescan_project: "Rescanning the project index…",
         game_check: "Checking the game scene…",
         list_skills: "Listing skills…",
         preview_skill_source: "Previewing a skill source…",
@@ -4346,16 +4716,39 @@ export async function runAgentTask(
     }
 
     if (
+      askMode &&
+      inspectionNudged &&
+      READ_ONLY_ACTIONS.has(action) &&
+      !VERIFICATION_ACTIONS.has(action)
+    ) {
+      inspectionReadRejections += 1;
+      step.ok = false;
+      step.observation =
+        "Inspection evidence is sufficient. Call finish now with the root cause, file:line evidence and the minimal fix. Do not read more files.";
+      step.durationMs = 0;
+      recordStep(step);
+      log("warn", "Inspection read blocked", action);
+      if (inspectionReadRejections >= 2) {
+        stoppedReason = "finished";
+        summary = buildInspectionSummary(steps);
+        log("warn", "Inspection finished with collected evidence", `${steps.length} steps`);
+      }
+      if (stoppedReason === "finished") break;
+      continue;
+    }
+
+    if (
       !askMode &&
       plan.needsWrite &&
       changedFiles.length === 0 &&
       writeNudges >= 2 &&
-      READ_ONLY_ACTIONS.has(action)
+      READ_ONLY_ACTIONS.has(action) &&
+      !VERIFICATION_ACTIONS.has(action)
     ) {
       readRejections += 1;
       step.ok = false;
       step.observation =
-        "Read budget exhausted. No file has changed yet. Perform the edit now with replace_in_file or write_file, or finish with the exact blocker.";
+        "Read budget exhausted. No file has changed yet. If the requested behavior already exists, finish with the verification evidence. Otherwise perform the edit now with replace_in_file or write_file, or finish with the exact blocker.";
       step.durationMs = 0;
       recordStep(step);
       log("warn", "Read budget exhausted", action);
@@ -4421,6 +4814,25 @@ export async function runAgentTask(
         errorMessage = "Syntax errors remained after the edit.";
         log("error", "Stopped with syntax errors", syntaxFailures.map((item) => item.file).join(", "));
         break;
+      }
+
+      if (!readOnlyMode && unreferencedAssets.length > 0 && assetNudges < 2) {
+        assetNudges += 1;
+        const observation = `Finish rejected: ${unreferencedAssets.join(
+          " ",
+        )} Add the missing <script src> / <link href> or import so the changed asset is actually loaded.`;
+        log("warn", "Finish rejected: asset not loaded", unreferencedAssets.join(", "));
+        recordStep({
+          index,
+          action: "invalid",
+          args: {},
+          observation,
+          ok: false,
+          durationMs: Date.now() - started,
+          tokenUsage: stepUsage,
+        });
+        transcript.push({ role: "user", content: `Observation (step ${index}) [invalid]: ${observation}` });
+        continue;
       }
 
       if (
@@ -4589,6 +5001,141 @@ export async function runAgentTask(
         continue;
       }
 
+      if (
+        !readOnlyMode &&
+        lastToolFailure &&
+        toolFailureNudges < 2 &&
+        modelTurns < maxSteps &&
+        (changedFiles.length === 0 ||
+          /(?:bloker|blocked|could not|couldn't|unable to|not applied|uygulanamadı|reddedildi|değişiklik yapılmadı|hiçbir değişiklik|failed)/i.test(
+            rawSummary,
+          ))
+      ) {
+        toolFailureNudges += 1;
+        const observation = `Finish rejected: your last ${lastToolFailure.action} call failed and was not resolved. Fix the call and complete the work yourself instead of stopping.\nError: ${lastToolFailure.observation.slice(0, 700)}${toolArgHint(
+          lastToolFailure.action,
+        )}`;
+        log(
+          "warn",
+          "Finish rejected: unresolved tool error",
+          `${lastToolFailure.action} · ${lastToolFailure.observation.slice(0, 140)}`,
+        );
+        recordStep({
+          index,
+          action: "invalid",
+          args: {},
+          observation,
+          ok: false,
+          durationMs: Date.now() - started,
+          tokenUsage: stepUsage,
+        });
+        transcript.push({ role: "user", content: `Observation (step ${index}) [tool-error]: ${observation}` });
+        continue;
+      }
+
+      const projectHasHtml = analysis.files.some((file) => /\.html?$/i.test(file.path));
+      const uiFilesChanged = changedFiles.some(
+        (file) =>
+          /\.(?:html?|css|scss|sass|less|jsx|tsx|vue|svelte)$/i.test(file) ||
+          (projectHasHtml && /\.(?:m?js)$/i.test(file)),
+      );
+      const claimsApplied =
+        /(?:uygulandı|düzeltildi|düzelttim|fixed|applied|değiştirildi|güncellendi|implemented)/i.test(
+          rawSummary,
+        ) &&
+        !/(?:no (?:file|change)|not applied|not changed|already (?:present|exists|implemented|applied|there|complete)|no changes? (?:are )?(?:needed|required)|nothing to change|uygulanamadı|değişiklik yapılmadı|hiçbir değişiklik|zaten (?:var|mevcut|tamam)|değişiklik gerekmiyor)/i.test(
+          rawSummary,
+        );
+      const claimsVerified =
+        /(?:doğrulandı|doğruladım|verified|tested|passed|geçti|✅)/i.test(rawSummary) &&
+        !/(?:not verified|unverified|doğrulanamadı|test edilemedi)/i.test(rawSummary);
+      const explainedNoCheck =
+        /(?:tarayıcı (?:yok|kullanılamıyor)|browser (?:is )?(?:not available|unavailable)|cannot run (?:a )?browser|mümkün değil)/i.test(
+          rawSummary,
+        );
+
+      if (
+        !readOnlyMode &&
+        claimNudges < 1 &&
+        changedFiles.length === 0 &&
+        claimsApplied
+      ) {
+        claimNudges += 1;
+        const observation =
+          "Your summary says the change was applied, but no file was actually changed. Do not report a fix that was not written. Make the edit now with write_file or replace_in_file, or state clearly that nothing needed to change and why. Partial rewrites that produce identical content do not count.";
+        log("warn", "Finish rejected: claimed change without an edit", rawSummary.replace(/\s+/g, " ").slice(0, 160));
+        recordStep({
+          index,
+          action: "invalid",
+          args: {},
+          observation,
+          ok: false,
+          durationMs: Date.now() - started,
+          tokenUsage: stepUsage,
+        });
+        transcript.push({ role: "user", content: `Observation (step ${index}) [claim]: ${observation}` });
+        continue;
+      }
+
+      if (
+        !readOnlyMode &&
+        verifyNudges < 1 &&
+        projectHasHtml &&
+        uiFilesChanged &&
+        !explainedNoCheck &&
+        realBrowserChecks + realScenarioRuns === 0 &&
+        modelTurns >= 2
+      ) {
+        verifyNudges += 1;
+        const observation =
+          "No verification ran against the real project entry page. A synthetic harness under .cie/ does not prove the app, even when it passes. Run browser_check or run_test_scenario on the real entry page (for example index.html). If the target state is hard to reach, use an eval step on the real page to put it in that state, then assert it with expectText/expectVisible/expectStable. Then finish.";
+        log("warn", "Finish rejected: no real-page verification", "synthetic checks do not count");
+        await appendLesson(
+          analysis.rootPath,
+          "A synthetic harness under .cie/ is not proof. Verify the real project entry page; use an eval step to reach a hidden state, then assert it.",
+        ).catch(() => {});
+        recordStep({
+          index,
+          action: "invalid",
+          args: {},
+          observation,
+          ok: false,
+          durationMs: Date.now() - started,
+          tokenUsage: stepUsage,
+        });
+        transcript.push({ role: "user", content: `Observation (step ${index}) [verify]: ${observation}` });
+        continue;
+      }
+
+      if (
+        !readOnlyMode &&
+        verifyNudges < 2 &&
+        uiFilesChanged &&
+        claimsVerified &&
+        realCheckAssertions === 0 &&
+        !explainedNoCheck
+      ) {
+        verifyNudges += 1;
+        const observation =
+          "Your real-page check only proved that the page loads. Assert the changed behavior itself with expectText, expectValue, expectStable or expectCount on the real entry page before claiming verification. A passing harness or a screenshot is not behavior evidence.";
+        log("warn", "Finish rejected: no behavior assertion", "real check had no expect* step");
+        await appendLesson(
+          analysis.rootPath,
+          "A real check that only proves the page loads is not verification. Assert the changed behavior with expectText/expectValue/expectStable/expectCount.",
+        ).catch(() => {});
+        recordStep({
+          index,
+          action: "invalid",
+          args: {},
+          observation,
+          ok: false,
+          durationMs: Date.now() - started,
+          tokenUsage: stepUsage,
+        });
+        transcript.push({ role: "user", content: `Observation (step ${index}) [verify]: ${observation}` });
+        continue;
+      }
+
       if (!readOnlyMode && changedFiles.length > 0) {
         const verification = await verifyChanges();
         if (verification.ran && !verification.ok && !verification.cached) {
@@ -4671,7 +5218,7 @@ export async function runAgentTask(
         ok = cachedAction.ok;
         log("info", "Skipped duplicate tool call", `${action} · step ${cachedAction.step}`);
       } else if (action === "list_files") {
-        const rawPrefix = normalizeAgentPath(analysis.rootPath, args.path);
+        const rawPrefix = normalizeAgentPath(analysis.rootPath, pathFromArgs(args));
         const prefix = rawPrefix.replace(/\/$/, "");
         const limit = Math.max(1, Math.min(200, Number(args.limit ?? 80) || 80));
         const matches = await listDiskFiles(analysis.rootPath, prefix, limit);
@@ -4702,7 +5249,7 @@ export async function runAgentTask(
         );
         ok = true;
       } else if (action === "git_blame") {
-        const filePath = normalizeAgentPath(analysis.rootPath, args.path);
+        const filePath = normalizeAgentPath(analysis.rootPath, pathFromArgs(args));
         if (!filePath) throw new Error("A file path is required.");
         if (isSecretAgentPath(filePath)) throw new Error("Reading environment, key or Git internals files is denied.");
         const startLine = Math.max(1, Number(args.startLine ?? 1) || 1);
@@ -4713,7 +5260,7 @@ export async function runAgentTask(
         log("info", "Git blame read", `${filePath}:${startLine}-${endLine}`);
         ok = true;
       } else if (action === "sqlite_query") {
-        const filePath = normalizeAgentPath(analysis.rootPath, args.path);
+        const filePath = normalizeAgentPath(analysis.rootPath, pathFromArgs(args));
         if (!filePath) throw new Error("A database path is required.");
         if (isSecretAgentPath(filePath)) throw new Error("Reading environment, key or Git internals files is denied.");
         observation = await querySqliteFile(
@@ -4725,7 +5272,7 @@ export async function runAgentTask(
         log("info", "SQLite query executed", filePath);
         ok = true;
       } else if (action === "csv_query") {
-        const filePath = normalizeAgentPath(analysis.rootPath, args.path);
+        const filePath = normalizeAgentPath(analysis.rootPath, pathFromArgs(args));
         if (!filePath) throw new Error("A CSV path is required.");
         if (isSecretAgentPath(filePath)) throw new Error("Reading environment, key or Git internals files is denied.");
         observation = await queryCsvFile(analysis.rootPath, filePath, args);
@@ -4834,6 +5381,7 @@ export async function runAgentTask(
             end: endLine,
             wholeFile: startLine === 1 && endLine >= lines.length,
             step: index,
+            observation,
           });
           readCoverage.set(symbol.filePath, ranges);
           log(
@@ -4867,7 +5415,7 @@ export async function runAgentTask(
         log("info", `${matches.length} symbols matched`, query || "*");
         ok = true;
       } else if (action === "read_file") {
-        const filePath = normalizeAgentPath(analysis.rootPath, args.path);
+        const filePath = normalizeAgentPath(analysis.rootPath, pathFromArgs(args));
         if (!filePath) throw new Error("A file path is required.");
         if (isSecretAgentPath(filePath)) throw new Error("Reading environment, key or Git internals files is denied.");
         const requestedStart = Math.max(1, Number(args.startLine ?? 1) || 1);
@@ -4884,10 +5432,15 @@ export async function runAgentTask(
         );
         const covered = readRangeCovered(ranges, requestedStart, wholeFile, requestedEnd);
         if (covered && coveredEntry) {
-          observation = `Already read ${filePath}${
-            wholeFile ? " (whole file)" : `:${requestedStart}-${requestedEnd}`
-          } in step ${coveredEntry.step}. Reuse that observation; do not read it again.`;
-          log("info", "Read skipped (already in context)", `${filePath} · step ${coveredEntry.step}`);
+          const cachedContent = coveredEntry.observation
+            ? clampObservation(coveredEntry.observation, 3_000)
+            : "";
+          observation =
+            `Cached read: ${filePath}${
+              wholeFile ? " (whole file)" : `:${requestedStart}-${requestedEnd}`
+            } from step ${coveredEntry.step}. Do not request this range again; make the edit now.` +
+            (cachedContent ? `\n\n${cachedContent}` : " Reuse the earlier observation.");
+          log("info", "Read served from context cache", `${filePath} · step ${coveredEntry.step}`);
           ok = true;
         } else {
           const file = await readSourceFile(analysis.rootPath, filePath);
@@ -4932,7 +5485,7 @@ export async function runAgentTask(
           ok = true;
         }
       } else if (action === "diagnostics") {
-        const filePath = normalizeAgentPath(analysis.rootPath, args.path);
+        const filePath = normalizeAgentPath(analysis.rootPath, pathFromArgs(args));
         if (!filePath) throw new Error("A file path is required.");
         if (isSecretAgentPath(filePath)) throw new Error("Reading environment, key or Git internals files is denied.");
         const lsp = await lspDiagnostics(analysis.rootPath, filePath).catch(() => null);
@@ -4964,7 +5517,7 @@ export async function runAgentTask(
         evidence.push({ path: filePath, label: "Diagnostics" });
         log(ok ? "info" : "warn", ok ? "Diagnostics checked" : "Diagnostics failed", filePath);
       } else if (action === "lsp_hover") {
-        const filePath = normalizeAgentPath(analysis.rootPath, args.path);
+        const filePath = normalizeAgentPath(analysis.rootPath, pathFromArgs(args));
         if (!filePath) throw new Error("A file path is required.");
         if (isSecretAgentPath(filePath)) throw new Error("Reading environment, key or Git internals files is denied.");
         const hover = await lspHover(
@@ -4978,7 +5531,7 @@ export async function runAgentTask(
         log(hover ? "info" : "warn", hover ? "LSP hover read" : "LSP hover empty", filePath);
         ok = true;
       } else if (action === "lsp_completion") {
-        const filePath = normalizeAgentPath(analysis.rootPath, args.path);
+        const filePath = normalizeAgentPath(analysis.rootPath, pathFromArgs(args));
         if (!filePath) throw new Error("A file path is required.");
         if (isSecretAgentPath(filePath)) throw new Error("Reading environment, key or Git internals files is denied.");
         const items = await lspCompletion(
@@ -4997,7 +5550,7 @@ export async function runAgentTask(
         log(items.length > 0 ? "info" : "warn", "LSP completions read", `${items.length} items`);
         ok = true;
       } else if (action === "find_in_file") {
-        const filePath = normalizeAgentPath(analysis.rootPath, args.path);
+        const filePath = normalizeAgentPath(analysis.rootPath, pathFromArgs(args));
         const query = String(args.query ?? "").trim();
         if (!filePath) throw new Error("A file path is required.");
         if (!query) throw new Error("A search query is required.");
@@ -5039,7 +5592,7 @@ export async function runAgentTask(
           ok = true;
         }
       } else if (action === "list_items") {
-        const filePath = normalizeAgentPath(analysis.rootPath, args.path);
+        const filePath = normalizeAgentPath(analysis.rootPath, pathFromArgs(args));
         if (!filePath) throw new Error("A file path is required.");
         if (isSecretAgentPath(filePath)) throw new Error("Reading environment, key or Git internals files is denied.");
         const file = await readSourceFile(analysis.rootPath, filePath);
@@ -5057,7 +5610,7 @@ export async function runAgentTask(
       } else if (action === "count_matches") {
         const query = String(args.query ?? "").trim();
         if (!query) throw new Error("A search query is required.");
-        const target = normalizeAgentPath(analysis.rootPath, args.path);
+        const target = normalizeAgentPath(analysis.rootPath, pathFromArgs(args));
         if (target && isSecretAgentPath(target)) throw new Error("Reading environment, key or Git internals files is denied.");
         const limit = Math.max(1, Math.min(50, Number(args.limit ?? 20) || 20));
         const needle = query.toLowerCase();
@@ -5101,7 +5654,7 @@ export async function runAgentTask(
         log("info", `${scanned} files scanned · ${total} matches`, query);
         ok = true;
       } else if (action === "json_query") {
-        const filePath = normalizeAgentPath(analysis.rootPath, args.path);
+        const filePath = normalizeAgentPath(analysis.rootPath, pathFromArgs(args));
         if (!filePath) throw new Error("A file path is required.");
         if (isSecretAgentPath(filePath)) throw new Error("Reading environment, key or Git internals files is denied.");
         const file = await readSourceFile(analysis.rootPath, filePath);
@@ -5145,7 +5698,7 @@ export async function runAgentTask(
         log("info", "JSON parsed", pointer || "root");
         ok = true;
       } else if (action === "rename_path") {
-        const fromPath = normalizeAgentPath(analysis.rootPath, args.path);
+        const fromPath = normalizeAgentPath(analysis.rootPath, pathFromArgs(args));
         const toPath = normalizeAgentPath(analysis.rootPath, args.newPath);
         if (!fromPath || !toPath) throw new Error("Both path and newPath are required.");
         if (isSecretAgentPath(fromPath) || isSecretAgentPath(toPath)) {
@@ -5170,7 +5723,7 @@ export async function runAgentTask(
         log("success", "Path moved", `${renamed.from} → ${renamed.to}`);
         ok = true;
       } else if (action === "delete_file") {
-        const targetPath = normalizeAgentPath(analysis.rootPath, args.path);
+        const targetPath = normalizeAgentPath(analysis.rootPath, pathFromArgs(args));
         if (!targetPath) throw new Error("A path is required.");
         if (isSecretAgentPath(targetPath)) {
           throw new Error("Deleting environment, key or Git internals files is denied.");
@@ -5384,6 +5937,15 @@ export async function runAgentTask(
         observation = result.message;
         log("success", "Mobile app launched", target);
         ok = true;
+      } else if (action === "rescan_project") {
+        const fresh = await analyzeProject(analysis.rootPath);
+        await saveAnalysis(fresh);
+        startProjectIndexBuild(fresh.id, fresh);
+        Object.assign(analysis, fresh);
+        invalidateReadCaches();
+        observation = `Rescanned project: ${fresh.files.length} files, ${fresh.symbols.length} symbols. Rebuilt the analysis and search index; the project map will refresh on the next run.`;
+        log("success", "Project rescanned", `${fresh.files.length} files · ${fresh.symbols.length} symbols`);
+        ok = true;
       } else if (action === "check_toolchains") {
         const report = await checkToolchains();
         observation = report.tools
@@ -5481,15 +6043,58 @@ export async function runAgentTask(
         observation = result.summary;
         ok = result.check.ok && result.check.metrics.canvases > 0;
         log(result.check.ok ? "success" : "error", "Game check complete", `${result.engine} · ${result.check.metrics.fps ?? "—"} fps`);
+      } else if (action === "run_test_scenario") {
+        const rawName = String(args.name ?? args.path ?? "").trim();
+        if (!rawName) throw new Error("A test scenario name is required.");
+        const relative = rawName.endsWith(".json")
+          ? rawName
+          : `.cie/agent/scenarios/${rawName.replace(/^.*[\\/]/, "")}.json`;
+        if (!relative.startsWith(".cie/agent/scenarios/")) {
+          throw new Error("Test scenarios must live under .cie/agent/scenarios/.");
+        }
+        const scenarioFile = await readSourceFile(analysis.rootPath, relative);
+        const scenario = JSON.parse(scenarioFile.content) as {
+          path?: string;
+          mobile?: boolean;
+          timeoutMs?: number;
+          steps?: BrowserCheckStep[];
+        };
+        if (!Array.isArray(scenario.steps) || scenario.steps.length === 0) {
+          throw new Error("The test scenario has no steps.");
+        }
+        const result = await runBrowserCheck(analysis.id, analysis.rootPath, {
+          path: scenario.path,
+          mobile: scenario.mobile,
+          timeoutMs: scenario.timeoutMs,
+          steps: scenario.steps,
+        });
+        const failedSteps = result.steps.filter((step) => !step.ok);
+        const scenarioSynthetic = isSyntheticCheckPath(scenario.path);
+        if (scenarioSynthetic) syntheticBrowserChecks += 1;
+        else {
+          realScenarioRuns += 1;
+          realCheckAssertions += countCheckAssertions(scenario.steps);
+        }
+        observation = `Test scenario ${relative}: ${result.ok ? "PASSED" : "FAILED"}${
+          scenarioSynthetic
+            ? "\nNote: this scenario runs a synthetic page under .cie/; it does not prove the real app. Verify the project entry page too."
+            : ""
+        }\n${result.summary}${
+          failedSteps.length > 0
+            ? `\nFailed steps:\n${failedSteps
+                .map((step) => `- ${step.index}. ${step.action}: ${step.detail.slice(0, 240)}`)
+                .join("\n")}`
+            : ""
+        }\nConsole errors: ${result.consoleErrors.slice(0, 5).join(" | ") || "none"}`;
+        evidence.push({ path: relative, label: "Test scenario" });
+        log(result.ok ? "success" : "warn", "Test scenario finished", result.summary.slice(0, 160));
+        ok = result.ok;
       } else if (action === "browser_check") {
         browserCheckCalls += 1;
-        if (browserCheckCalls > 2) {
-          throw new Error(
-            "Browser check budget reached (2). Use the last failure details to fix the page; do not run browser_check again in this task.",
-          );
-        }
         const browserPath = typeof args.path === "string" ? args.path : "index.html";
         const rawSteps = Array.isArray(args.steps) ? args.steps : [];
+        const browserKey = `${browserPath}::${JSON.stringify(rawSteps)}`;
+        const syntheticCheck = isSyntheticCheckPath(browserPath);
         const result = await runBrowserCheck(analysis.id, analysis.rootPath, {
           path: browserPath,
           url: typeof args.url === "string" ? args.url : undefined,
@@ -5497,6 +6102,19 @@ export async function runAgentTask(
           mobile: args.mobile === true,
           screenshot: args.screenshot === true,
         });
+        if (syntheticCheck) syntheticBrowserChecks += 1;
+        else {
+          realBrowserChecks += 1;
+          realCheckAssertions += countCheckAssertions(rawSteps as { action: string }[]);
+        }
+        if (result.ok) {
+          browserFailureRepeat = 0;
+        } else if (browserKey === lastBrowserKey) {
+          browserFailureRepeat += 1;
+        } else {
+          browserFailureRepeat = 1;
+        }
+        lastBrowserKey = browserKey;
         observation = [
           result.summary,
           ...result.steps.map(
@@ -5511,6 +6129,12 @@ export async function runAgentTask(
             : "",
           result.resourceErrors.length > 0
             ? `Resource errors:\n${result.resourceErrors.slice(0, 8).join("\n")}`
+            : "",
+          syntheticCheck
+            ? "Note: this check ran a synthetic page under .cie/, not the project entry page. It does not prove the real app."
+            : "",
+          !result.ok && browserFailureRepeat >= 3
+            ? "The same check has failed 3 times in a row. Change the steps or fix the underlying page; repeating it will not help."
             : "",
         ]
           .filter(Boolean)
@@ -5567,7 +6191,6 @@ export async function runAgentTask(
           `Read-only research subagent. Investigate and report a compact answer with file:line evidence. Do not modify files or run commands.\n\n${goal}`,
           {
             mode: "ask",
-            maxSteps: 6,
             allowWrite: false,
             allowCommands: false,
             interactive: false,
@@ -5597,7 +6220,7 @@ export async function runAgentTask(
         }
         log("info", "Research subagent completed", goal.slice(0, 160));
       } else if (action === "placeholder_asset") {
-        const assetPath = normalizeAgentPath(analysis.rootPath, args.path);
+        const assetPath = normalizeAgentPath(analysis.rootPath, pathFromArgs(args));
         if (!assetPath) throw new Error("An asset path is required.");
         if (isSecretAgentPath(assetPath)) throw new Error("Writing environment, key or Git internals assets is denied.");
         const assetAllowed = await requirePermission(
@@ -5628,7 +6251,7 @@ export async function runAgentTask(
         log("success", "Placeholder asset created", created.path);
         ok = true;
       } else if (action === "graphic_check") {
-        const graphicPath = normalizeAgentPath(analysis.rootPath, args.path);
+        const graphicPath = normalizeAgentPath(analysis.rootPath, pathFromArgs(args));
         if (!graphicPath) throw new Error("A graphic path is required.");
         const result = await checkGraphic(
           analysis.rootPath,
@@ -5639,7 +6262,7 @@ export async function runAgentTask(
         ok = result.ok;
         log(result.ok ? "success" : "warn", "Graphic check", `${result.format} · ${result.width ?? "?"}×${result.height ?? "?"}`);
       } else if (action === "create_graphic") {
-        const graphicPath = normalizeAgentPath(analysis.rootPath, args.path);
+        const graphicPath = normalizeAgentPath(analysis.rootPath, pathFromArgs(args));
         if (!graphicPath) throw new Error("A graphic path is required.");
         if (isSecretAgentPath(graphicPath)) throw new Error("Writing environment, key or Git internals graphics is denied.");
         const allowed = await requirePermission(
@@ -6129,10 +6752,22 @@ export async function runAgentTask(
         ok = true;
       } else if (action === "write_file") {
         if (changedFiles.length >= AGENT_MAX_WRITES) throw new Error(`Write limit reached (${AGENT_MAX_WRITES} files).`);
-        const filePath = normalizeAgentPath(analysis.rootPath, args.path);
-        const content = typeof args.content === "string" ? args.content : "";
+        const filePath = normalizeAgentPath(analysis.rootPath, pathFromArgs(args));
+        const content = contentFromArgs(args);
         if (!filePath) throw new Error("A file path is required.");
-        if (!content && !(args.content === "")) throw new Error("The content field must be a string.");
+        if (
+          !content &&
+          !Object.keys(args).some((key) =>
+            ["content", "text", "code", "body", "value", "source"].includes(key),
+          )
+        ) {
+          throw new Error("The content field must be a string.");
+        }
+        if (content.length > 200_000) {
+          throw new Error(
+            "File content is too large for one tool call (200k character limit). Write the first section with write_file, then use append_text for the rest. Keep each JSON reply complete.",
+          );
+        }
         if (isSecretAgentPath(filePath)) throw new Error("Writing environment, key or Git internals files is denied.");
         const writeAllowed = await requirePermission(
           "write",
@@ -6142,17 +6777,21 @@ export async function runAgentTask(
           { preview: content },
         );
         if (!writeAllowed) throw new Error("The user denied permission to write this file.");
+        const previous = await readSourceFile(analysis.rootPath, filePath).catch(() => null);
         const written = await writeSourceFile(projectId, analysis.rootPath, filePath, content);
-        changedFiles.push(written.filePath);
+        const effectiveChange = !previous || previous.content !== content;
+        if (effectiveChange) changedFiles.push(written.filePath);
         evidence.push({ path: written.filePath, label: "Written by agent" });
         invalidateReadCaches();
-        observation = `Wrote ${written.bytes} bytes to ${written.filePath}${written.backupPath ? " (backup created)" : ""}.`;
+        observation = effectiveChange
+          ? `Wrote ${written.bytes} bytes to ${written.filePath}${written.backupPath ? " (backup created)" : ""}.`
+          : `Wrote ${written.bytes} bytes to ${written.filePath}, but the content is identical to the previous version (no effective change).`;
         log("success", "File written", `${written.bytes} bytes${written.backupPath ? " · backup created" : ""}`);
         ok = true;
       } else if (action === "replace_in_file") {
-        const filePath = normalizeAgentPath(analysis.rootPath, args.path);
-        const find = typeof args.find === "string" ? args.find : "";
-        const replace = typeof args.replace === "string" ? args.replace : "";
+        const filePath = normalizeAgentPath(analysis.rootPath, pathFromArgs(args));
+        const find = findFromArgs(args);
+        const replace = replaceFromArgs(args);
         if (!filePath) throw new Error("A file path is required.");
         if (!find) throw new Error("The find field is required.");
         if (isSecretAgentPath(filePath)) throw new Error("Editing environment, key or Git internals files is denied.");
@@ -6170,15 +6809,18 @@ export async function runAgentTask(
         if (!replaceAllowed) throw new Error("The user denied permission to edit this file.");
         const nextContent = file.content.replace(find, replace);
         const written = await writeSourceFile(projectId, analysis.rootPath, filePath, nextContent);
-        if (!changedFiles.includes(written.filePath)) changedFiles.push(written.filePath);
+        const effectiveChange = nextContent !== file.content;
+        if (effectiveChange && !changedFiles.includes(written.filePath)) changedFiles.push(written.filePath);
         evidence.push({ path: written.filePath, label: "Edited by agent" });
         invalidateReadCaches();
-        observation = `Replaced one snippet in ${written.filePath} (${written.bytes} bytes).`;
+        observation = effectiveChange
+          ? `Replaced one snippet in ${written.filePath} (${written.bytes} bytes).`
+          : `The replacement produced identical content in ${written.filePath}; no effective change was made.`;
         log("success", "File edited", written.filePath);
         ok = true;
       } else if (action === "append_text") {
-        const filePath = normalizeAgentPath(analysis.rootPath, args.path);
-        const content = typeof args.content === "string" ? args.content : "";
+        const filePath = normalizeAgentPath(analysis.rootPath, pathFromArgs(args));
+        const content = contentFromArgs(args);
         if (!filePath) throw new Error("A file path is required.");
         if (!content.trim()) throw new Error("The content to append is required.");
         if (isSecretAgentPath(filePath)) throw new Error("Editing environment, key or Git internals files is denied.");
@@ -6202,23 +6844,26 @@ export async function runAgentTask(
           const separator = existing && existing.content.length > 0 && !existing.content.endsWith("\n") ? "\n" : "";
           const nextContent = `${existing?.content ?? ""}${separator}${content}`;
           const written = await writeSourceFile(projectId, analysis.rootPath, filePath, nextContent);
-          if (!changedFiles.includes(written.filePath)) changedFiles.push(written.filePath);
+          const effectiveChange = nextContent !== (existing?.content ?? "");
+          if (effectiveChange && !changedFiles.includes(written.filePath)) changedFiles.push(written.filePath);
           evidence.push({ path: written.filePath, label: "Appended by agent" });
           invalidateReadCaches();
-          observation = `Appended ${content.length} chars to ${written.filePath} (${written.bytes} bytes).`;
+          observation = effectiveChange
+            ? `Appended ${content.length} chars to ${written.filePath} (${written.bytes} bytes).`
+            : `The append produced identical content in ${written.filePath}; no effective change was made.`;
           log("success", "File appended", written.filePath);
           ok = true;
         }
       } else if (action === "replace_many") {
-        const filePath = normalizeAgentPath(analysis.rootPath, args.path);
+        const filePath = normalizeAgentPath(analysis.rootPath, pathFromArgs(args));
         if (!filePath) throw new Error("A file path is required.");
         if (isSecretAgentPath(filePath)) throw new Error("Editing environment, key or Git internals files is denied.");
         const rawEdits = Array.isArray(args.edits) ? args.edits : [];
         const edits = rawEdits
           .filter((item): item is Record<string, unknown> => Boolean(item && typeof item === "object"))
           .map((item) => ({
-            find: typeof item.find === "string" ? item.find : "",
-            replace: typeof item.replace === "string" ? item.replace : "",
+            find: findFromArgs(item),
+            replace: replaceFromArgs(item),
           }))
           .filter((item) => item.find);
         if (edits.length === 0) throw new Error("At least one find/replace edit is required.");
@@ -6249,14 +6894,17 @@ export async function runAgentTask(
         );
         if (!manyAllowed) throw new Error("The user denied permission to edit this file.");
         const written = await writeSourceFile(projectId, analysis.rootPath, filePath, nextContent);
-        if (!changedFiles.includes(written.filePath)) changedFiles.push(written.filePath);
+        const effectiveChange = nextContent !== file.content;
+        if (effectiveChange && !changedFiles.includes(written.filePath)) changedFiles.push(written.filePath);
         evidence.push({ path: written.filePath, label: "Edited by agent (multiple)" });
         invalidateReadCaches();
-        observation = `Applied ${edits.length} localized edits to ${written.filePath} in one write (${written.bytes} bytes).`;
+        observation = effectiveChange
+          ? `Applied ${edits.length} localized edits to ${written.filePath} in one write (${written.bytes} bytes).`
+          : `The edits produced identical content in ${written.filePath}; no effective change was made.`;
         log("success", "File edited with multiple replacements", written.filePath);
         ok = true;
       } else if (action === "format_file") {
-        const filePath = normalizeAgentPath(analysis.rootPath, args.path);
+        const filePath = normalizeAgentPath(analysis.rootPath, pathFromArgs(args));
         if (!filePath) throw new Error("A file path is required.");
         if (isSecretAgentPath(filePath)) throw new Error("Formatting environment, key or Git internals files is denied.");
         const formatAllowed = await requirePermission(
@@ -6364,11 +7012,18 @@ export async function runAgentTask(
       }
     } catch (toolError) {
       observation = toolError instanceof Error ? toolError.message : "The tool call failed.";
+      if (/required|must be a string|limit reached|too large|outside the project|denied/i.test(observation)) {
+        observation += `\n\nFix the arguments and retry the same tool now. Do not finish while this call is failing.${toolArgHint(action)}`;
+      }
+      lastToolFailure = { action, observation, index };
       ok = false;
+    }
+    if (ok && ["write_file", "append_text", "replace_in_file", "replace_many", "rename_path", "delete_file"].includes(action)) {
+      lastToolFailure = null;
     }
 
     if (actionCount > 1) {
-      observation = `${observation}\n\n(Your reply contained ${actionCount} tool calls; all were executed in order. One JSON action per turn is still preferred.)`;
+      observation = `${observation}\n\n(Your reply contained ${actionCount} tool calls; all were executed in order. Batched read-only calls are encouraged; keep mutating actions one per reply.)`;
     }
     if (
       ok &&
@@ -6382,6 +7037,11 @@ export async function runAgentTask(
           .join(", ");
         observation = `${observation}\n\nUI wiring check: ${detail} is not defined in any project markup. Add the corresponding input/control to the form/template (or explain why it is created dynamically) before finishing.`;
         log("warn", "UI wiring incomplete", detail);
+      }
+      unreferencedAssets = await auditUnreferencedAssets(analysis, changedFiles).catch(() => []);
+      if (unreferencedAssets.length > 0) {
+        observation = `${observation}\n\nAsset wiring check: ${unreferencedAssets.join(" ")} Add the script/link tag or import before finishing.`;
+        log("warn", "Asset not loaded", unreferencedAssets.join(" · "));
       }
     }
     if (
@@ -6461,6 +7121,38 @@ export async function runAgentTask(
     step.tokenUsage = stepUsage;
     log(ok ? "success" : "error", ok ? "Tool completed" : "Tool failed", action);
     recordStep(step);
+    if (READ_ONLY_ACTIONS.has(step.action) && ok) {
+      readOnlyStepsSinceChange += 1;
+    } else if (!READ_ONLY_ACTIONS.has(step.action)) {
+      readOnlyStepsSinceChange = 0;
+    }
+    if (readOnlyMode && readOnlyStepsSinceChange >= 8 && !inspectionNudged) {
+      inspectionNudged = true;
+      transcript.push({
+        role: "system",
+        content:
+          "Inspection decision point: you have enough evidence. Finish now with a compact diagnosis: root cause, file:line evidence, runtime proof, and the minimal fix that would be needed. Do not read more files. browser_check, run_test_scenario and game_check remain available if one final runtime proof is needed.",
+      });
+      log("warn", "Inspection decision point", `${readOnlyStepsSinceChange} read-only calls`);
+    }
+    if (
+      !readOnlyMode &&
+      plan.needsWrite &&
+      changedFiles.length === 0 &&
+      readOnlyStepsSinceChange >= 8 &&
+      !readDecisionNudged
+    ) {
+      readDecisionNudged = true;
+      writeNudges = 2;
+      readRejections = 0;
+      queuedActions.length = 0;
+      transcript.push({
+        role: "system",
+        content:
+          "Decision point: you have made 8+ read-only calls without changing a file. Stop reading. If the requested behavior already exists, verify it and call finish with file:line evidence and no edit. Otherwise make the smallest edit now with replace_in_file or write_file. Further file-reading/search calls are blocked, but browser_check, run_test_scenario and game_check remain available for verification. Then finish.",
+      });
+      log("warn", "Decision point: edit or finish", `${readOnlyStepsSinceChange} read-only calls · no edit`);
+    }
     if (step.action === "invalid") {
       protocolFailures += 1;
       if (protocolFailures >= 2) {
@@ -6484,7 +7176,81 @@ export async function runAgentTask(
       }`,
     });
 
-    if (steps.length >= AGENT_MAX_ACTIONS) break;
+    // Progress watchdog: run without a fixed step budget, but stop when the
+    // model keeps failing or repeating the same calls with no new information.
+    const repeatObservation = /Already executed in step \d+ with the same arguments/.test(
+      step.observation,
+    );
+    const unproductive =
+      !ok || step.action === "invalid" || (READ_ONLY_ACTIONS.has(step.action) && repeatObservation);
+    unproductiveTurns = unproductive ? unproductiveTurns + 1 : 0;
+    if (unproductiveTurns === 4 && !progressNudged) {
+      progressNudged = true;
+      transcript.push({
+        role: "system",
+        content:
+          "Four turns produced no progress. Change approach now: fix the failing tool arguments, read a different range or file, or make the edit. Do not repeat the same calls.",
+      });
+      log("warn", "No-progress warning", "4 turns without new information");
+    }
+    if (unproductiveTurns >= 8) {
+      stoppedReason = "error";
+      summary = `Stopped after ${unproductiveTurns} turns without progress: the same failing or repeated calls kept coming back. Last observation: ${step.observation.slice(
+        0,
+        400,
+      )} Fix the failing call or provide a different instruction, then continue.`;
+      errorMessage = summary;
+      log("error", "Stopping a loop without progress", `${unproductiveTurns} unproductive turns`);
+      break;
+    }
+
+    // Count only the current run. startingUsage belongs to earlier attempts and
+    // must not make a fresh retry begin already over the guard.
+    const spentThisRun = tokenTotal.totalTokens;
+    const currentCodeChanges = changedFiles.filter((file) => !file.startsWith(".cie/")).length;
+    if (currentCodeChanges > codeChangeCount) {
+      codeChangeCount = currentCodeChanges;
+      tokensAtLastCodeChange = spentThisRun;
+      postChangeNudged = false;
+    } else if (codeChangeCount > 0 && spentThisRun - tokensAtLastCodeChange >= 200_000 && !postChangeNudged) {
+      postChangeNudged = true;
+      transcript.push({
+        role: "system",
+        content:
+          "You already changed runtime code but have spent 200k tokens since the last code edit. Stop verifying in circles. Finish with the current evidence, or make the one remaining code edit now.",
+      });
+      log("warn", "Post-change verification warning", `${spentThisRun - tokensAtLastCodeChange} tokens since the last code edit`);
+    } else if (codeChangeCount > 0 && spentThisRun - tokensAtLastCodeChange >= 300_000) {
+      stoppedReason = "error";
+      summary = `Post-change verification stop: ${(
+        spentThisRun - tokensAtLastCodeChange
+      ).toLocaleString()} tokens spent since the last runtime code change. The change itself is preserved. Finish from the current files or run one focused verification, then stop.`;
+      errorMessage = summary;
+      log("error", "Post-change verification stop", `${spentThisRun - tokensAtLastCodeChange} tokens since the last code edit`);
+      break;
+    }
+    const spentLimit = readOnlyMode
+      ? READ_ONLY_TOKEN_LIMIT
+      : changedFiles.length === 0
+        ? NO_PROGRESS_TOKEN_LIMIT
+        : WORKING_TOKEN_LIMIT;
+    if (spentThisRun >= spentLimit) {
+      stoppedReason = "error";
+      summary = `Token safety stop: ${spentThisRun.toLocaleString()} tokens spent with ${
+        readOnlyMode
+          ? "no final answer"
+          : changedFiles.length === 0
+            ? "no file changed"
+            : "no completion"
+      }. The run was stopped to prevent an endless loop. ${
+        changedFiles.length === 0
+          ? "Split the task into smaller single-behavior tasks or retry with a narrower scope."
+          : "Finish from the current files or report the exact remaining blocker."
+      }`;
+      errorMessage = summary;
+      log("error", "Token safety stop", `${spentThisRun.toLocaleString()} tokens · ${changedFiles.length} file(s) changed`);
+      break;
+    }
   }
 
   if (stoppedReason === "max_steps" && steps.length > 0) {
@@ -6584,8 +7350,15 @@ export async function runAgentTask(
     const lastEvidence = lastSuccess
       ? ` Last successful tool: ${lastSuccess.action} — ${lastSuccess.observation.slice(0, 700)}`
       : "";
-    summary = `${errorMessage ?? "The agent stopped because a request failed."}${worked}${lastEvidence}`;
+    const reason =
+      errorMessage?.trim() ||
+      summary.trim() ||
+      "The agent stopped because a request failed.";
+    summary = `${reason}${worked}${lastEvidence}`;
   }
+
+  summary = stripCommentaryTags(summary);
+  if (!summary.trim() && errorMessage) summary = errorMessage;
 
   if (isToolCallLeak(summary)) {
     const cleaned = stripToolCallMarkup(summary);

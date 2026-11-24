@@ -4,17 +4,23 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import type { ProjectTask } from "../../shared/tasks";
-import { summaryAllowsNoChanges } from "./ai/loop";
+import { splitLargeGoal, summaryAllowsNoChanges } from "./ai/loop";
+import { continuationFindings } from "./ai/service";
 import {
+  appendAgentRunEvent,
+  appendLesson,
   appendTaskContext,
   clearQueue,
   createQueue,
   loadQueue,
   markTask,
   nextPendingTask,
+  readLessons,
   removeTask,
   reorderTasks,
+  saveAgentRun,
   saveQueue,
+  startAgentRunLive,
   updateTask,
 } from "./tasks";
 
@@ -123,6 +129,109 @@ test("updates, removes and reorders queued tasks", async () => {
     queue = removeTask(queue, "task-2");
     assert.equal(queue.tasks.some((item) => item.id === "task-2"), false);
     assert.deepEqual(queue.tasks.find((item) => item.id === "task-3")?.dependsOn, []);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("stores a run record and extracts failed tool steps", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "cie-run-"));
+  try {
+    const relative = await saveAgentRun(root, {
+      taskId: "task-1",
+      attempt: 2,
+      goal: "fix the overlay",
+      stoppedReason: "max_steps",
+      summary: "stopped",
+      changedFiles: ["app.js"],
+      steps: [
+        { index: 1, action: "read_file", ok: true, observation: "read ok", args: { path: "app.js" } },
+        {
+          index: 2,
+          action: "append_text",
+          ok: false,
+          observation: "A file path is required.",
+          args: { content: "x" },
+        },
+      ],
+    });
+    assert.equal(relative.endsWith("runs/task-1-a2.json"), true);
+    const data = JSON.parse(await fs.readFile(path.join(root, relative), "utf8"));
+    assert.equal(data.failedSteps.length, 1);
+    assert.equal(data.failedSteps[0].action, "append_text");
+    assert.match(data.failedSteps[0].observation, /file path/);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("keeps append-only lessons readable for the next run", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "cie-lessons-"));
+  try {
+    await appendLesson(root, "append_text needs path and content keys");
+    await appendLesson(root, "guard one-time DOM writes outside requestAnimationFrame");
+    const lessons = await readLessons(root);
+    assert.match(lessons, /append_text needs path and content keys/);
+    assert.match(lessons, /requestAnimationFrame/);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("carries prior findings into a continuation request", () => {
+  const prior = [
+    "Kök neden: oyun sonu yazıları comedy.js:612 içindeki handleGameOver fonksiyonunda her karede yeniden yazılıyor.",
+    "Yapılan düzeltme: gameOverHandled bayrağı ve READ_MS = 2600 ile sıralı akış eklenecek.",
+    "Doğrulama: .comedy-note üzerinde expectStable 1200 ms çalıştırılacak.",
+  ].join("\n");
+  const findings = continuationFindings(
+    [{ role: "assistant", content: prior }],
+    "düzeltmeyi uygula",
+  );
+  assert.ok(findings?.includes("comedy.js:612"));
+  assert.equal(
+    continuationFindings([{ role: "assistant", content: "too short" }], "düzeltmeyi uygula"),
+    null,
+  );
+  assert.equal(
+    continuationFindings([{ role: "assistant", content: prior }], "bu proje ne yapıyor?"),
+    null,
+  );
+});
+
+test("splits a multi-feature goal into one task per behavior", () => {
+  const goal =
+    "uçağa ateş edebilme özelliği ekle . kırmızı engelleri farklı ebatlarda meteor olarak değiştir. 3 farklı ebatta meteor olsun küçüğüne 1 atışta bir büyüğü 2 en büyüğü 3 atışta patlasın. küçükler büyüğe göre daha hızlı hareket etsin. komik sahneler hala gelmedi onuda kontrol et.";
+  const tasks = splitLargeGoal(goal);
+  assert.ok(tasks);
+  assert.equal(tasks.length, 5);
+  assert.match(tasks[0].title, /ateş edebilme/);
+  assert.match(tasks[4].title, /komik sahneler/);
+  assert.deepEqual(tasks[1].dependsOn, ["task-1"]);
+});
+
+test("writes a live run log even before the attempt finishes", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "cie-live-"));
+  try {
+    await startAgentRunLive(root, "task-1", 3);
+    await appendAgentRunEvent(root, "task-1", 3, {
+      type: "step",
+      step: {
+        index: 1,
+        action: "read_file",
+        args: { path: "app.js" },
+        observation: "read ok",
+        ok: true,
+        durationMs: 12,
+      },
+    });
+    const text = await fs.readFile(
+      path.join(root, ".cie/agent/runs/task-1-a3.live.jsonl"),
+      "utf8",
+    );
+    assert.match(text, /"type":"start"/);
+    assert.match(text, /read_file/);
+    assert.match(text, /read ok/);
   } finally {
     await fs.rm(root, { recursive: true, force: true });
   }

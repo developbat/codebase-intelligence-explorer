@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import type { AiAgentEvent } from "../../shared/ai";
 import type {
   ProjectTask,
   ProjectTaskQueue,
@@ -37,7 +38,7 @@ function nowIso(): string {
   return new Date().toISOString();
 }
 
-function emptyQueue(projectId: string, goal: string): ProjectTaskQueue {
+export function emptyQueue(projectId: string, goal: string): ProjectTaskQueue {
   const at = nowIso();
   return {
     version: 1,
@@ -196,6 +197,175 @@ export async function appendTaskContext(
     next = `${current.slice(-Math.floor(MAX_CONTEXT_BYTES * 0.6))}${entry}`;
   }
   await writeTextAtomic(file, next);
+}
+
+function lessonsPath(rootPath: string): string {
+  return path.join(rootPath, ".cie", "agent", "LESSONS.md");
+}
+
+export async function appendLesson(rootPath: string, lesson: string): Promise<void> {
+  const text = lesson.trim();
+  if (!text) return;
+  const file = lessonsPath(rootPath);
+  let current = "";
+  try {
+    current = await fs.readFile(file, "utf8");
+  } catch {
+    current = "# Agent lessons\n\nShort, reusable lessons from previous failures. Read this before starting a task.\n";
+  }
+  const entry = `\n- ${new Date().toISOString().slice(0, 16).replace("T", " ")} · ${text.slice(0, 800)}\n`;
+  let next = `${current}${entry}`;
+  if (Buffer.byteLength(next) > 24_000) next = `${current.slice(-16_000)}${entry}`;
+  await writeTextAtomic(file, next);
+}
+
+export async function readLessons(rootPath: string): Promise<string> {
+  try {
+    return (await fs.readFile(lessonsPath(rootPath), "utf8")).slice(-6_000);
+  } catch {
+    return "";
+  }
+}
+
+export interface AgentRunStepRecord {
+  index: number;
+  action: string;
+  ok: boolean;
+  observation: string;
+  args?: string;
+  durationMs?: number;
+}
+
+export interface AgentRunRecord {
+  version: 1;
+  taskId: string;
+  attempt: number;
+  goal: string;
+  stoppedReason: string;
+  summary: string;
+  changedFiles: string[];
+  failedSteps: AgentRunStepRecord[];
+  steps: AgentRunStepRecord[];
+  createdAt: string;
+}
+
+function clip(value: unknown, limit: number): string {
+  const text = typeof value === "string" ? value : value === undefined ? "" : JSON.stringify(value);
+  return text.length > limit ? `${text.slice(0, limit)}\u2026` : text;
+}
+
+function safeTaskId(value: string): string {
+  return value.replace(/[^\w.-]+/g, "-").slice(0, 60) || "task";
+}
+
+function runFilePath(rootPath: string, taskId: string, attempt: number, extension: string): string {
+  return path.join(agentDir(rootPath), "runs", `${safeTaskId(taskId)}-a${attempt}.${extension}`);
+}
+
+/** Start a per-attempt live log so an aborted or killed run still leaves evidence. */
+export async function startAgentRunLive(
+  rootPath: string,
+  taskId: string,
+  attempt: number,
+): Promise<void> {
+  const directory = path.join(agentDir(rootPath), "runs");
+  await fs.mkdir(directory, { recursive: true, mode: 0o700 });
+  const file = runFilePath(rootPath, taskId, attempt, "live.jsonl");
+  await fs.writeFile(
+    file,
+    `${JSON.stringify({ at: nowIso(), type: "start", taskId, attempt })}\n`,
+    { mode: 0o600 },
+  );
+}
+
+/** Append one event to the live run log. Token chunks are skipped. */
+export async function appendAgentRunEvent(
+  rootPath: string,
+  taskId: string,
+  attempt: number,
+  event: AiAgentEvent,
+): Promise<void> {
+  if (event.type === "token" || event.type === "done") return;
+  const entry: Record<string, unknown> = { at: nowIso(), type: event.type };
+  if (event.type === "step") {
+    entry.index = event.step.index;
+    entry.action = event.step.action;
+    entry.ok = event.step.ok;
+    entry.observation = clip(event.step.observation, 800);
+    entry.args = clip(event.step.args, 400);
+    entry.tokenUsage = event.step.tokenUsage;
+    entry.durationMs = event.step.durationMs;
+  } else if (event.type === "log") {
+    entry.level = event.entry.level;
+    entry.label = event.entry.label;
+    entry.detail = clip(event.entry.detail, 300);
+  } else if (event.type === "model") {
+    entry.from = event.from;
+    entry.to = event.to;
+    entry.reason = clip(event.reason, 300);
+  } else if (event.type === "error") {
+    entry.message = clip(event.message, 500);
+  } else if (event.type === "task") {
+    entry.taskId = event.task?.id;
+    entry.status = event.task?.status;
+  } else if (event.type === "intent") {
+    entry.scope = event.intent.scope;
+    entry.kind = event.intent.kind;
+  }
+  const file = runFilePath(rootPath, taskId, attempt, "live.jsonl");
+  await fs.appendFile(file, `${JSON.stringify(entry)}\n`, { mode: 0o600 });
+}
+
+export async function saveAgentRun(
+  rootPath: string,
+  record: Omit<AgentRunRecord, "version" | "createdAt" | "steps" | "failedSteps"> & {
+    steps: { index: number; action: string; ok: boolean; observation: string; args?: unknown; durationMs?: number }[];
+  },
+): Promise<string> {
+  const steps: AgentRunStepRecord[] = record.steps.slice(-160).map((step) => ({
+    index: step.index,
+    action: step.action,
+    ok: step.ok,
+    observation: clip(step.observation, 1_600),
+    args: step.args === undefined ? undefined : clip(step.args, 600),
+    durationMs: step.durationMs,
+  }));
+  const failedSteps = steps.filter(
+    (step) => !step.ok && step.action !== "invalid" && step.action !== "finish",
+  );
+  const data: AgentRunRecord = {
+    version: 1,
+    createdAt: nowIso(),
+    ...record,
+    steps,
+    failedSteps,
+  };
+  const directory = path.join(agentDir(rootPath), "runs");
+  await fs.mkdir(directory, { recursive: true, mode: 0o700 });
+  const file = path.join(directory, `${safeTaskId(record.taskId)}-a${record.attempt}.json`);
+  await writeTextAtomic(file, JSON.stringify(data, null, 2));
+  // Keep diagnostics bounded: retain the newest 40 run records.
+  try {
+    const entries = (await fs.readdir(directory)).filter(
+      (name) => name.endsWith(".json") || name.endsWith(".jsonl"),
+    );
+    if (entries.length > 40) {
+      const stats = await Promise.all(
+        entries.map(async (name) => ({
+          name,
+          at: (await fs.stat(path.join(directory, name)).catch(() => null))?.mtimeMs ?? 0,
+        })),
+      );
+      stats.sort((a, b) => a.at - b.at);
+      for (const stale of stats.slice(0, entries.length - 40)) {
+        // eslint-disable-next-line no-await-in-loop
+        await fs.rm(path.join(directory, stale.name), { force: true }).catch(() => {});
+      }
+    }
+  } catch {
+    // pruning is best-effort
+  }
+  return path.relative(rootPath, file).split(path.sep).join("/");
 }
 
 export function nextPendingTask(queue: ProjectTaskQueue): ProjectTask | undefined {

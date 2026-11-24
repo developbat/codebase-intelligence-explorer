@@ -1,0 +1,150 @@
+{
+  "projectId": "4541796f07101515",
+  "language": "en",
+  "cases": [
+    {
+      "id": "comedy-items-en",
+      "goal": "Make comedy items spawn more often and more visible; verify each item effect; do not re-add existing items.",
+      "expect": {
+        "minTasks": 2,
+        "maxTasks": 5,
+        "noTestOnly": true,
+        "noCleanup": true,
+        "areas": [
+          "comedy.js"
+        ]
+      }
+    },
+    {
+      "id": "shooting-meteor-en",
+      "goal": "Add shooting and three meteor sizes; small is faster; 1/2/3 hits to destroy; verify in the browser.",
+      "expect": {
+        "minTasks": 2,
+        "maxTasks": 6,
+        "noTestOnly": true,
+        "areas": [
+          "app.js"
+        ]
+      }
+    },
+    {
+      "id": "comedy-bug-en",
+      "goal": "Comedy scenes are not visible; find the root cause, fix it and verify the real page.",
+      "expect": {
+        "minTasks": 1,
+        "maxTasks": 4,
+        "noTestOnly": true,
+        "areas": [
+          "comedy.js"
+        ]
+      }
+    },
+    {
+      "id": "item-effects-en",
+      "goal": "Fix item effects: wifi, coffee, energy, cloak and banana must change gameplay; keep cheese, slipper and toilet; verify each effect.",
+      "expect": {
+        "minTasks": 1,
+        "maxTasks": 6,
+        "noTestOnly": true,
+        "noCleanup": true,
+        "areas": [
+          "comedy.js"
+        ]
+      }
+    },
+    {
+      "id": "cbe-dark-mode",
+      "projectId": "2f97a1dcd90d1acf",
+      "goal": "Add a dark mode toggle to the task app; persist the choice and verify it in the browser.",
+      "expect": {
+        "minTasks": 2,
+        "maxTasks": 4,
+        "noTestOnly": true,
+        "noCleanup": true,
+        "areas": [
+          "index.html",
+          "styles.css",
+          "script.js"
+        ]
+      }
+    },
+    {
+      "id": "sample-order-endpoint",
+      "projectId": "7651e1e027cf6d46",
+      "goal": "Add a GET /orders/:id endpoint with validation and tests.",
+      "expect": {
+        "minTasks": 1,
+        "maxTasks": 4,
+        "noTestOnly": true,
+        "areas": [
+          "order.controller.ts"
+        ]
+      }
+    },
+    {
+      "id": "cie-eval-stage",
+      "projectId": "0751de9f2296c3d1",
+      "goal": "Add a read-only stage option to the eval runner and document it.",
+      "expect": {
+        "minTasks": 1,
+        "maxTasks": 4,
+        "noTestOnly": true,
+        "areas": [
+          "evalStages.ts"
+        ]
+      }
+    },
+    {
+      "id": "laravel-health",
+      "projectId": "5b42c28a16dd210a",
+      "goal": "Add a health-check route and a feature test.",
+      "expect": {
+        "minTasks": 1,
+        "maxTasks": 4,
+        "noTestOnly": true,
+        "areas": [
+          "routes/web.php"
+        ]
+      }
+    },
+    {
+      "id": "python-todo-search",
+      "projectId": "375385130b822e59",
+      "goal": "Add a todo search endpoint by title and a test.",
+      "expect": {
+        "minTasks": 1,
+        "maxTasks": 4,
+        "noTestOnly": true,
+        "noCleanup": true,
+        "areas": [
+          "todo_resource.py"
+        ]
+      }
+    },
+    {
+      "id": "rn-settings-screen",
+      "projectId": "71fbb9c7782b339b",
+      "goal": "Add a settings screen and a navigation entry.",
+      "expect": {
+        "minTasks": 1,
+        "maxTasks": 6,
+        "noTestOnly": true,
+        "areas": [
+          "App.tsx"
+        ]
+      }
+    },
+    {
+      "id": "go-hello-french",
+      "projectId": "8e52dcf5f8efe1f5",
+      "goal": "Extend Hello to support French and add table-driven tests in the same exercise.",
+      "expect": {
+        "minTasks": 1,
+        "maxTasks": 4,
+        "areas": [
+          "hello.go"
+        ]
+      }
+    }
+  ]
+}

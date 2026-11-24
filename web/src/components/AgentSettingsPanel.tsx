@@ -14,6 +14,7 @@ import type {
   ModelHealth,
   ModelHealthReport,
 } from "../../../shared/modelHealth";
+import { modelSupportsStudio } from "../../../shared/modelCapabilities";
 import type {
   AiAgentAutoResult,
   AiAgentRole,
@@ -122,7 +123,9 @@ export function AgentSettingsPanel({ settings, onSaved }: AgentSettingsPanelProp
     const provider =
       settings?.providers.find((item) => item.id === providerId) ??
       settings?.providers.find((item) => item.id === configured?.provider);
-    return provider?.models ?? [];
+    return (provider?.models ?? []).filter((model) =>
+      modelSupportsStudio("code", providerId, model),
+    );
   };
 
   function updateRole(role: AiAgentRole, patch: Partial<AiAgentRoleConfig>) {
@@ -265,6 +268,34 @@ export function AgentSettingsPanel({ settings, onSaved }: AgentSettingsPanelProp
           <option value="warn">{t("Warn only")}</option>
           <option value="stop">{t("Stop at the limit")}</option>
         </select>
+      </div>
+
+      <div className="agent-budget-mode">
+        <div>
+          <strong>{t("Agent output limit per step")}</strong>
+          <small>
+            {t("Maximum tokens the model may return in one tool call. Large files should be written in chunks.")}
+          </small>
+        </div>
+        <input
+          className="text-input"
+          type="number"
+          min={4000}
+          max={64000}
+          step={1000}
+          value={settings?.agentMaxOutputTokens ?? 16000}
+          disabled={!settings || busy !== null}
+          onChange={(event) => {
+            const value = Number(event.target.value);
+            if (!Number.isFinite(value)) return;
+            void api.ai
+              .updateSettings({ agentMaxOutputTokens: value })
+              .then((next) => {
+                onSaved(next);
+              })
+              .catch(() => undefined);
+          }}
+        />
       </div>
 
       <label className="agent-review-toggle">

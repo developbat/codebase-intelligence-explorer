@@ -3,6 +3,7 @@ import { ArrowDown, ArrowUp, Check, Cpu, Loader2, Search, Star, X } from "lucide
 import type { AiProviderId, AiSettingsPublic } from "../../../shared/ai";
 import type { PricingReport } from "../../../shared/pricing";
 import { findModelPrice, formatUsd } from "../../../shared/pricing";
+import { modelsForStudio, type StudioId } from "../../../shared/modelCapabilities";
 import { api } from "../api";
 import { useI18n } from "../i18n";
 import { useCachedResource } from "../lib/resourceCache";
@@ -24,6 +25,7 @@ export function ModelPickerPanel({
   const [query, setQuery] = useState("");
   const [providerFilter, setProviderFilter] = useState("all");
   const [busyKey, setBusyKey] = useState<string | null>(null);
+  const [studioTab, setStudioTab] = useState<"code" | "chat" | "image" | "video">("code");
   const [message, setMessage] = useState<string | null>(null);
   const localScanRef = useRef(false);
 
@@ -35,16 +37,11 @@ export function ModelPickerPanel({
 
   const rows = useMemo(() => {
     if (!settings) return [] as ModelRow[];
-    const list: ModelRow[] = [];
-    for (const provider of settings.providers) {
-      if (provider.enabled === false) continue;
-      const models =
-        provider.models.length > 0 ? provider.models : provider.model ? [provider.model] : [];
-      for (const model of models) {
-        if (!model) continue;
-        list.push({ provider: provider.id, providerName: provider.name, model });
-      }
-    }
+    const list: ModelRow[] = modelsForStudio(settings, studioTab as StudioId).map((row) => ({
+      provider: row.provider,
+      providerName: row.providerName,
+      model: row.model,
+    }));
     const needle = query.trim().toLowerCase();
     return list
       .filter((row) => providerFilter === "all" || row.provider === providerFilter)
@@ -57,7 +54,7 @@ export function ModelPickerPanel({
         (a, b) =>
           a.provider.localeCompare(b.provider) || a.model.localeCompare(b.model),
       );
-  }, [settings, query, providerFilter]);
+  }, [settings, query, providerFilter, studioTab]);
 
   useEffect(() => {
     const local = settings?.providers.find((provider) => provider.id === "local");
@@ -80,6 +77,14 @@ export function ModelPickerPanel({
   const defaultModel = settings.defaultModel;
 
   const chain = settings.fallback?.chain ?? [];
+  const studioLabel =
+    studioTab === "image"
+      ? t("Image")
+      : studioTab === "video"
+        ? t("Video")
+        : studioTab === "chat"
+          ? t("Chat")
+          : t("Code");
 
   async function applyChain(next: { provider: string; model: string }[]) {
     setBusyKey("chain");
@@ -161,43 +166,66 @@ export function ModelPickerPanel({
         </span>
       </div>
 
+      {studioTab === "code" ? (
       <div className="model-picker-selected">
-        <div className="model-picker-selected-head">
-          <strong>
-            {t("Selected models")} {chain.length > 0 ? `· ${chain.length}` : ""}
-          </strong>
-          {chain.length > 0 ? (
-            <button className="ghost-button" onClick={() => void applyChain([])} disabled={busyKey !== null}>
-              {t("Auto")}
-            </button>
-          ) : (
-            <span>{t("Auto selection is active. Add models below to choose the order.")}</span>
-          )}
-        </div>
-        {chain.length > 0 ? (
-          <div className="model-picker-selected-list">
-            {chain.map((item, index) => (
-              <span key={`${item.provider}::${item.model}`}>
-                <b>{index + 1}</b>
-                <code>{item.model}</code>
-                <small>{item.provider}</small>
-                <button onClick={() => moveSelected(index, -1)} disabled={index === 0 || busyKey !== null} title={t("Move up")}>
-                  <ArrowUp size={9} />
-                </button>
-                <button
-                  onClick={() => moveSelected(index, 1)}
-                  disabled={index === chain.length - 1 || busyKey !== null}
-                  title={t("Move down")}
-                >
-                  <ArrowDown size={9} />
-                </button>
-                <button onClick={() => toggleSelected({ provider: item.provider, providerName: "", model: item.model })} disabled={busyKey !== null} title={t("Remove")}>
-                  <X size={9} />
-                </button>
-              </span>
-            ))}
+          <div className="model-picker-selected-head">
+            <strong>
+              {t("Selected models")} {chain.length > 0 ? `· ${chain.length}` : ""}
+            </strong>
+            {chain.length > 0 ? (
+              <button className="ghost-button" onClick={() => void applyChain([])} disabled={busyKey !== null}>
+                {t("Auto")}
+              </button>
+            ) : (
+              <span>{t("Auto selection is active. Add models below to choose the order.")}</span>
+            )}
           </div>
-        ) : null}
+          {chain.length > 0 ? (
+            <div className="model-picker-selected-list">
+              {chain.map((item, index) => (
+                <span key={`${item.provider}::${item.model}`}>
+                  <b>{index + 1}</b>
+                  <code>{item.model}</code>
+                  <small>{item.provider}</small>
+                  <button onClick={() => moveSelected(index, -1)} disabled={index === 0 || busyKey !== null} title={t("Move up")}>
+                    <ArrowUp size={9} />
+                  </button>
+                  <button
+                    onClick={() => moveSelected(index, 1)}
+                    disabled={index === chain.length - 1 || busyKey !== null}
+                    title={t("Move down")}
+                  >
+                    <ArrowDown size={9} />
+                  </button>
+                  <button onClick={() => toggleSelected({ provider: item.provider, providerName: "", model: item.model })} disabled={busyKey !== null} title={t("Remove")}>
+                    <X size={9} />
+                  </button>
+                </span>
+              ))}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
+
+      <div className="model-picker-studio-tabs">
+        {([
+          ["code", "Code"],
+          ["chat", "Chat"],
+          ["image", "Image"],
+          ["video", "Video"],
+        ] as const).map(([id, label]) => (
+          <button
+            key={id}
+            className={studioTab === id ? "is-active" : ""}
+            onClick={() => {
+              setStudioTab(id);
+              setProviderFilter("all");
+            }}
+          >
+            {t(label)}
+          </button>
+        ))}
       </div>
 
       <div className="model-picker-toolbar">
@@ -259,34 +287,56 @@ export function ModelPickerPanel({
                     {formatUsd(price?.outputPerMillion)}
                   </span>
                 </div>
-                <button
-                  className={`ghost-button ${chain.some((item) => item.provider === row.provider && item.model === row.model) ? "is-selected" : ""}`}
-                  onClick={() => toggleSelected(row)}
-                  disabled={busyKey !== null}
-                  title={t("Add to or remove from selected models")}
-                >
-                  {chain.some((item) => item.provider === row.provider && item.model === row.model) ? (
-                    <Check size={11} />
-                  ) : null}
-                  {chain.some((item) => item.provider === row.provider && item.model === row.model)
-                    ? t("Selected")
-                    : t("Select")}
-                </button>
-                <button
-                  className="ghost-button"
-                  onClick={() => void setDefault(row)}
-                  disabled={busyKey !== null || active}
-                  title={t("Set as default")}
-                >
-                  {busyKey === key ? (
-                    <Loader2 size={11} className="spin" />
-                  ) : active ? (
-                    <Check size={11} />
-                  ) : (
-                    <Star size={11} />
-                  )}
-                  {active ? t("Default") : t("Set default")}
-                </button>
+                {studioTab === "code" ? (
+                  <>
+                    <button
+                      className={`ghost-button ${chain.some((item) => item.provider === row.provider && item.model === row.model) ? "is-selected" : ""}`}
+                      onClick={() => toggleSelected(row)}
+                      disabled={busyKey !== null}
+                      title={t("Add to or remove from selected models")}
+                    >
+                      {chain.some((item) => item.provider === row.provider && item.model === row.model) ? (
+                        <Check size={11} />
+                      ) : null}
+                      {chain.some((item) => item.provider === row.provider && item.model === row.model)
+                        ? t("Selected")
+                        : t("Select")}
+                    </button>
+                    <button
+                      className="ghost-button"
+                      onClick={() => void setDefault(row)}
+                      disabled={busyKey !== null || active}
+                      title={t("Set as default")}
+                    >
+                      {busyKey === key ? (
+                        <Loader2 size={11} className="spin" />
+                      ) : active ? (
+                        <Check size={11} />
+                      ) : (
+                        <Star size={11} />
+                      )}
+                      {active ? t("Default") : t("Set default")}
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    className="ghost-button"
+                    onClick={() => {
+                      localStorage.setItem(
+                        `cie:studio-model:${studioTab}`,
+                        JSON.stringify({ provider: row.provider, model: row.model }),
+                      );
+                      setMessage(
+                        t("Selected for {studio}: {model}", {
+                          studio: studioLabel,
+                          model: row.model,
+                        }),
+                      );
+                    }}
+                  >
+                    {t("Use in {studio}", { studio: studioLabel })}
+                  </button>
+                )}
               </div>
             );
           })

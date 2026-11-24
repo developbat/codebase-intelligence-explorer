@@ -114,6 +114,26 @@ export const AI_PROVIDERS: AiProviderInfo[] = [
     keyPlaceholder: "xai-…",
   },
   {
+    id: "pollinations",
+    name: "Pollinations AI",
+    kind: "openai",
+    baseUrl: "https://gen.pollinations.ai/v1",
+    models: [
+      "openai/gpt-5.4-nano",
+      "google/gemini-3.8-flash",
+      "deepseek/deepseek-v4-pro",
+      "black-forest-labs/flux.1-schnell",
+      "openai/gpt-image-1.5",
+      "google/gemini-3.1-flash-image",
+      "google/veo-3.1-fast",
+      "bytedance/seedance-2.0-fast",
+      "kwaivgi/kling-v3.0-std",
+      "alibaba/wan-2.6",
+    ],
+    docsUrl: "https://enter.pollinations.ai/keys",
+    keyPlaceholder: "sk_…",
+  },
+  {
     id: "free",
     name: "Free (Pollinations)",
     kind: "openai",
@@ -251,6 +271,7 @@ export interface AiSettingsPublic {
   localModelsDir: string;
   reviewEdits: boolean;
   taskBudgetMode: AiTaskBudgetMode;
+  agentMaxOutputTokens: number;
 }
 
 export interface AiCustomProviderInput {
@@ -282,6 +303,7 @@ export interface AiSettingsInput {
   localModelsDir?: string;
   reviewEdits?: boolean;
   taskBudgetMode?: AiTaskBudgetMode;
+  agentMaxOutputTokens?: number;
 }
 
 export interface AiUsage {
@@ -586,6 +608,8 @@ export type AiAgentAction =
   | "csv_query"
   | "git_blame"
   | "browser_check"
+  | "run_test_scenario"
+  | "rescan_project"
   | "list_project_tools"
   | "run_project_tool"
   | "list_mobile_devices"

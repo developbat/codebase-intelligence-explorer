@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 
-const BUILTIN_VERSION = "1";
+const BUILTIN_VERSION = "3";
 
 interface BuiltinSkill {
   slug: string;
@@ -115,6 +115,83 @@ Check the rendered markup and styles, not just the screenshot.
 ## Output
 
 List issues with selector, file, impact and a minimal fix. Mark blockers separately from nice-to-haves. Do not rewrite unrelated layout.`,
+  },
+  {
+    slug: "runtime-ui-debugging",
+    name: "Runtime UI Debugging",
+    description:
+      "Diagnose why a browser UI or game behavior is missing, flickering or unreadable. Traces asset wiring and animation loops, then proves the root cause in a real browser.",
+    body: `# Runtime UI Debugging
+
+Never guess from feature names. Prove the cause with the rendered page and file evidence.
+
+## 1. Is the code actually loaded?
+
+1. List every \`<script src>\` and \`<link href>\` in the HTML entry point.
+2. Compare them with the changed JS/CSS files. A valid file that no HTML loads does nothing.
+3. Check for duplicate tags. Two copies of the same script run twice or fight over timers.
+4. For modules, confirm the import graph reaches the entry point.
+
+## 2. Does the runtime path exist?
+
+- Find the function that should create or update the element. Search by selector, class and text.
+- Read the caller chain: event listener → handler → render function.
+- Confirm the element exists in markup or is created dynamically before it is queried.
+- Check whether the update is gated behind a state flag that never becomes true.
+
+## 3. Text that changes too fast or cannot be read
+
+This is usually not a slow timer. It is a rewrite inside the frame loop:
+
+- \`requestAnimationFrame\` / \`setInterval\` → function that assigns \`innerHTML\` or \`textContent\` on every tick.
+- Random choices inside that assignment make the text change every frame.
+
+Fix: compute the value once per state change (guard with a flag or compare the previous value) and keep the loop free of one-time writes.
+
+## 4. Prove it on the real page, not a harness
+
+A synthetic page under \`.cie/\` that imports one script is not proof of the app. Verify the project entry page. If the state is hard to reach, use an \`eval\` step on the real page to put it there, then assert it.
+
+Use the app preview, not a static read:
+
+\`\`\`json
+{"action":"browser_check","args":{"path":"index.html","steps":[
+  {"action":"click","selector":"#play-button"},
+  {"action":"expectVisible","selector":".overlay"},
+  {"action":"expectStable","selector":".overlay .message","durationMs":1200}
+]}}
+\`\`\`
+
+\`expectStable\` fails when the element text changes during the sample window. Use it for counters, toasts, game-over messages and anything a user must read.
+
+To reach a hidden state on the real page:
+
+\`\`\`json
+{"action":"eval","value":"document.querySelector('#start-screen').hidden=true; document.querySelector('#game-over-screen').hidden=false;"}
+\`\`\`
+
+For delayed elements, wait first:
+
+\`\`\`json
+{"action":"waitForSelector","selector":".comedy-note","timeoutMs":4000}
+\`\`\`
+
+Then assert the same selector a real user would see. A check that only proves the page loads is not verification of the change.
+
+## 5. Tool failures are not blockers
+
+- If a write or append call fails with \`A file path is required\`, re-issue it with \`{"action":"append_text","args":{"path":"file.js","content":"..."}}\`.
+- If a tool you need does not exist, create a project tool or a small script and run it.
+- Read the newest \`.cie/agent/runs/*.json\` file to see the exact failed action and observation before retrying.
+- Never finish with "blocked" while a correctable tool error is open.
+
+## 6. Save the scenario
+
+Write the verified steps to \`.cie/agent/scenarios/<name>.json\` and run it with \`run_test_scenario\`. Scenario files let the next run prove the fix instead of re-diagnosing.
+
+## Report
+
+State the root cause with file:line, the failing runtime sample, the minimal fix, and the passing scenario. Do not claim a fix from static reading alone.`,
   },
   {
     slug: "refactor-guard",

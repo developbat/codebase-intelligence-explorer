@@ -11,6 +11,22 @@ import type {
 } from "../../shared/toolchains";
 
 const execFileAsync = promisify(execFile);
+
+function hasEslintConfig(rootPath?: string): boolean {
+  if (!rootPath) return false;
+  return [
+    "eslint.config.js",
+    "eslint.config.mjs",
+    "eslint.config.cjs",
+    "eslint.config.ts",
+    ".eslintrc",
+    ".eslintrc.js",
+    ".eslintrc.cjs",
+    ".eslintrc.json",
+    ".eslintrc.yml",
+    ".eslintrc.yaml",
+  ].some((name) => fs.existsSync(path.join(rootPath, name)));
+}
 const execAsync = promisify(exec);
 
 type Platform = "darwin" | "linux" | "win32";
@@ -26,6 +42,7 @@ interface Definition {
   autoInstall?: boolean;
   managed?: boolean;
   local?: boolean;
+  packageName?: string;
   note?: string;
   install: Partial<Record<Platform, string>>;
 }
@@ -189,6 +206,7 @@ const DEFINITIONS: Definition[] = [
     id: "typescript-language-server",
     name: "TypeScript Language Server",
     commands: ["typescript-language-server"],
+    packageName: "typescript-language-server",
     args: ["--version"],
     category: "lsp",
     languages: ["typescript", "javascript"],
@@ -206,6 +224,7 @@ const DEFINITIONS: Definition[] = [
     id: "pyright",
     name: "Pyright",
     commands: ["pyright-langserver", "pyright"],
+    packageName: "pyright",
     args: ["--version"],
     category: "lsp",
     languages: ["python"],
@@ -250,6 +269,7 @@ const DEFINITIONS: Definition[] = [
     id: "intelephense",
     name: "Intelephense",
     commands: ["intelephense"],
+    packageName: "intelephense",
     args: ["--version"],
     category: "lsp",
     languages: ["php"],
@@ -262,6 +282,7 @@ const DEFINITIONS: Definition[] = [
     id: "eslint",
     name: "ESLint",
     commands: ["eslint"],
+    packageName: "eslint",
     args: ["--version"],
     category: "linter",
     languages: ["typescript", "javascript"],
@@ -275,6 +296,7 @@ const DEFINITIONS: Definition[] = [
     id: "prettier",
     name: "Prettier",
     commands: ["prettier"],
+    packageName: "prettier",
     args: ["--version"],
     category: "formatter",
     languages: ["typescript", "javascript", "css", "html", "json", "markdown"],
@@ -412,6 +434,54 @@ function platform(): Platform {
   return process.platform === "darwin" ? "darwin" : process.platform === "win32" ? "win32" : "linux";
 }
 
+function packageVersion(packageJsonPath: string): string | undefined {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(packageJsonPath, "utf8")) as { version?: unknown };
+    return typeof parsed.version === "string" ? parsed.version : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function packageCandidates(definition: Definition, projectRoot?: string): { path: string; label: string }[] {
+  if (!definition.packageName) return [];
+  const packageName = definition.packageName;
+  const candidates: { path: string; label: string }[] = [];
+  if (definition.local && projectRoot) {
+    candidates.push({
+      path: path.join(projectRoot, "node_modules", packageName, "package.json"),
+      label: `${packageName} (project)`,
+    });
+  }
+  candidates.push({
+    path: path.join(process.cwd(), "node_modules", packageName, "package.json"),
+    label: `${packageName} (app)`,
+  });
+  // npm's default global layout: <prefix>/bin/node -> <prefix>/lib/node_modules/<pkg>
+  const nodeDir = path.dirname(process.execPath);
+  candidates.push({
+    path: path.resolve(nodeDir, "..", "lib", "node_modules", packageName, "package.json"),
+    label: `${packageName} (global)`,
+  });
+  candidates.push({
+    path: path.resolve(nodeDir, "..", "node_modules", packageName, "package.json"),
+    label: `${packageName} (global)`,
+  });
+  if (process.env.npm_config_prefix) {
+    candidates.push({
+      path: path.join(process.env.npm_config_prefix, "lib", "node_modules", packageName, "package.json"),
+      label: `${packageName} (global)`,
+    });
+  }
+  if (process.env.NPM_CONFIG_PREFIX) {
+    candidates.push({
+      path: path.join(process.env.NPM_CONFIG_PREFIX, "lib", "node_modules", packageName, "package.json"),
+      label: `${packageName} (global)`,
+    });
+  }
+  return candidates;
+}
+
 function commandCandidates(definition: Definition, projectRoot?: string): string[] {
   const candidates: string[] = [];
   if (definition.local && projectRoot) {
@@ -431,6 +501,28 @@ async function checkDefinition(
   definition: Definition,
   projectRoot?: string,
 ): Promise<ToolchainTool> {
+  for (const candidate of packageCandidates(definition, projectRoot)) {
+    if (!fs.existsSync(candidate.path)) continue;
+    const version = packageVersion(candidate.path);
+    return {
+      id: definition.id,
+      name: definition.name,
+      installed: true,
+      version: version ? `${version} · ${candidate.label}` : candidate.label,
+      installCommands: install(
+        definition.install.darwin,
+        definition.install.linux,
+        definition.install.win32,
+        definition.name,
+      ),
+      category: definition.category,
+      languages: definition.languages,
+      required: definition.required,
+      autoInstall: definition.autoInstall,
+      managed: definition.managed,
+      note: definition.note,
+    };
+  }
   for (const command of commandCandidates(definition, projectRoot)) {
     try {
       const result = await execFileAsync(command, definition.args, {
@@ -578,10 +670,15 @@ export async function installToolchain(
   const tool = report.tools.find((item) => item.id === id);
   if (!tool) throw new Error("Unknown toolchain.");
   if (tool.installed) {
-    return { id, command: "", ok: true, output: `${tool.name} is already installed.` };
+    const note =
+      id === "eslint" && projectRoot && !hasEslintConfig(projectRoot)
+        ? " No eslint.config.js / .eslintrc file was found; add a config before using the lint command."
+        : "";
+    return { id, command: "", ok: true, output: `${tool.name} is already installed.${note}` };
   }
   const command = tool.installCommands.find((item) => item.platform === report.platform)?.command;
   if (!command) throw new Error(`No automatic install command is available for ${tool.name} on ${report.platform}.`);
+  let output = "";
   try {
     const result = await execAsync(command, {
       timeout: 15 * 60_000,
@@ -589,12 +686,7 @@ export async function installToolchain(
       shell: "/bin/bash",
       cwd: projectRoot,
     });
-    return {
-      id,
-      command,
-      ok: true,
-      output: `${result.stdout ?? ""}${result.stderr ?? ""}`.trim().slice(-8_000),
-    };
+    output = `${result.stdout ?? ""}${result.stderr ?? ""}`.trim().slice(-8_000);
   } catch (error) {
     return {
       id,
@@ -603,6 +695,26 @@ export async function installToolchain(
       output: (error instanceof Error ? error.message : "Toolchain install failed.").slice(-8_000),
     };
   }
+  const after = await checkToolchains(true, { rootPath: projectRoot });
+  const installedTool = after.tools.find((item) => item.id === id);
+  if (!installedTool?.installed) {
+    return {
+      id,
+      command,
+      ok: false,
+      output: `${output}\n\n${tool.name} is still not detected after the install command. Check the npm prefix/global path or run the command manually.`.trim(),
+    };
+  }
+  const eslintNote =
+    id === "eslint" && projectRoot && !hasEslintConfig(projectRoot)
+      ? "ESLint is installed, but no eslint.config.js / .eslintrc file was found. Add a config (or run `npx eslint --init`) before using the lint command."
+      : "";
+  return {
+    id,
+    command,
+    ok: true,
+    output: `${output}${output ? "\n\n" : ""}${tool.name} ${installedTool.version ?? "installed"}.${eslintNote ? `\n\n${eslintNote}` : ""}`.trim(),
+  };
 }
 
 export async function installRecommended(

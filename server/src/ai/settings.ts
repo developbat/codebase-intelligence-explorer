@@ -54,6 +54,7 @@ interface StoredSettings {
   localModelsDir: string;
   reviewEdits: boolean;
   taskBudgetMode: AiTaskBudgetMode;
+  agentMaxOutputTokens: number;
 }
 
 export const AI_AGENT_ROLES: AiAgentRole[] = ["main", "planner", "fast", "reviewer"];
@@ -150,6 +151,7 @@ function defaults(): StoredSettings {
     localModelsDir: path.join(getDataDir(), "local-models"),
     reviewEdits: true,
     taskBudgetMode: "off",
+    agentMaxOutputTokens: 16_000,
   };
 }
 
@@ -260,6 +262,11 @@ async function loadStored(): Promise<StoredSettings> {
         parsed.taskBudgetMode === "stop" || parsed.taskBudgetMode === "warn"
           ? parsed.taskBudgetMode
           : "off",
+      agentMaxOutputTokens:
+        Number.isFinite(Number(parsed.agentMaxOutputTokens)) &&
+        Number(parsed.agentMaxOutputTokens) >= 2_000
+          ? Math.min(64_000, Math.round(Number(parsed.agentMaxOutputTokens)))
+          : 16_000,
     };
   } catch {
     return base;
@@ -288,7 +295,11 @@ export async function getPublicSettings(): Promise<AiSettingsPublic> {
       models: config?.models?.length ? config.models : provider.models,
       custom: false,
       modelListUrl:
-        provider.id === "free" ? "https://text.pollinations.ai/models" : undefined,
+        provider.id === "free"
+          ? "https://text.pollinations.ai/models"
+          : provider.id === "pollinations"
+            ? "https://gen.pollinations.ai/v1/models"
+            : undefined,
       modelsUpdatedAt: config?.modelsUpdatedAt,
       hasKey: Boolean(key) || isKeylessProvider(provider.id),
       enabled: !stored.disabledProviders.includes(provider.id),
@@ -337,6 +348,7 @@ export async function getPublicSettings(): Promise<AiSettingsPublic> {
     localModelsDir: stored.localModelsDir,
     reviewEdits: stored.reviewEdits !== false,
     taskBudgetMode: stored.taskBudgetMode ?? "off",
+    agentMaxOutputTokens: stored.agentMaxOutputTokens ?? 16_000,
   };
 }
 
@@ -519,6 +531,13 @@ export async function updateAiSettings(input: AiSettingsInput): Promise<AiSettin
       input.taskBudgetMode === "stop" || input.taskBudgetMode === "warn"
         ? input.taskBudgetMode
         : "off";
+  }
+
+  if (input.agentMaxOutputTokens !== undefined) {
+    const value = Number(input.agentMaxOutputTokens);
+    if (Number.isFinite(value)) {
+      stored.agentMaxOutputTokens = Math.max(2_000, Math.min(64_000, Math.round(value)));
+    }
   }
 
   if (input.agentRoles) {
