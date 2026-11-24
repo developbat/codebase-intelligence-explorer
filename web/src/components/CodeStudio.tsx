@@ -4364,6 +4364,14 @@ export function CodeStudio({
 
         {(() => {
           if (!taskQueue || chatBusy || dismissedQueueAt === taskQueue.updatedAt) return null;
+          // A failed task can be retried inside the same run; do not show a
+          // "Continue" banner while the loop is still working.
+          if (
+            taskQueue.status === "running" ||
+            taskQueue.tasks.some((task) => task.status === "in_progress")
+          ) {
+            return null;
+          }
           const failed = taskQueue.tasks.filter(
             (task) => task.status === "failed" || task.status === "blocked",
           );

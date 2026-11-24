@@ -78,8 +78,22 @@ export function browserCheckTarget(
 }
 
 function stepTimeout(step: BrowserCheckStep): number {
-  return Math.max(500, Math.min(30_000, Number(step.timeoutMs) || DEFAULT_TIMEOUT));
+  // An agent-supplied 30s timeout turns one broken selector into a minute-long
+  // task. Local pages need at most 8s for assertions and 15s for actions.
+  const cap = [
+    "waitForSelector",
+    "expectText",
+    "expectValue",
+    "expectVisible",
+    "expectCount",
+    "expectStable",
+  ].includes(step.action)
+    ? 8_000
+    : 15_000;
+  return Math.max(500, Math.min(cap, Number(step.timeoutMs) || DEFAULT_TIMEOUT));
 }
+
+const MAX_CHECK_MS = 25_000;
 
 function isSelectorStep(step: BrowserCheckStep): boolean {
   return [
@@ -290,7 +304,7 @@ export async function runBrowserCheck(
   const aborted = () => new Error("Browser check stopped by the user.");
   if (options.signal?.aborted) throw aborted();
   const executablePath = await browserExecutable();
-  const timeoutMs = Math.max(5_000, Math.min(120_000, options.timeoutMs ?? 30_000));
+  const timeoutMs = Math.max(5_000, Math.min(30_000, options.timeoutMs ?? 15_000));
   const steps = (options.steps ?? []).slice(0, MAX_STEPS);
   let requestedPath = options.path?.trim() || "index.html";
   if (path.isAbsolute(requestedPath)) {
@@ -348,14 +362,31 @@ export async function runBrowserCheck(
       }
     });
     const url = browserCheckTarget(projectId, requestedPath, options.url);
+    const checkStartedAt = Date.now();
     const response = await page.goto(url, { waitUntil: "load", timeout: timeoutMs });
     if (response && !response.ok()) {
       throw new Error(`Preview page returned HTTP ${response.status()}.`);
     }
     await page.waitForTimeout(250);
+    // A Streamlit/Django/Next error page can look like a normal page. Surface
+    // the real runtime error instead of waiting for selectors that never appear.
+    const bodyText = await page.locator("body").innerText().catch(() => "");
+    const runtimeError = bodyText.match(
+      /(?:Error running app|Traceback \(most recent call last\)|ModuleNotFoundError|StreamlitAPIException|Unhandled Runtime Error|Failed to compile)/i,
+    );
+    if (runtimeError) {
+      throw new Error(
+        `The app page shows a runtime error (${runtimeError[0]}). Fix the app before checking UI.\n${bodyText.slice(0, 700)}`,
+      );
+    }
 
     for (let index = 0; index < steps.length; index += 1) {
       if (options.signal?.aborted) throw aborted();
+      if (Date.now() - checkStartedAt > MAX_CHECK_MS) {
+        throw new Error(
+          `Browser check exceeded ${MAX_CHECK_MS / 1000}s. Report the page error or narrow the assertions instead of waiting on missing selectors.`,
+        );
+      }
       const step = steps[index];
       const started = Date.now();
       try {

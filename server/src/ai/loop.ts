@@ -905,6 +905,8 @@ function taskInstruction(
     extractionTask ? "" : "Batch up to 4 independent read-only calls in one reply (read_file, find_in_file, search_code, list_files). One context round-trip per batch instead of one per read.",
     extractionTask ? "" : "Put all UI assertions into one browser_check call (up to 6 steps). Run the verification command once after the final edit; do not repeat a successful check unless code changed.",
     extractionTask ? "" : "Do not create .cie/agent/checks or .cie/agent/scenarios files for a one-off verification; use the existing tests and browser_check.",
+    extractionTask ? "" : "Before the first edit, search for the exact feature name, symbol or label. If it already exists, verify it and finish with evidence instead of adding a duplicate.",
+    extractionTask ? "" : "Never kill, pkill, killall or nohup the dev server; the app manages the server and the preview.",
     extractionTask ? "" : "Read the smallest range you need. Do not read a whole large file before planning; read the relevant functions, then edit. If you have read the same file twice without editing, stop reading and make the smallest change.",
     (task.repairAttempts ?? 0) > 0
       ? `Narrow retry: read at most ${RECOVERY_POLICY.maxFilesForNarrowRetry} files (or none when the content is already in context), apply the smallest edit, then verify. Do not repeat earlier reads.`
@@ -953,9 +955,9 @@ export function taskBudgetForEffort(effort: ProjectTaskEffort): {
 }
 
 export function taskStepBudget(effort: ProjectTaskEffort): number {
-  if (effort === "simple") return 12;
-  if (effort === "hard") return 28;
-  return 20;
+  if (effort === "simple") return 10;
+  if (effort === "hard") return 20;
+  return 14;
 }
 
 interface RetryRecovery {

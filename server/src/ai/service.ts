@@ -1930,6 +1930,10 @@ const AGENT_BLOCKED_COMMANDS: RegExp[] = [
   /\bchmod\s+-R\s+777\s+\/(?:\s|$)/i,
   /\bcurl\b[^\n|]*\|\s*(?:sh|bash|zsh)\b/,
   /\bwget\b[^\n|]*\|\s*(?:sh|bash|zsh)\b/,
+  // Killing or daemonizing a dev server makes the preview stale and makes the
+  // agent verify a different process than the app manages.
+  /\b(?:p?kill|killall)\b/,
+  /\bnohup\b/,
 ];
 
 export function isSecretAgentPath(relative: string): boolean {
@@ -4451,6 +4455,7 @@ ${lessons}` : "",
   let stoppedReason: AiAgentResult["stoppedReason"] = "max_steps";
   let errorMessage: string | undefined;
   let consecutiveFailures = 0;
+  let protocolRetries = 0;
   let protocolFailures = 0;
   let emptyResponseCount = 0;
   const startingUsage = options.startingUsage ?? { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
@@ -4769,6 +4774,40 @@ ${lessons}` : "",
     transientRetries = 0;
     log("info", "Plan received", `${reply.length} characters`);
 
+    // Some providers occasionally emit a native/DSML tool-call block instead of
+    // the JSON action protocol. Never turn that placeholder into a "finish";
+    // retry immediately with a strict protocol correction.
+    if (
+      /provider-native tool call omitted|<\|[^|]*\|>|DSML|<\/?tool_call|<function=|antml:/i.test(
+        reply,
+      )
+    ) {
+      protocolRetries += 1;
+      const observation =
+        "Your reply used a provider-native tool call instead of the JSON action protocol. Reply again with exactly one complete JSON object using action and args. Do not emit <|...|>, DSML, <tool_call>, <function> or commentary.";
+      log("warn", "Provider-native tool call rejected", `protocol retry ${protocolRetries}/2`);
+      recordStep({
+        index,
+        action: "invalid",
+        args: {},
+        observation,
+        ok: false,
+        durationMs: Date.now() - started,
+        tokenUsage: stepUsage,
+      });
+      transcript.push({
+        role: "user",
+        content: `Observation (step ${index}) [protocol]: ${observation}`,
+      });
+      if (protocolRetries >= 2) {
+        errorMessage =
+          "Stopped after 2 provider-native tool-call replies. The model did not follow the JSON action protocol.";
+        stoppedReason = "error";
+        break;
+      }
+      continue;
+    }
+
     const cleanReply = stripCommentaryTags(stripToolCallMarkup(reply));
     transcript.push({
       role: "assistant",
@@ -4842,6 +4881,7 @@ ${lessons}` : "",
       transcript.push({ role: "user", content: `Observation (step ${index}) [invalid]: ${observation}` });
       continue;
     }
+    protocolRetries = 0;
     const parsedActions = Array.isArray(parsed.__actions)
       ? (parsed.__actions as ParsedToolAction[])
       : [];
@@ -7144,7 +7184,11 @@ ${lessons}` : "",
         const command = String(args.command ?? "").trim();
         if (!command) throw new Error("A command is required.");
         if (isBlockedAgentCommand(command)) {
-          throw new Error("That command is blocked by the agent safety policy.");
+          throw new Error(
+            /\b(?:p?kill|killall|nohup)\b/i.test(command)
+              ? "Do not kill or restart the dev server. The app manages background jobs; use the job Stop/Preview controls or browser_check the existing URL."
+              : "That command is blocked by the agent safety policy.",
+          );
         }
         const cwdInput = normalizeAgentPath(analysis.rootPath, args.cwd);
         const cwd = cwdInput || undefined;
