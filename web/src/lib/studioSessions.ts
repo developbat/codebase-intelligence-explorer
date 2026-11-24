@@ -28,7 +28,13 @@ export interface StudioEntry {
   tokenUsage?: { inputTokens: number; outputTokens: number; totalTokens: number };
   costUsd?: number;
   attachment?: string;
-  sources?: { url: string; title?: string; status?: number; error?: string }[];
+  sources?: {
+    url: string;
+    title?: string;
+    status?: number;
+    error?: string;
+    snippet?: string;
+  }[];
   searchProvider?: string;
   createdAt: string;
 }

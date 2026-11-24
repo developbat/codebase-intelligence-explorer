@@ -3,6 +3,8 @@ import {
   AlertTriangle,
   ArrowUp,
   Bot,
+  Check,
+  Copy,
   FileText,
   Globe2,
   Image as ImageIcon,
@@ -86,6 +88,7 @@ export function ChatStudio({
   const [noteMessage, setNoteMessage] = useState<string | null>(null);
   const [attachMenuOpen, setAttachMenuOpen] = useState(false);
   const [libraryOpen, setLibraryOpen] = useState(false);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
   const [modelChoice, setModelChoice] = useState<{ provider: AiProviderId; model: string } | null>(
     () => {
       try {
@@ -213,6 +216,16 @@ export function ChatStudio({
     abortRef.current?.abort();
   }
 
+  async function copyMessage(entry: StudioEntry) {
+    try {
+      await navigator.clipboard.writeText(entry.content);
+      setCopiedId(entry.id);
+      window.setTimeout(() => setCopiedId((current) => (current === entry.id ? null : current)), 1_400);
+    } catch {
+      setError(t("Could not copy this message."));
+    }
+  }
+
   async function saveNotes(entries = active?.entries ?? []) {
     if (!projectId || !active || entries.length === 0) return;
     const transcript = entries
@@ -303,6 +316,17 @@ export function ChatStudio({
                       {message.costUsd ? ` · ${formatUsd(message.costUsd)}` : ""}
                     </small>
                   ) : null}
+                  {message.role === "assistant" ? (
+                    <button
+                      className={`chat-studio-copy ${copiedId === message.id ? "is-copied" : ""}`}
+                      onClick={() => void copyMessage(message)}
+                      title={t("Copy response")}
+                      aria-label={t("Copy response")}
+                    >
+                      {copiedId === message.id ? <Check size={9} /> : <Copy size={9} />}
+                      {copiedId === message.id ? t("Copied") : t("Copy")}
+                    </button>
+                  ) : null}
                   <button
                     className="studio-message-note"
                     onClick={() => void saveNotes([message])}
@@ -320,24 +344,34 @@ export function ChatStudio({
                   )}
                 </div>
                 {message.sources && message.sources.length > 0 ? (
-                  <div className="chat-studio-sources">
-                    {message.searchProvider ? (
-                      <span className="chat-studio-source-provider">{message.searchProvider}</span>
-                    ) : null}
-                    {message.sources.map((source) => (
-                      <a
-                        key={source.url}
-                        href={source.url}
-                        target="_blank"
-                        rel="noreferrer"
-                        title={source.error ?? source.url}
-                      >
-                        <Globe2 size={9} />
-                        {source.title || source.url}
-                        {source.error ? ` · ${source.error}` : ""}
-                      </a>
-                    ))}
-                  </div>
+                  <details className="chat-studio-sources">
+                    <summary>
+                      {message.searchProvider ? (
+                        <span className="chat-studio-source-provider">{message.searchProvider}</span>
+                      ) : null}
+                      <span>
+                        {t("{count} sources", { count: message.sources.length })}
+                      </span>
+                    </summary>
+                    <div className="chat-studio-source-list">
+                      {message.sources.map((source, sourceIndex) => (
+                        <a
+                          key={source.url}
+                          href={source.url}
+                          target="_blank"
+                          rel="noreferrer"
+                          title={source.error ?? source.url}
+                        >
+                          <b>{sourceIndex + 1}</b>
+                          <span>
+                            <strong>{source.title || source.url}</strong>
+                            {source.snippet ? <small>{source.snippet}</small> : null}
+                            {source.error ? <em>{source.error}</em> : null}
+                          </span>
+                        </a>
+                      ))}
+                    </div>
+                  </details>
                 ) : null}
               </article>
             ))

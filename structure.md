@@ -445,8 +445,12 @@ Chat Studio uses a concise research prompt: user language first, current date,
 no self-introduction or capability-disclaimer list, and no long refusal when
 live data is missing. With **Web search** enabled it searches news/current
 questions through Google News RSS, optional Google Custom Search (`GOOGLE_CSE_API_KEY`
-+ `GOOGLE_CSE_ID`) and a DuckDuckGo HTML fallback. Results become cited sources
-and source chips in the answer. `GET /api/web/search` exposes the same chain.
++ `GOOGLE_CSE_ID`) and a DuckDuckGo HTML fallback. Results become numbered,
+collapsed Sources details with a provider badge; the answer body uses `[1]`
+style references without raw URLs. Each assistant message has a Copy action.
+Capability questions (`neler yapıyorsun?`) are detected before search, answered
+from a local capability brief only for that request, and never go to a search
+provider. `GET /api/web/search` exposes the same chain.
 
 ### 4.14 Tool registry and capability metadata
 
