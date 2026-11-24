@@ -394,6 +394,7 @@ export async function startBackgroundProcess(
       job.status === "exited" &&
       exitCode !== 0 &&
       (options.restartCount ?? 0) < 1 &&
+      !/address already in use|EADDRINUSE|port is already allocated/i.test(job.output) &&
       isDevServerCommand(trimmed);
     if (shouldRestart) {
       job.output = trimOutput(

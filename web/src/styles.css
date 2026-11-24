@@ -24099,3 +24099,145 @@ button.canvas-stat {
   font-family: var(--mono);
   font-size: 9px;
 }
+
+/* Clearer background-job cards: status, URL and stop action are separated. */
+.studio-job > summary.studio-job-summary {
+  gap: 8px;
+  min-height: 34px;
+  padding: 5px 8px;
+}
+
+.studio-job-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: none;
+  padding: 2px 7px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.05);
+  color: #9fb6d3;
+  font-family: var(--mono);
+  font-size: 7.5px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.studio-job-status.is-running {
+  border-color: rgba(94, 234, 212, 0.35);
+  background: rgba(94, 234, 212, 0.08);
+  color: #5eead4;
+}
+
+.studio-job-status.is-exited,
+.studio-job-status.is-stopped {
+  border-color: rgba(245, 194, 107, 0.3);
+  color: #f5c26b;
+}
+
+.studio-job-command {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #d6e8ff;
+  font-family: var(--mono);
+  font-size: 8.5px;
+}
+
+.studio-job-meta {
+  flex: none;
+  color: #7f9bbd;
+  font-family: var(--mono);
+  font-size: 7.5px;
+  white-space: nowrap;
+}
+
+.studio-job-actions {
+  flex: none;
+  display: flex;
+  align-items: center;
+}
+
+.studio-job-actions button.studio-job-stop {
+  border-color: rgba(244, 114, 182, 0.45);
+  background: rgba(244, 114, 182, 0.12);
+  color: #ffd0d8;
+  font-weight: 600;
+}
+
+.studio-job-urls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  border-top: 1px dashed var(--line);
+  background: rgba(110, 168, 254, 0.04);
+}
+
+.studio-job-urls-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #8fb4df;
+  font-family: var(--mono);
+  font-size: 7.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.studio-job-urls .studio-job-url {
+  padding: 2px 6px;
+  font-size: 8px;
+}
+
+.studio-job-preview {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 20px;
+  padding: 0 7px;
+  border: 1px solid rgba(94, 234, 212, 0.3);
+  border-radius: 4px;
+  background: rgba(94, 234, 212, 0.08);
+  color: #a7f3e7;
+  font-size: 7.5px;
+}
+
+.studio-job-preview:hover {
+  border-color: rgba(94, 234, 212, 0.55);
+}
+
+.studio-terminal-input-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  height: 26px;
+  padding: 0 8px;
+  border: 1px dashed rgba(110, 168, 254, 0.28);
+  border-radius: 5px;
+  background: transparent;
+  color: #8fb4df;
+  font-size: 8px;
+  text-align: left;
+}
+
+.studio-terminal-input-toggle small {
+  margin-left: auto;
+  color: #5f7fa3;
+  font-size: 7.5px;
+}
+
+.studio-terminal-input-toggle:hover {
+  border-color: rgba(110, 168, 254, 0.5);
+  color: #c5dcff;
+}
+
+.studio-continue-info .studio-continue-hint {
+  color: #8fb4df;
+  font-size: 7.5px;
+  opacity: 0.9;
+}

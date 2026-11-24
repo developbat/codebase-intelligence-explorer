@@ -717,6 +717,7 @@ export function CodeStudio({
   const jobOffsetsRef = useRef<Record<string, number>>({});
   const jobsTickRef = useRef(false);
   const [bottomTab, setBottomTab] = useState<"terminal" | "tests" | "jobs" | "checks">("terminal");
+  const [terminalInputOpen, setTerminalInputOpen] = useState(true);
   const [testDiscovery, setTestDiscovery] = useState<TestDiscovery | null>(null);
   const [testCommand, setTestCommand] = useState("");
   const [testBusy, setTestBusy] = useState(false);
@@ -1437,6 +1438,12 @@ export function CodeStudio({
   useEffect(() => {
     terminalsRef.current = terminals;
   }, [terminals]);
+  useEffect(() => {
+    // The agent terminal is output-oriented; collapse the command input so the
+    // log gets the space. A shell/other terminal keeps the input visible.
+    setTerminalInputOpen(activeTerminal?.title !== t("Agent"));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTerminal?.id]);
   useEffect(() => {
     return () => {
       for (const terminal of terminalsRef.current) {
@@ -4376,6 +4383,11 @@ export function CodeStudio({
                   {t("blocked or failed")}
                 </span>
                 <small title={taskQueue.goal}>{reason.slice(0, 260)}</small>
+                <small className="studio-continue-hint">
+                  {t(
+                    "Resume keeps completed tasks and changed files; it does not restart the project.",
+                  )}
+                </small>
               </div>
               <div className="studio-continue-actions">
                 <button
@@ -4877,6 +4889,7 @@ export function CodeStudio({
                       <span>{t("Working directory")}</span>
                       <code>{analysis.rootPath}</code>
                     </div>
+                    {terminalInputOpen ? (
                     <div className="studio-command-row">
                       <span>$</span>
                       <input
@@ -4923,6 +4936,15 @@ export function CodeStudio({
                         <Play size={11} /> {t("Background")}
                       </button>
                     </div>
+                    ) : (
+                      <button
+                        className="studio-terminal-input-toggle"
+                        onClick={() => setTerminalInputOpen(true)}
+                      >
+                        <ChevronDown size={10} /> {t("Show command input")}
+                        <small>{t("Output only · open the input when you need to run a command.")}</small>
+                      </button>
+                    )}
                     <div className="studio-command-tools">
                       <label className="studio-terminal-search">
                         <Search size={9} />
@@ -4969,6 +4991,14 @@ export function CodeStudio({
                         />
                         {t("Favorite")}
                       </button>
+                      {terminalInputOpen ? (
+                        <button
+                          onClick={() => setTerminalInputOpen(false)}
+                          title={t("Hide command input")}
+                        >
+                          <ChevronUp size={9} /> {t("Hide input")}
+                        </button>
+                      ) : null}
                       <span>{t("Use ↑ / ↓ for history")}</span>
                     </div>
                     {commandHistoryOpen ? (
@@ -5526,41 +5556,44 @@ export function CodeStudio({
                           const running = job.status === "running";
                           const ended = job.endedAt ? new Date(job.endedAt).getTime() : Date.now();
                           const duration = Math.max(0, ended - new Date(job.startedAt).getTime());
+                          const statusLabel =
+                            job.status === "running"
+                              ? t("Running")
+                              : job.status === "exited" || job.status === "stopped"
+                                ? t("Stopped")
+                                : t("Failed");
                           return (
                             <details key={job.id} className={`studio-job ${running ? "is-running" : ""}`} open={running}>
-                              <summary>
-                                <span className={`studio-job-dot is-${job.status}`} />
-                                <code>{job.command}</code>
-                                <small>{job.status}</small>
-                                {job.pid ? <small>PID {job.pid}</small> : null}
-                                <small>{Math.round(duration / 1000)}s</small>
-                                {(running ? job.urls : undefined)?.map((url) => (
-                                  <a
-                                    key={url}
-                                    className="studio-job-url"
-                                    href={url}
-                                    target="_blank"
-                                    rel="noreferrer"
-                                    onClick={(event) => event.stopPropagation()}
-                                    title={t("Open local URL")}
-                                  >
-                                    {url.replace(/^https?:\/\//, "")} <ExternalLink size={8} />
-                                  </a>
-                                ))}
+                              <summary className="studio-job-summary">
+                                <span className={`studio-job-status is-${job.status}`}>
+                                  <span className="studio-job-dot" />
+                                  {statusLabel}
+                                </span>
+                                <code className="studio-job-command" title={job.command}>
+                                  {job.command}
+                                </code>
+                                <span className="studio-job-meta">
+                                  {job.pid ? `PID ${job.pid} · ` : ""}
+                                  {Math.round(duration / 1000)}s
+                                </span>
                                 <span className="studio-job-actions">
                                   {running ? (
                                     <button
+                                      className="studio-job-stop"
                                       onClick={(event) => {
                                         event.preventDefault();
+                                        event.stopPropagation();
                                         void stopJob(job.id);
                                       }}
+                                      title={t("Stop this background job")}
                                     >
-                                      {t("Stop")}
+                                      <Square size={10} /> {t("Stop")}
                                     </button>
                                   ) : (
                                     <button
                                       onClick={(event) => {
                                         event.preventDefault();
+                                        event.stopPropagation();
                                         void removeJob(job.id);
                                       }}
                                     >
@@ -5569,6 +5602,35 @@ export function CodeStudio({
                                   )}
                                 </span>
                               </summary>
+                              {running && (job.urls?.length ?? 0) > 0 ? (
+                                <div className="studio-job-urls">
+                                  <span className="studio-job-urls-label">
+                                    <Server size={10} /> {t("URL")}
+                                  </span>
+                                  {job.urls?.map((url) => (
+                                    <a
+                                      key={url}
+                                      className="studio-job-url"
+                                      href={url}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      title={t("Open local URL")}
+                                    >
+                                      {url.replace(/^https?:\/\//, "")} <ExternalLink size={8} />
+                                    </a>
+                                  ))}
+                                  <button
+                                    className="studio-job-preview"
+                                    onClick={(event) => {
+                                      event.preventDefault();
+                                      setLivePreviewUrl(job.urls?.[0] ?? "");
+                                      setRightTab("preview");
+                                    }}
+                                  >
+                                    <Eye size={10} /> {t("Open in Preview")}
+                                  </button>
+                                </div>
+                              ) : null}
                               <pre>{jobOutputs[job.id] || job.output || t("No output yet.")}</pre>
                             </details>
                           );

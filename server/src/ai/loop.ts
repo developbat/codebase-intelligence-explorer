@@ -38,6 +38,14 @@ import { recordUsage } from "./usage";
 import { getPublicSettings, resolveAgentRole, resolveProvider } from "./settings";
 import { pickAlternateAgentModel } from "./agents";
 import {
+  RECOVERY_POLICY,
+  buildResumeContract,
+  environmentRepairNote,
+  isEnvironmentFailure,
+  isReadLoopFailure,
+  narrowTaskForEditFirst,
+} from "./recovery";
+import {
   healthKey,
   modelHealthByProviderModel,
   recordModelFallback,
@@ -843,15 +851,22 @@ function taskInstruction(
     .slice(-8)
     .map(
       (item) =>
-        `- ${item.id} ${item.title}: ${(item.resultSummary ?? "").replace(/\n+/g, " ").slice(0, 260)}`,
+        `- ${item.id} ${item.title}: ${(item.resultSummary ?? "").replace(/\n+/g, " ").slice(0, 260)}${
+          item.changedFiles.length > 0 ? ` · files: ${item.changedFiles.join(", ")}` : ""
+        }`,
     )
     .join("\n");
+  const resumeContract =
+    priorTasks.some((item) => item.status === "done") || (task.repairAttempts ?? 0) > 0
+      ? buildResumeContract(priorTasks, task)
+      : "";
   return [
     `You are executing task ${task.id} of ${total} in a persistent project task loop.`,
     `Task: ${task.title}`,
     task.detail,
     task.acceptance ? `Acceptance: ${task.acceptance}` : "",
     task.notes ? `Retry note: ${task.notes}` : "",
+    resumeContract,
     prior ? `Previous task summaries (use this before reading context.md):\n${prior}` : "",
     extractionTask
       ? "This is a read-only complete-list task. Do not read .cie/agent context files, do not run grep/shell commands, do not use list_items or browser_check. Call extract_entities with the matching kind once, then finish with every item in the user's language."
@@ -881,6 +896,9 @@ function taskInstruction(
     extractionTask ? "" : "Do not re-read files already fully read by a previous task unless the current task needs exact content after a change.",
     extractionTask ? "" : "Batch up to 4 independent read-only calls in one reply (read_file, find_in_file, search_code, list_files). One context round-trip per batch instead of one per read.",
     extractionTask ? "" : "Read the smallest range you need. Do not read a whole large file before planning; read the relevant functions, then edit. If you have read the same file twice without editing, stop reading and make the smallest change.",
+    (task.repairAttempts ?? 0) > 0
+      ? `Narrow retry: read at most ${RECOVERY_POLICY.maxFilesForNarrowRetry} files (or none when the content is already in context), apply the smallest edit, then verify. Do not repeat earlier reads.`
+      : "",
     "Stay scoped to this task. Do not do later tasks. Do not revert earlier work.",
     verification && !extractionTask ? `Verification command: ${verification}` : "",
     extractionTask
@@ -1432,17 +1450,43 @@ export async function runProjectLoop(
         await appendLesson(analysis.rootPath, `Retry recovery ${task.id}: ${recovery.note}`);
       }
     }
+    const doneForResume = queue.tasks.filter((item) => item.status === "done");
     queue = {
       ...queue,
       tasks: queue.tasks.map((task) => {
         if (task.status !== "failed" && task.status !== "blocked") return task;
         const recovery = recoveries.get(task.id);
-        const notes = [recovery?.note, task.notes].filter(Boolean).join("\n\n");
+        // A manual "Continue" must resume, not restart. Read-loop tasks are
+        // narrowed again; completed tasks and changed files are preserved.
+        const narrow = isReadLoopFailure(
+          `${task.notes ?? ""}\n${task.resultSummary ?? ""}`,
+        )
+          ? narrowTaskForEditFirst(task, "read loop from an earlier run")
+          : null;
+        const contract = buildResumeContract(doneForResume, task);
+        const envNote = isEnvironmentFailure(
+          undefined,
+          `${task.notes ?? ""}\n${task.resultSummary ?? ""}`,
+        )
+          ? environmentRepairNote(`${task.notes ?? ""} ${task.resultSummary ?? ""}`)
+          : "";
+        const notes = [contract, envNote, recovery?.note, narrow?.notes, task.notes]
+          .filter(Boolean)
+          .join("\n\n");
         return {
           ...task,
+          ...(narrow
+            ? {
+                detail: narrow.detail,
+                acceptance: narrow.acceptance,
+                effort: "simple",
+                role: "main",
+                repairAttempts: narrow.repairAttempts,
+              }
+            : {}),
           status: "pending",
           attempts: 0,
-          repairAttempts: 0,
+          ...(narrow ? {} : { repairAttempts: task.repairAttempts ?? 0 }),
           modelOverride: undefined,
           completedAt: undefined,
           resultSummary: undefined,
@@ -1467,6 +1511,7 @@ export async function runProjectLoop(
   const seenTasks = new Set<string>();
   const avoidModels = new Set<string>();
   let executedCount = 0;
+  let autoRepairs = 0;
 
   while (executedCount < maxTasks && Date.now() - startedAt < maxMs) {
     if (signal?.aborted) {
@@ -1889,27 +1934,111 @@ export async function runProjectLoop(
       result.tokenUsage,
     ).totalTokens;
     const noEditTokenBurn = changedBefore === 0 && taskSpentTokens >= 300_000;
+    const failureText = `${result.summary ?? ""}\n${result.steps
+      .map((step) => step.observation ?? "")
+      .join("\n")}`;
+    const envFailure = isEnvironmentFailure(result.steps, failureText);
     if (
       status !== "done" &&
       result.stoppedReason !== "aborted" &&
-      (readBudgetStalled || noEditTokenBurn)
+      (readBudgetStalled || noEditTokenBurn || envFailure)
     ) {
-      const reason = readBudgetStalled
-        ? "kept reading instead of editing"
-        : "produced no file change";
+      const reason =
+        envFailure && !readBudgetStalled && !noEditTokenBurn
+          ? "hit a broken Python runtime"
+          : readBudgetStalled
+            ? "kept reading instead of editing"
+            : "produced no file change";
+      const latestTask = queue.tasks.find((item) => item.id === task.id) ?? task;
+      const repairAttempts = latestTask.repairAttempts ?? 0;
+
+      // Recover inside the same run instead of leaving a "Continue" button:
+      // narrow the task, keep completed work, and retry with an edit-first
+      // budget. Bounded globally so a broken goal cannot loop forever.
+      if (
+        repairAttempts < RECOVERY_POLICY.maxRepairsPerTask &&
+        autoRepairs < RECOVERY_POLICY.maxRepairsPerRun
+      ) {
+        autoRepairs += 1;
+        const repaired =
+          envFailure && !readBudgetStalled && !noEditTokenBurn
+            ? {
+                ...latestTask,
+                status: "pending" as const,
+                attempts: 0,
+                repairAttempts: repairAttempts + 1,
+                tokenUsage: undefined,
+                resultSummary: undefined,
+                verification: undefined,
+                notes: [
+                  latestTask.notes,
+                  environmentRepairNote(failureText),
+                  "The runtime is repaired. Re-run the verification through the project .venv first; if the existing implementation passes, finish without rewriting it. Fix only real code failures.",
+                ]
+                  .filter(Boolean)
+                  .join("\n"),
+              }
+            : narrowTaskForEditFirst(
+                {
+                  ...latestTask,
+                  notes: [latestTask.notes, envFailure ? environmentRepairNote(failureText) : ""]
+                    .filter(Boolean)
+                    .join("\n"),
+                },
+                reason,
+              );
+        queue = markTask(queue, task.id, {
+          ...repaired,
+          status: "pending",
+          modelOverride: { provider: main.id, model: main.model },
+          provider: main.id,
+          model: main.model,
+          notes: [
+            repaired.notes,
+            envFailure
+              ? "The runtime was repaired. Verify through the project .venv, not the system interpreter."
+              : "",
+          ]
+            .filter(Boolean)
+            .join("\n"),
+        });
+        await appendTaskContext(
+          analysis.rootPath,
+          `Auto-repair · ${task.id}`,
+          `The task ${reason} after ${taskSpentTokens.toLocaleString()} tokens. It was narrowed into an edit-first retry (#${repaired.repairAttempts}) instead of stopping the whole goal.${envFailure ? " The failure was environmental; the Python venv is used for the retry." : ""}`,
+        );
+        await appendLesson(
+          analysis.rootPath,
+          `${task.id} ${reason} after ${taskSpentTokens.toLocaleString()} tokens. Auto-repair ${repaired.repairAttempts}/${RECOVERY_POLICY.maxRepairsPerTask}: edit first, read at most ${RECOVERY_POLICY.maxFilesForNarrowRetry} files, preserve completed work.`,
+        ).catch(() => {});
+        queue = await saveQueue(analysis.rootPath, queue);
+        emit({
+          type: "log",
+          entry: {
+            id: `log-${Date.now()}-auto-repair-${task.id}`,
+            at: nowIso(),
+            level: "warn",
+            label: "Auto-repair started",
+            detail: `${task.id}: ${reason}. Retrying with an edit-first budget (${repaired.repairAttempts}/${RECOVERY_POLICY.maxRepairsPerTask}).`,
+          },
+        });
+        emit({ type: "task", queue, task: queue.tasks.find((item) => item.id === task.id) });
+        continue;
+      }
+
       queue = markTask(queue, task.id, {
         status: "blocked",
         completedAt: nowIso(),
-        notes: `Blocked: the previous attempt ${reason} after ${taskSpentTokens.toLocaleString()} tokens. Automatic retry was stopped to prevent an endless loop. Split this goal into smaller single-behavior tasks, or retry manually with a narrower scope.`,
+        notes: `Blocked: the previous attempt ${reason} after ${taskSpentTokens.toLocaleString()} tokens. Automatic recovery was tried ${repairAttempts} time(s) and stopped to prevent an endless loop. Split this goal into smaller single-behavior tasks, or retry manually with a narrower scope.`,
       });
       await appendTaskContext(
         analysis.rootPath,
         `Blocked · ${task.id}`,
-        `The task ${reason} after ${taskSpentTokens.toLocaleString()} tokens. Automatic retry stopped; split the goal or narrow the scope.`,
+        `The task ${reason} after ${taskSpentTokens.toLocaleString()} tokens. Automatic recovery was exhausted; split the goal or narrow the scope.`,
       );
       await appendLesson(
         analysis.rootPath,
-        `${task.id} ${reason} after ${taskSpentTokens.toLocaleString()} tokens. Split multi-feature goals into one behavior per task; do not re-read the same file ranges.`,
+        `${task.id} ${reason} after ${taskSpentTokens.toLocaleString()} tokens. Automatic recovery exhausted; split multi-feature goals into one behavior per task and do not re-read the same file ranges.`,
       ).catch(() => {});
       queue = await saveQueue(analysis.rootPath, queue);
       emit({ type: "task", queue, task: queue.tasks.find((item) => item.id === task.id) });

@@ -2119,6 +2119,17 @@ export const tr: Dictionary = {
   "AI test generation failed": "AI test üretimi başarısız oldu",
   "Test file created. Rescan to include it in the graph and test discovery.":
     "Test dosyası oluşturuldu. Graph ve test keşfine dahil etmek için yeniden tarayın.",
-  "Could not create the test file": "Test dosyası oluşturulamadı"
-
+  "Could not create the test file": "Test dosyası oluşturulamadı",
+  "Running": "Çalışıyor",
+  "Stopped": "Durduruldu",
+  "URL": "Adres",
+  "Open in Preview": "Önizlemede aç",
+  "Show command input": "Komut girişini göster",
+  "Hide input": "Girişi gizle",
+  "Hide command input": "Komut girişini gizle",
+  "Output only · open the input when you need to run a command.":
+    "Yalnızca çıktı · komut çalıştırmak istediğinde girişi aç.",
+  "Stop this background job": "Bu arka plan işini durdur",
+  "Resume keeps completed tasks and changed files; it does not restart the project.":
+    "Sürdürme tamamlanan görevleri ve değişen dosyaları korur; projeyi baştan başlatmaz."
 };
