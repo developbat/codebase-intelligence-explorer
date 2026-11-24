@@ -202,6 +202,23 @@ questions (“nerede?”) and compound requests (“listele ve ekle” → chang
 This prevents plan wording such as “create a complete list” from turning a
 read-only question into a project edit.
 
+### 4.5.1 Extraction cache
+
+`extractEntities` keeps an in-memory LRU-ish cache (max 32 entries) keyed by:
+
+```text
+projectId | analysis.createdAt | kind | scope | query | limit
+```
+
+- Repeated identical extractions return `fromCache: true` without re-reading
+  files.
+- Any agent write, mapped change, undo or rescan calls
+  `invalidateExtractionCache(projectId)` through `invalidateReadCaches()`.
+- A watcher/rescan creates a new `analysis.createdAt`, so old entries are
+  naturally bypassed.
+- The tool log distinguishes “Entities extracted” from “Entities extracted from
+  cache”.
+
 ### 4.6 Extraction profile
 
 When the work brief is `extract(sth)`:

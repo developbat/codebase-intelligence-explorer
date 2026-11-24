@@ -124,6 +124,7 @@ import type { ExtractionTable } from "../../../shared/extraction";
 import {
   applyMappingsToContent,
   extractEntities,
+  invalidateExtractionCache,
   resolveWorkBrief,
   type EntityKind,
   type EntityResult,
@@ -4513,6 +4514,7 @@ ${lessons}` : "",
     readCoverage.clear();
     readOnlyCache.clear();
     findCounts.clear();
+    invalidateExtractionCache(projectId);
   };
   let modelTurns = 0;
   let writeNudges = 0;
@@ -6327,7 +6329,7 @@ ${lessons}` : "",
         }
         log(
           "info",
-          "Entities extracted",
+          result.fromCache ? "Entities extracted from cache" : "Entities extracted",
           `${result.kind} · ${result.total} item(s) · ${result.unique} unique`,
         );
         ok = true;

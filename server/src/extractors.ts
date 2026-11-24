@@ -43,6 +43,8 @@ export interface EntityResult {
   headers: EntityHeader[];
   markdown: string;
   truncated: boolean;
+  /** True when the result came from the in-memory extraction cache. */
+  fromCache?: boolean;
 }
 
 export interface EntityRequest {
@@ -1025,6 +1027,43 @@ async function extractText(
   return buildResult("text", headers, items, items.length, truncated);
 }
 
+interface ExtractionCacheEntry {
+  createdAt: string;
+  result: EntityResult;
+}
+
+const EXTRACTION_CACHE = new Map<string, ExtractionCacheEntry>();
+
+export function invalidateExtractionCache(projectId?: string): void {
+  if (!projectId) {
+    EXTRACTION_CACHE.clear();
+    return;
+  }
+  const prefix = `${projectId}|`;
+  for (const key of EXTRACTION_CACHE.keys()) {
+    if (key.startsWith(prefix)) EXTRACTION_CACHE.delete(key);
+  }
+}
+
+function extractionCacheKey(
+  analysis: AnalysisResult,
+  request: EntityRequest,
+  limit: number,
+): string {
+  const scope = (Array.isArray(request.scope) ? request.scope : request.scope ? [request.scope] : [])
+    .map((value) => value.trim().replace(/\\/g, "/"))
+    .sort()
+    .join(",");
+  return [
+    analysis.id,
+    analysis.createdAt,
+    request.kind,
+    scope,
+    request.query ?? "",
+    limit,
+  ].join("|");
+}
+
 export interface MappedReplacement {
   from: string;
   to: string;
@@ -1085,35 +1124,58 @@ export async function extractEntities(
   request: EntityRequest,
 ): Promise<EntityResult> {
   const limit = Math.max(1, Math.min(2_000, Number(request.limit) || 500));
+  const key = extractionCacheKey(analysis, request, limit);
+  const cached = EXTRACTION_CACHE.get(key);
+  if (cached && cached.createdAt === analysis.createdAt) {
+    return { ...cached.result, fromCache: true };
+  }
+  let result: EntityResult;
   switch (request.kind) {
     case "color":
-      return extractColor(analysis, request.scope, limit);
+      result = await extractColor(analysis, request.scope, limit);
+      break;
     case "input":
     case "button":
     case "link":
-      return extractMarkup(analysis, request.kind, request.scope, limit);
+      result = await extractMarkup(analysis, request.kind, request.scope, limit);
+      break;
     case "function":
     case "class":
     case "component":
-      return extractSymbols(analysis, request.kind, request.scope, limit);
+      result = await extractSymbols(analysis, request.kind, request.scope, limit);
+      break;
     case "env":
     case "todo":
     case "route":
     case "import":
-      return extractPatterned(analysis, request.kind, request.scope, limit);
+      result = await extractPatterned(analysis, request.kind, request.scope, limit);
+      break;
     case "asset":
-      return extractAssets(analysis, request.scope, limit);
+      result = await extractAssets(analysis, request.scope, limit);
+      break;
     case "document":
-      return extractDocuments(analysis, request.scope, limit);
+      result = await extractDocuments(analysis, request.scope, limit);
+      break;
     case "selector":
-      return extractSelector(analysis, request.scope, limit);
+      result = await extractSelector(analysis, request.scope, limit);
+      break;
     case "markdown":
-      return extractMarkdown(analysis, request.scope, limit);
+      result = await extractMarkdown(analysis, request.scope, limit);
+      break;
     case "file":
-      return extractFiles(analysis, request.scope, limit);
+      result = await extractFiles(analysis, request.scope, limit);
+      break;
     case "text":
-      return extractText(analysis, request.scope, request.query, limit);
+      result = await extractText(analysis, request.scope, request.query, limit);
+      break;
     default:
       throw new Error(`Unsupported extraction kind: ${String(request.kind)}`);
   }
+  result.fromCache = false;
+  EXTRACTION_CACHE.set(key, { createdAt: analysis.createdAt, result });
+  if (EXTRACTION_CACHE.size > 32) {
+    const oldest = EXTRACTION_CACHE.keys().next().value;
+    if (oldest) EXTRACTION_CACHE.delete(oldest);
+  }
+  return result;
 }
