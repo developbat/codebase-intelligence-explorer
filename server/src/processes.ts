@@ -2,6 +2,15 @@ import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { spawn, type ChildProcess } from "node:child_process";
+import {
+  planPythonEnvironment,
+  probePythonInterpreter,
+  projectPythonEnv,
+  pythonSetupLockPath,
+  pythonVenvInfo,
+  waitForPythonSetup,
+  writePythonEnvironmentMarker,
+} from "./pythonRuntime";
 import { isWithin } from "./scanner";
 import type { BackgroundJob, DevCommandSuggestion } from "../../shared/types";
 
@@ -16,6 +25,7 @@ interface JobInternal extends BackgroundJob {
 }
 
 const jobs = new Map<string, Map<string, JobInternal>>();
+const setupLocks = new Set<string>();
 let cleanupRegistered = false;
 
 function registerCleanup(): void {
@@ -30,6 +40,7 @@ function registerCleanup(): void {
         }
       }
     }
+    for (const lock of setupLocks) void fs.rm(lock, { force: true }).catch(() => undefined);
   };
   process.once("exit", cleanup);
   process.once("SIGINT", () => {
@@ -57,6 +68,10 @@ const LOCAL_URL_PATTERN =
 export function extractLocalUrls(output: string): string[] {
   const seen = new Set<string>();
   for (const match of output.matchAll(LOCAL_URL_PATTERN)) {
+    // Server access logs look like `127.0.0.1:64646 - "GET /health"`; that is
+    // a client address, not a preview URL.
+    const following = output.slice((match.index ?? 0) + match[0].length);
+    if (/^\s+-\s+"/u.test(following)) continue;
     let url = match[0].replace(/[),.;]+$/, "");
     if (!/^https?:\/\//i.test(url)) url = `http://${url}`;
     try {
@@ -174,28 +189,89 @@ export async function detectDevCommands(rootPath: string): Promise<DevCommandSug
   } else if ((await exists("composer.json")) || (await exists("public/index.php"))) {
     suggestions.push({ label: "PHP server", command: "php -S localhost:8000 -t public", kind: "php" });
   }
-  if ((await exists("requirements.txt")) && !(await exists(".venv")) && !(await exists("venv"))) {
-    const requirements = (await exists("requirements-dev.txt")) ? "requirements-dev.txt" : "requirements.txt";
+
+  // Python: prefer the project virtual environment so `python3`, `pip`,
+  // `pytest`, `uvicorn` and `streamlit` resolve inside `.venv`.
+  const pythonVenv = await pythonVenvInfo(rootPath);
+  const pythonRunner = pythonVenv ? pythonVenv.relativePython : "python3";
+  const requirementsPresent =
+    (await exists("requirements.txt")) || (await exists("requirements-dev.txt"));
+  if (requirementsPresent) {
+    const plan = await planPythonEnvironment(rootPath);
+    if (plan) {
+      suggestions.push({
+        label: "Install dependencies",
+        command: plan.command,
+        kind: "python",
+        purpose: "install",
+      });
+    }
+  }
+  const readPython = (relative: string) =>
+    fs.readFile(path.join(rootPath, relative), "utf8").catch(() => "");
+
+  if (await exists("manage.py")) {
+    suggestions.push({ label: "Django", command: `${pythonRunner} manage.py runserver`, kind: "python" });
+  }
+
+  // Streamlit entry points (app.py, streamlit_app.py, dashboard.py).
+  const streamlitCandidates = ["app.py", "streamlit_app.py", "dashboard.py"];
+  let streamlitEntry: string | null = null;
+  let pythonAppSource = "";
+  for (const candidate of streamlitCandidates) {
+    if (!(await exists(candidate))) continue;
+    const source = await readPython(candidate);
+    if (candidate === "app.py") pythonAppSource = source;
+    if (/\b(?:import|from)\s+streamlit\b/u.test(source)) {
+      streamlitEntry = candidate;
+      break;
+    }
+  }
+  if (!streamlitEntry) {
+    const requirementText = (
+      await Promise.all(["requirements.txt", "requirements-dev.txt", "pyproject.toml"].map(readPython))
+    )
+      .join("\n")
+      .toLowerCase();
+    if (/\bstreamlit\b/u.test(requirementText)) {
+      for (const candidate of streamlitCandidates) {
+        if (await exists(candidate)) {
+          streamlitEntry = candidate;
+          break;
+        }
+      }
+    }
+  }
+
+  if (streamlitEntry) {
     suggestions.push({
-      label: "Install dependencies",
-      command: `python3 -m venv .venv && . .venv/bin/activate && pip install -r ${requirements}`,
+      label: "Streamlit",
+      command: `${pythonRunner} -m streamlit run ${streamlitEntry} --server.headless true --server.address 127.0.0.1`,
       kind: "python",
-      purpose: "install",
     });
   }
-  if (await exists("manage.py")) {
-    suggestions.push({ label: "Django", command: "python3 manage.py runserver", kind: "python" });
-  } else if (await exists("app/main.py")) {
-    try {
-      const mainPy = await fs.readFile(path.join(rootPath, "app/main.py"), "utf8");
-      if (/FastAPI\(/.test(mainPy)) {
-        suggestions.push({ label: "FastAPI", command: "uvicorn app.main:app --reload", kind: "python" });
-      }
-    } catch {
-      // ignore unreadable entry file
+
+  for (const entry of ["app/main.py", "main.py"]) {
+    if (!(await exists(entry))) continue;
+    const source = await readPython(entry);
+    if (/FastAPI\(/u.test(source)) {
+      const module = entry.replace(/\.py$/u, "").replace(/[\\/]/gu, ".");
+      suggestions.push({
+        label: "FastAPI",
+        command: `${pythonRunner} -m uvicorn ${module}:app --reload`,
+        kind: "python",
+      });
+      break;
     }
-  } else if (await exists("app.py")) {
-    suggestions.push({ label: "Flask", command: "flask --app app run", kind: "python" });
+  }
+
+  if (!streamlitEntry && (await exists("app.py"))) {
+    const source = pythonAppSource || (await readPython("app.py"));
+    if (/\b(?:import|from)\s+flask\b/u.test(source)) {
+      suggestions.push({ label: "Flask", command: `${pythonRunner} -m flask --app app run`, kind: "python" });
+    } else if (!/FastAPI\(/u.test(source)) {
+      suggestions.push({ label: "Python app", command: `${pythonRunner} app.py`, kind: "python" });
+    }
   }
   if ((await exists("bin/rails")) && (await exists("Gemfile"))) {
     suggestions.push({ label: "Rails", command: "bin/rails server", kind: "ruby" });
@@ -221,11 +297,28 @@ export async function detectDevCommands(rootPath: string): Promise<DevCommandSug
   return suggestions.slice(0, 4);
 }
 
+export interface BackgroundProcessOptions {
+  /** Internal completion hook; used to record a prepared Python environment. */
+  onExit?: (job: BackgroundJob) => void | Promise<void>;
+  /** Restart a crashed dev server once instead of leaving a dead preview. */
+  autoRestart?: boolean;
+  /** @internal Number of automatic restarts already attempted. */
+  restartCount?: number;
+}
+
+const DEV_SERVER_PATTERN =
+  /\b(streamlit|uvicorn|gunicorn|flask\s+--app|manage\.py\s+runserver|npm\s+(run\s+)?(dev|start|serve)|pnpm\s+(dev|start)|yarn\s+(dev|start)|bun\s+(dev|start)|vite|next\s+dev|php\s+-S|http\.server|expo\s+start|react-native\s+start|flutter\s+run|go\s+run|cargo\s+run|dotnet\s+run|rails\s+server|mix\s+phx\.server)\b/i;
+
+export function isDevServerCommand(command: string): boolean {
+  return DEV_SERVER_PATTERN.test(command);
+}
+
 export async function startBackgroundProcess(
   rootPath: string,
   projectId: string,
   command: string,
   cwd?: string,
+  options: BackgroundProcessOptions = {},
 ): Promise<BackgroundJob> {
   const trimmed = command.trim();
   if (!trimmed) throw new Error("A command is required.");
@@ -246,6 +339,7 @@ export async function startBackgroundProcess(
   if (!isWithin(realRoot, realCwd)) throw new Error("Command working directory is outside the project.");
 
   const id = crypto.randomUUID();
+  const pythonEnv = await projectPythonEnv(rootPath);
   const child = spawn(trimmed, {
     cwd: realCwd,
     shell: true,
@@ -257,6 +351,7 @@ export async function startBackgroundProcess(
       PYTHONUNBUFFERED: "1",
       GIT_PAGER: "cat",
       PAGER: "cat",
+      ...pythonEnv,
     },
   });
 
@@ -291,9 +386,99 @@ export async function startBackgroundProcess(
     if (job.status === "running") job.status = "exited";
     job.exitCode = exitCode;
     job.endedAt = new Date().toISOString();
+    if (options.onExit) {
+      void Promise.resolve(options.onExit(publicJob(job))).catch(() => undefined);
+    }
+    const shouldRestart =
+      Boolean(options.autoRestart) &&
+      job.status === "exited" &&
+      exitCode !== 0 &&
+      (options.restartCount ?? 0) < 1 &&
+      isDevServerCommand(trimmed);
+    if (shouldRestart) {
+      job.output = trimOutput(
+        job.output,
+        `\n[auto-restart] Server exited with code ${exitCode ?? "?"}. Restarting after the environment is ready…\n`,
+      );
+      setTimeout(() => {
+        void waitForPythonSetup(rootPath, undefined, 120_000)
+          .then(() =>
+            startBackgroundProcess(rootPath, projectId, trimmed, cwd, {
+              ...options,
+              restartCount: (options.restartCount ?? 0) + 1,
+            }),
+          )
+          .catch(() => undefined);
+      }, 1_500).unref?.();
+    }
   });
 
   return publicJob(job);
+}
+
+/**
+ * Start the detected dev server automatically, once, after a Python project is
+ * prepared. The user should never have to find and click a start button after
+ * creating a project.
+ */
+export async function autoStartDevServer(
+  projectId: string,
+  rootPath: string,
+): Promise<BackgroundJob | null> {
+  const map = projectJobs(projectId);
+  if ([...map.values()].some((job) => job.status === "running" && isDevServerCommand(job.command))) {
+    return null;
+  }
+  const suggestions = await detectDevCommands(rootPath);
+  const server = suggestions.find((suggestion) => suggestion.purpose !== "install");
+  if (!server) return null;
+  return startBackgroundProcess(rootPath, projectId, server.command, undefined, {
+    autoRestart: true,
+  });
+}
+
+/**
+ * Create the project virtual environment and install requirements in the
+ * background. Called automatically after a Python project is opened so the
+ * user never has to run setup commands by hand.
+ */
+export async function startPythonEnvironment(
+  projectId: string,
+  rootPath: string,
+): Promise<BackgroundJob | null> {
+  const plan = await planPythonEnvironment(rootPath);
+  if (!plan) return null;
+  // `.cie-python.json` marks a completed setup; do not reinstall on every open.
+  const preparedVenv = await pythonVenvInfo(rootPath);
+  if (preparedVenv?.version) return null;
+  const map = projectJobs(projectId);
+  const existing = [...map.values()].find(
+    (job) => job.status === "running" && job.command === plan.command,
+  );
+  if (existing) return publicJob(existing);
+
+  const lock = pythonSetupLockPath(rootPath);
+  await fs.mkdir(path.dirname(lock), { recursive: true }).catch(() => undefined);
+  await fs.writeFile(lock, new Date().toISOString(), "utf8").catch(() => undefined);
+  setupLocks.add(lock);
+  try {
+    return await startBackgroundProcess(rootPath, projectId, plan.command, undefined, {
+      onExit: async (job) => {
+        setupLocks.delete(lock);
+        await fs.rm(lock, { force: true }).catch(() => undefined);
+        if (job.exitCode !== 0) return;
+        const venv = await pythonVenvInfo(rootPath);
+        const version =
+          probePythonInterpreter(venv?.python ?? "python3")?.version ?? plan.interpreter?.version;
+        if (version) await writePythonEnvironmentMarker(rootPath, version);
+        await autoStartDevServer(projectId, rootPath).catch(() => null);
+      },
+    });
+  } catch (error) {
+    setupLocks.delete(lock);
+    await fs.rm(lock, { force: true }).catch(() => undefined);
+    throw error;
+  }
 }
 
 export function listBackgroundProcesses(projectId: string): BackgroundJob[] {

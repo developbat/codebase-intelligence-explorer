@@ -883,6 +883,18 @@ export function CodeStudio({
   const [pendingLine, setPendingLine] = useState<number | null>(null);
   const autoRunPromptRef = useRef<string | null>(null);
   const keepRightTabRef = useRef(false);
+  const resumePollRef = useRef<number | null>(null);
+  const autoPreviewPickedRef = useRef(false);
+
+  useEffect(
+    () => () => {
+      if (resumePollRef.current != null) {
+        window.clearTimeout(resumePollRef.current);
+        resumePollRef.current = null;
+      }
+    },
+    [],
+  );
 
   useEffect(() => {
     chatHydratedRef.current = false;
@@ -1371,12 +1383,22 @@ export function CodeStudio({
 
   const quickCommands = useMemo(() => quickCommandsFor(analysis), [analysis]);
   const livePreviewUrls = useMemo(
-    () => [...new Set(jobs.flatMap((job) => job.urls ?? []))],
+    // Only expose addresses of servers that are actually running; a crashed
+    // Python process must not leave a dead frame (and its traceback) on screen.
+    () => [...new Set(jobs.filter((job) => job.status === "running").flatMap((job) => job.urls ?? []))],
     [jobs],
   );
   useEffect(() => {
     if (livePreviewUrl && !livePreviewUrls.includes(livePreviewUrl)) {
       setLivePreviewUrl("");
+      autoPreviewPickedRef.current = false;
+    }
+  }, [livePreviewUrl, livePreviewUrls]);
+  useEffect(() => {
+    if (!livePreviewUrl && livePreviewUrls.length > 0 && !autoPreviewPickedRef.current) {
+      autoPreviewPickedRef.current = true;
+      setLivePreviewUrl(livePreviewUrls[0]);
+      setRightTab("preview");
     }
   }, [livePreviewUrl, livePreviewUrls]);
   const htmlFiles = useMemo(
@@ -1626,8 +1648,23 @@ export function CodeStudio({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeFile, contents]);
 
+  const hasRunningJobs = jobs.some((job) => job.status === "running");
+
   useEffect(() => {
-    if (!consoleOpen || bottomTab !== "jobs") return;
+    void refreshJobs();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [analysis.id]);
+
+  useEffect(() => {
+    if (
+      !consoleOpen &&
+      bottomTab !== "jobs" &&
+      !hasRunningJobs &&
+      rightTab !== "preview" &&
+      !livePreviewUrl
+    ) {
+      return;
+    }
     const tick = async () => {
       if (jobsTickRef.current) return;
       jobsTickRef.current = true;
@@ -1641,7 +1678,7 @@ export function CodeStudio({
     const timer = window.setInterval(() => void tick(), 2000);
     return () => window.clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [consoleOpen, bottomTab, analysis.id]);
+  }, [consoleOpen, bottomTab, analysis.id, hasRunningJobs, rightTab, livePreviewUrl]);
 
   function openSettings(tab: SettingsTab, addModel = false) {
     onOpenSettings?.(tab, addModel);
@@ -2107,7 +2144,41 @@ export function CodeStudio({
       source: "agent",
       at: new Date().toISOString(),
     });
+    // The editor's own commands must be visible without opening the chat log:
+    // keep the terminal tab in front and append there.
+    setBottomTab("terminal");
+    setConsoleOpen(true);
     if (htmlFiles.length === 0 && !livePreviewUrl) setRightTab("run");
+  }
+
+  /**
+   * A dropped browser connection (sleep, screen lock, reload) must not look
+   * like a Python/runtime failure. Refresh the server-side queue silently and
+   * let the task loop finish without asking the user to restart it.
+   */
+  function resumeTaskQueueSilently() {
+    if (resumePollRef.current != null) window.clearTimeout(resumePollRef.current);
+    let attempts = 0;
+    const tick = async () => {
+      attempts += 1;
+      const response = await api.tasks.get(analysis.id).catch(() => null);
+      if (response?.queue) {
+        setTaskQueue(response.queue);
+        const active = response.queue.tasks.some(
+          (task) => task.status === "in_progress" || task.status === "pending",
+        );
+        if (!active) {
+          resumePollRef.current = null;
+          return;
+        }
+      }
+      if (attempts >= 120 || !analysis) {
+        resumePollRef.current = null;
+        return;
+      }
+      resumePollRef.current = window.setTimeout(() => void tick(), 3_000);
+    };
+    resumePollRef.current = window.setTimeout(() => void tick(), 3_000);
   }
 
   async function runCommand(nextCommand?: string, terminalId?: string) {
@@ -2228,13 +2299,13 @@ export function CodeStudio({
     }
   }
 
-  async function startBackgroundCommand(commandText?: string) {
+  async function startBackgroundCommand(commandText?: string, autoRestart = false) {
     const text = (commandText ?? activeTerminal?.command ?? "").trim();
     if (!text) return;
     rememberCommand(text);
     setJobError(null);
     try {
-      const job = await api.processes.start(analysis.id, text);
+      const job = await api.processes.start(analysis.id, text, undefined, autoRestart);
       setJobs((current) => [job, ...current]);
       jobOffsetsRef.current[job.id] = 0;
       setJobOutputs((current) => ({ ...current, [job.id]: "" }));
@@ -2874,20 +2945,23 @@ export function CodeStudio({
         };
       } else if (controller.signal.aborted) {
         // The browser connection dropped (screen lock, sleep, reload). The run
-        // keeps going on the server, so do not report it as a user stop.
+        // keeps going on the server, so resume silently instead of showing an
+        // error screen.
         const queue = await api.tasks.get(analysis.id).catch(() => null);
         if (queue?.queue) setTaskQueue(queue.queue);
-        setChatError(
-          t(
-            "Connection lost. The task is still running on the server; progress will refresh automatically.",
-          ),
-        );
+        resumeTaskQueueSilently();
       } else {
-        setChatError(requestError instanceof Error ? requestError.message : t("Project chat failed"));
-        if (!runStarted) {
-          restoreUnsentMessage();
+        const message =
+          requestError instanceof Error ? requestError.message : t("Project chat failed");
+        if (/failed to fetch|load failed|network|econnreset|terminated|connection/i.test(message)) {
+          resumeTaskQueueSilently();
         } else {
-          setChatRetryQuestion(text);
+          setChatError(message);
+          if (!runStarted) {
+            restoreUnsentMessage();
+          } else {
+            setChatRetryQuestion(text);
+          }
         }
       }
     } finally {
@@ -4972,7 +5046,12 @@ export function CodeStudio({
                           <button
                             key={suggestion.command}
                             className={suggestion.purpose === "install" ? "is-install" : ""}
-                            onClick={() => void startBackgroundCommand(suggestion.command)}
+                            onClick={() =>
+                              void startBackgroundCommand(
+                                suggestion.command,
+                                suggestion.purpose !== "install",
+                              )
+                            }
                             title={`${suggestion.command} · ${t("Runs in the background")}`}
                           >
                             {suggestion.purpose === "install" ? <Download size={8} /> : <Play size={8} />}

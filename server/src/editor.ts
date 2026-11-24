@@ -4,6 +4,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { getDataDir } from "./store";
 import { updateIndexedFile } from "./indexer";
+import { waitForPythonSetup, projectPythonEnv } from "./pythonRuntime";
 import { isWithin } from "./scanner";
 
 const MAX_WRITE_BYTES = 900_000;
@@ -328,6 +329,12 @@ export async function runProjectCommand(
 
   const timeoutMs = Math.max(1_000, Math.min(30 * 60_000, options.timeoutMs ?? COMMAND_TIMEOUT_MS));
   const started = Date.now();
+  // Do not race the automatic `venv + pip install` job: the first Python
+  // command after project creation waits for the environment to be ready.
+  if (/\b(python|pip|pytest|uvicorn|streamlit|flask|gunicorn|django)\b/i.test(trimmed)) {
+    await waitForPythonSetup(rootPath, options.signal);
+  }
+  const pythonEnv = await projectPythonEnv(rootPath);
   return await new Promise<RunCommandResult>((resolve, reject) => {
     let stdout = "";
     let stderr = "";
@@ -340,8 +347,8 @@ export async function runProjectCommand(
       windowsHide: true,
       env:
         options.envMode === "safe"
-          ? safeProcessEnv({ CI: process.env.CI ?? "1", ...(options.env ?? {}) })
-          : { ...process.env, CI: process.env.CI ?? "1", ...(options.env ?? {}) },
+          ? safeProcessEnv({ CI: process.env.CI ?? "1", ...pythonEnv, ...(options.env ?? {}) })
+          : { ...process.env, CI: process.env.CI ?? "1", ...pythonEnv, ...(options.env ?? {}) },
     });
 
     const append = (

@@ -20,6 +20,12 @@ test("extractLocalUrls finds and normalizes dev server addresses", () => {
     "http://127.0.0.1:3000/app?x=1",
   ]);
   assert.deepEqual(extractLocalUrls("no urls here"), []);
+  assert.deepEqual(
+    extractLocalUrls(
+      'INFO:     127.0.0.1:64646 - "GET /health HTTP/1.1" 200 OK\nINFO:     Uvicorn running on http://127.0.0.1:8000',
+    ),
+    ["http://127.0.0.1:8000"],
+  );
 });
 
 test("detectDevCommands reads package scripts and lockfile manager", async () => {
@@ -50,7 +56,7 @@ test("detectDevCommands understands generated FastAPI, PHP and static templates"
     );
     assert.deepEqual(
       (await detectDevCommands(root)).map((item) => item.command),
-      ["uvicorn app.main:app --reload"],
+      ["python3 -m uvicorn app.main:app --reload"],
     );
     await fs.rm(path.join(root, "app"), { recursive: true, force: true });
 
@@ -92,4 +98,42 @@ test("detectDevCommands falls back to Python and Ruby servers", async () => {
   } finally {
     await fs.rm(root, { recursive: true, force: true });
   }
+});
+
+test("detectDevCommands runs Streamlit through the project virtual environment", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "cie-dev-streamlit-"));
+  try {
+    await fs.writeFile(
+      path.join(root, "requirements.txt"),
+      "streamlit>=1.41,<2\npandas>=2.1,<3\n",
+    );
+    await fs.writeFile(path.join(root, "app.py"), "import streamlit as st\nst.title('ok')\n");
+    await fs.mkdir(path.join(root, ".venv", "bin"), { recursive: true });
+    await fs.writeFile(
+      path.join(root, ".venv", "bin", "python"),
+      `#!/bin/sh\nprintf '%s\\n' '{"v":"3.13.2","exe":"${path.join(root, ".venv", "bin", "python")}"}'\n`,
+      { mode: 0o755 },
+    );
+
+    const commands = await detectDevCommands(root);
+    assert.deepEqual(
+      commands.map((item) => item.command),
+      [
+        "./.venv/bin/python -m pip install -r requirements.txt",
+        "./.venv/bin/python -m streamlit run app.py --server.headless true --server.address 127.0.0.1",
+      ],
+    );
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("isDevServerCommand distinguishes servers from one-off commands", async () => {
+  const { isDevServerCommand } = await import("./processes");
+  assert.equal(isDevServerCommand("./.venv/bin/python -m streamlit run app.py"), true);
+  assert.equal(isDevServerCommand("./.venv/bin/python -m uvicorn app.main:app --reload"), true);
+  assert.equal(isDevServerCommand("npm run dev"), true);
+  assert.equal(isDevServerCommand("npm run build"), false);
+  assert.equal(isDevServerCommand("./.venv/bin/python -m pip install -r requirements.txt"), false);
+  assert.equal(isDevServerCommand("./.venv/bin/python -m pytest -q"), false);
 });

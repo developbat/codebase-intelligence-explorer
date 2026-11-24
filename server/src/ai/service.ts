@@ -42,6 +42,7 @@ import { getDataDir, loadAnalysis, saveAnalysis } from "../store";
 import { analyzeProject } from "../analyzer";
 import { isWithin } from "../scanner";
 import { formatProjectFile } from "../formatter";
+import { pythonEnvironmentHint } from "./pythonHints";
 import { detectProjectProfile } from "../projectProfile";
 import { checkFileSyntax } from "../syntax";
 import { lspCompletion, lspDiagnostics, lspHover } from "../lsp";
@@ -3803,6 +3804,7 @@ export async function runAgentTask(
   const steps: AiAgentStep[] = [];
   const changedFiles: string[] = [];
   const ranCommands: string[] = [];
+  const failedCommands = new Map<string, number>();
   const logs: AiAgentLogEntry[] = [];
   let logCounter = 0;
   let currentStepIndex = 0;
@@ -7140,8 +7142,16 @@ ${lessons}` : "",
         ranCommands.push(command);
         log(result.exitCode === 0 ? "success" : "error", "Command finished", `exit ${result.exitCode ?? "—"} · ${result.durationMs} ms`);
         const output = `${result.stdout}${result.stderr ? `\n${result.stderr}` : ""}`.trim();
+        const environmentHint = pythonEnvironmentHint(command, result.exitCode, output);
+        const failures = result.exitCode === 0 ? 0 : (failedCommands.get(command) ?? 0) + 1;
+        if (result.exitCode === 0) failedCommands.delete(command);
+        else failedCommands.set(command, failures);
+        const repeatHint =
+          failures >= 2
+            ? "\n\nThe same command already failed twice. Do not run it again unchanged: change the interpreter/environment (use the project `.venv`) or the command itself."
+            : "";
         observation = clampObservation(
-          `Command: ${command}\nCWD: ${result.cwd}\nExit: ${result.exitCode ?? "—"}\nDuration: ${result.durationMs} ms\n${output || "(no output)"}`,
+          `Command: ${command}\nCWD: ${result.cwd}\nExit: ${result.exitCode ?? "—"}\nDuration: ${result.durationMs} ms\n${output || "(no output)"}${environmentHint}${repeatHint}`,
         );
         if (verificationCommand && command === verificationCommand) {
           const signature = await changeSignature();

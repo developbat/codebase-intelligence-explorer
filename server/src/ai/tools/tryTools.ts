@@ -11,6 +11,7 @@ import {
   writeSourceFile,
 } from "../../editor";
 import { formatProjectFile } from "../../formatter";
+import { pythonEnvironmentHint } from "../pythonHints";
 import { searchCode } from "../../search";
 import {
   applyMappingsToContent,
@@ -771,8 +772,9 @@ const runCommandHandler: AgentToolHandler = async (context): Promise<AgentToolRe
     { timeoutMs: 120_000, signal: context.signal },
   );
   context.ranCommands.push(command);
+  const output = `${result.stdout}${result.stderr ? `\n${result.stderr}` : ""}`.trim();
   return {
-    observation: `Command: ${command}\nExit: ${result.exitCode ?? "—"}\n${`${result.stdout}${result.stderr ? `\n${result.stderr}` : ""}`.trim() || "(no output)"}`,
+    observation: `Command: ${command}\nExit: ${result.exitCode ?? "—"}\n${output || "(no output)"}${pythonEnvironmentHint(command, result.exitCode, output)}`,
     ok: result.exitCode === 0,
   };
 };

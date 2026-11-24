@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import type { ProjectTooling } from "../../shared/types";
+import { findPythonInterpreter } from "./pythonRuntime";
 
 interface ProjectFile {
   path: string;
@@ -60,13 +61,23 @@ export async function detectProjectProfile(
       : ".";
   let pythonVenv: string | null = null;
   for (const candidate of [".venv", "venv"]) {
-    const interpreter = path.join(rootPath, candidate, "bin", "python");
+    const interpreter =
+      process.platform === "win32"
+        ? path.join(rootPath, candidate, "Scripts", "python.exe")
+        : path.join(rootPath, candidate, "bin", "python");
     if (await fs.access(interpreter).then(() => true).catch(() => false)) {
       pythonVenv = candidate;
       break;
     }
   }
-  const pythonCommand = pythonVenv ? `./${pythonVenv}/bin/python` : "python3";
+  // Without a project venv, prefer a stable interpreter over the system
+  // `python3` (Homebrew may point it at an unstable new major release).
+  const stablePython = pythonVenv ? null : await findPythonInterpreter();
+  const pythonCommand = pythonVenv
+    ? process.platform === "win32"
+      ? `.\\${pythonVenv}\\Scripts\\python.exe`
+      : `./${pythonVenv}/bin/python`
+    : (stablePython?.shell ?? "python3");
   let pythonUsesUnittest = false;
   for (const file of pythonTestFiles.slice(0, 8)) {
     const content = await fs.readFile(path.join(rootPath, file), "utf8").catch(() => "");

@@ -107,8 +107,10 @@ import {
   removeBackgroundProcess,
   detectDevCommands,
   startBackgroundProcess,
+  startPythonEnvironment,
   stopBackgroundProcess,
 } from "./processes";
+import { pythonEnvironmentStatus } from "./pythonRuntime";
 import {
   closeProjectTerminals,
   closeTerminalSession,
@@ -2457,6 +2459,9 @@ app.post("/api/analyze", async (req, res) => {
     const result = await analyzeProject(expanded);
     await saveAnalysis(result);
     startProjectIndexBuild(result.id, result);
+    // Python projects become runnable without a manual setup step. The job is
+    // visible under Background jobs, so creation/installs stay transparent.
+    void startPythonEnvironment(result.id, result.rootPath).catch(() => undefined);
     res.json(result);
   } catch (error) {
     handleError(res, error, 400);
@@ -2509,6 +2514,9 @@ app.get("/api/projects/:id", async (req, res) => {
     const { id } = req.params;
     const result = await loadAnalysis(id);
     await touchProject(id);
+    // Opening a saved Python project must prepare its environment too, not
+    // only a fresh analyze.
+    void startPythonEnvironment(result.id, result.rootPath).catch(() => undefined);
     res.json(result);
   } catch (error) {
     handleError(res, error, 404);
@@ -2985,6 +2993,30 @@ app.get("/api/projects/:id/dev-commands", async (req, res) => {
   }
 });
 
+app.get("/api/projects/:id/python-env", async (req, res) => {
+  try {
+    const analysis = await loadAnalysis(req.params.id);
+    res.json(await pythonEnvironmentStatus(analysis.rootPath));
+  } catch (error) {
+    handleError(res, error, 400);
+  }
+});
+
+app.post("/api/projects/:id/python-env", async (req, res) => {
+  try {
+    const analysis = await loadAnalysis(req.params.id);
+    const status = await pythonEnvironmentStatus(analysis.rootPath);
+    if (status.requirements.length === 0) {
+      res.status(400).json({ error: "This project has no Python requirements file." });
+      return;
+    }
+    const job = await startPythonEnvironment(analysis.id, analysis.rootPath);
+    res.status(202).json({ job, status });
+  } catch (error) {
+    handleError(res, error, 400);
+  }
+});
+
 app.get("/api/projects/:id/processes", async (req, res) => {
   try {
     res.json({ jobs: listBackgroundProcesses(req.params.id) });
@@ -3006,6 +3038,7 @@ app.post("/api/projects/:id/processes", async (req, res) => {
       req.params.id,
       command,
       typeof req.body?.cwd === "string" ? req.body.cwd : undefined,
+      { autoRestart: req.body?.autoRestart === true },
     );
     res.json(job);
   } catch (error) {

@@ -284,6 +284,7 @@ First decide what the user wants: a question, an explanation, a code change, a m
 - Question/explanation: inspect the real project and answer with file:line citations. Do not modify files.
 - Code change: inspect first, then call the write tool. If writes are not pre-approved, the app asks the user for permission.
 - Command/verification: call run_command when needed. If commands are not pre-approved, the app asks the user for permission.
+- Python: never install into the system interpreter and never use --break-system-packages. The app prepares the project .venv automatically; run Python through ./.venv/bin/python (or python3.13 to rebuild it). If a Python command exits 139/SIGSEGV, reports externally-managed-environment or a missing module, fix the environment with the venv instead of retrying the same command.
 - delete_file and rename_path always require explicit confirmation.
 Search strategy:
 - Translate the request into 2-5 distinctive terms, symbol names or literal markers, then call project_search first. It combines the project index, symbols and text hits.

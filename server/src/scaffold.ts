@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { isWithin } from "./scanner";
+import { planPythonEnvironment } from "./pythonRuntime";
 import { EXTRA_TEMPLATES } from "./extraTemplates";
 import type {
   ProjectTemplate,
@@ -562,8 +563,8 @@ const FASTAPI_TEMPLATE: TemplateDefinition = {
   ],
   suggestedCommands: [
     "python3 -m venv .venv && . .venv/bin/activate && pip install -r requirements-dev.txt",
-    "uvicorn app.main:app --reload",
-    "pytest",
+    ".venv/bin/python -m uvicorn app.main:app --reload",
+    ".venv/bin/python -m pytest -q",
   ],
   build: (name) => [
     { path: "requirements.txt", content: "fastapi>=0.115,<1\nuvicorn[standard]>=0.32,<1\n" },
@@ -625,11 +626,12 @@ def test_echo() -> None:
       content: readme(name, "A Python FastAPI service.", [
         "## Run",
         "",
+        "Use Python 3.12–3.14 (3.15 can crash pandas/numpy).",
+        "",
         "```bash",
         "python3 -m venv .venv",
-        ". .venv/bin/activate",
-        "pip install -r requirements-dev.txt",
-        "uvicorn app.main:app --reload",
+        ".venv/bin/python -m pip install -r requirements-dev.txt",
+        ".venv/bin/python -m uvicorn app.main:app --reload",
         "```",
         "",
         "Open `http://127.0.0.1:8000/docs`.",
@@ -637,7 +639,7 @@ def test_echo() -> None:
         "## Verify",
         "",
         "```bash",
-        "pytest",
+        ".venv/bin/python -m pytest -q",
         "```",
       ]),
     },
@@ -872,12 +874,21 @@ export async function scaffoldProject(request: ScaffoldProjectRequest): Promise<
     throw error;
   }
 
+  const pythonPlan =
+    (template.language === "Python" || template.id.includes("python")) &&
+    written.some((file) => file.startsWith("requirements"))
+      ? await planPythonEnvironment(rootPath)
+      : null;
+  const suggestedCommands = pythonPlan
+    ? [pythonPlan.command, ...template.suggestedCommands.slice(1)]
+    : template.suggestedCommands;
+
   return {
     rootPath,
     name,
     template: template.id,
     filesCreated: written,
     warnings: template.id === "php-web" ? ["PHP files are shown as source; no PHP runtime preview is started."] : [],
-    suggestedCommands: template.suggestedCommands,
+    suggestedCommands,
   };
 }

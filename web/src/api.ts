@@ -311,10 +311,10 @@ export const api = {
       request<{ commands: DevCommandSuggestion[] }>(`/api/projects/${id}/dev-commands`),
     list: (id: string) =>
       request<{ jobs: BackgroundJob[] }>(`/api/projects/${id}/processes`),
-    start: (id: string, command: string, cwd?: string) =>
+    start: (id: string, command: string, cwd?: string, autoRestart = false) =>
       request<BackgroundJob>(`/api/projects/${id}/processes`, {
         method: "POST",
-        body: JSON.stringify({ command, cwd }),
+        body: JSON.stringify({ command, cwd, autoRestart }),
       }),
     read: (id: string, jobId: string, offset = 0) =>
       request<BackgroundJobRead>(
