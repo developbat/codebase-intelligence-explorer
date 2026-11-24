@@ -12,6 +12,11 @@ import type {
 const MAX_STEPS = 30;
 const DEFAULT_TIMEOUT = 8_000;
 
+export interface BrowserCheckRunOptions extends BrowserCheckOptions {
+  /** Stop the check and close the browser when the agent run is aborted. */
+  signal?: AbortSignal;
+}
+
 const CHROME_CANDIDATES = [
   process.env.CIE_CHROME_PATH,
   "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
@@ -254,8 +259,10 @@ function localUrl(value: string): string {
 export async function runBrowserCheck(
   projectId: string,
   rootPath: string,
-  options: BrowserCheckOptions = {},
+  options: BrowserCheckRunOptions = {},
 ): Promise<BrowserCheckResult> {
+  const aborted = () => new Error("Browser check stopped by the user.");
+  if (options.signal?.aborted) throw aborted();
   const executablePath = await browserExecutable();
   const timeoutMs = Math.max(5_000, Math.min(120_000, options.timeoutMs ?? 30_000));
   const steps = (options.steps ?? []).slice(0, MAX_STEPS);
@@ -276,6 +283,10 @@ export async function runBrowserCheck(
   const stepResults: BrowserCheckStepResult[] = [];
   let page: Page | null = null;
   let showingWindow = options.visible === true && process.env.CIE_BROWSER_HEADLESS !== "1";
+  const closeOnAbort = () => {
+    void browser?.close().catch(() => undefined);
+  };
+  options.signal?.addEventListener("abort", closeOnAbort, { once: true });
   try {
     const launch = (headless: boolean) =>
       chromium.launch({
@@ -316,6 +327,7 @@ export async function runBrowserCheck(
     await page.waitForTimeout(250);
 
     for (let index = 0; index < steps.length; index += 1) {
+      if (options.signal?.aborted) throw aborted();
       const step = steps[index];
       const started = Date.now();
       try {
@@ -344,6 +356,7 @@ export async function runBrowserCheck(
           durationMs: Date.now() - started,
         });
       }
+      if (options.signal?.aborted) throw aborted();
     }
 
     const metrics = await collectMetrics(page, viewport);
@@ -415,6 +428,7 @@ export async function runBrowserCheck(
       screenshotPath,
     };
   } finally {
+    options.signal?.removeEventListener("abort", closeOnAbort);
     if (browser) {
       await browser.close().catch(() => undefined);
     }

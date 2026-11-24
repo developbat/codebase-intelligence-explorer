@@ -7099,6 +7099,7 @@ ${lessons}` : "",
           steps: gameSteps as BrowserCheckStep[] | undefined,
           screenshot: args.screenshot !== false,
           visible: options.liveBrowser === true || args.visible === true,
+          signal,
         });
         if (result.check.screenshotPath) {
           evidence.push({ path: result.check.screenshotPath, label: "Game check screenshot" });
@@ -7134,6 +7135,7 @@ ${lessons}` : "",
           timeoutMs: scenario.timeoutMs,
           steps: scenario.steps,
           visible: options.liveBrowser === true || args.visible === true,
+          signal,
         });
         const failedSteps = result.steps.filter((step) => !step.ok);
         const scenarioSynthetic = isSyntheticCheckPath(scenario.path);
@@ -7173,6 +7175,7 @@ ${lessons}` : "",
           mobile: args.mobile === true,
           screenshot: args.screenshot === true,
           visible: liveBrowser,
+          signal,
         });
         if (syntheticCheck) syntheticBrowserChecks += 1;
         else {
