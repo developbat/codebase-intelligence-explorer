@@ -4134,6 +4134,31 @@ export function CodeStudio({
 
           {chatBusy ? (
             <div className="studio-workflow-live">
+              {liveBrowser && liveArmed ? (
+                <div className="studio-inline-preview">
+                  <div className="studio-inline-preview-head">
+                    <span>
+                      <Monitor size={10} /> {t("Live preview")}
+                    </span>
+                    <button onClick={() => setRightTab("live")}>{t("Open panel")}</button>
+                  </div>
+                  <div className="studio-inline-preview-stage">
+                    <img
+                      key={`inline-${liveFrameKey}`}
+                      src={`/api/projects/${analysis.id}/live-browser?run=${liveFrameKey}&inline=1`}
+                      alt={t("Live test browser")}
+                      onLoad={() => setLiveFrameReady(true)}
+                      onError={() => setLiveFrameReady(false)}
+                    />
+                    {!liveFrameReady ? (
+                      <div className="studio-inline-preview-empty">
+                        <Monitor size={16} />
+                        <span>{t("Waiting for the live page…")}</span>
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
+              ) : null}
               {chatLiveAnswer ? (
                 <div className="studio-live-answer">
                   <MarkdownText value={chatLiveAnswer} />

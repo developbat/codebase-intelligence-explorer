@@ -66,7 +66,7 @@ Modes are stored per project in `localStorage` (`cie:studio-mode:<projectId>`).
 
 The mode pill in the Code Studio sidebar is clickable: it switches between Build
 and Ask; Plan/Research switch to Build when clicked. The old static “Write mode”
-label on the app breadcrumb/status bar was replaced with **Agent workspace**.
+label on the app breadcrumb/status bar was removed; the selected product tab already communicates the workspace. The project name alone is shown.
 
 The composer also shows a permission chip:
 
@@ -496,14 +496,16 @@ the agent must switch to DOM-visible checks or report the blocker instead of
 repeating the same step. Test-only summaries such as “proje dosyalarında
 değişiklik yapılmadı” are accepted by the finish guard.
 
-**In-app live browser.** The composer exposes a persisted **Live browser**
-toggle. It passes `liveBrowser` through the task loop and agent stream;
-`browser_check`, `game_check` and `run_test_scenario` run in a headless
-Playwright page and stream JPEG frames at ~4 fps through
-`GET /api/projects/:id/live-browser` into the right-panel **Live test** tab.
-The stream waits briefly for the page, survives the log-before-page race, ends on
-Stop/abort, and keeps the last frame in the panel. An explicit `visible: true`
-still opens a separate Chrome window for debugging.
+**In-app live browser.** The **Live test** panel exposes a persisted **Live
+view** toggle; it only controls frame display, not tool availability. It passes
+`liveBrowser` through the task loop and agent stream; `browser_check`,
+`game_check` and `run_test_scenario` run in a headless Playwright page and stream
+JPEG frames at ~4 fps through `GET /api/projects/:id/live-browser` into both the
+right-panel Live test tab and an inline preview card in the agent chat. The
+stream waits briefly for the page, survives the log-before-page race, ends on
+Stop/abort, and keeps the last frame. An explicit `visible: true` still opens a
+separate Chrome window for debugging. Chat Studio uses the same animated robot
+orb while thinking.
 
 **Context and cache budgets.** File content, extraction results and AI results
 use entry + byte caps (300 files / 16M chars, 32 extractions / 12M chars, 120 AI

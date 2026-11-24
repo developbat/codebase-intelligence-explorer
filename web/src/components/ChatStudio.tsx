@@ -6,7 +6,6 @@ import {
   FileText,
   Globe2,
   Image as ImageIcon,
-  Loader2,
   MessageSquare,
   MessageSquarePlus,
   Paperclip,
@@ -340,8 +339,15 @@ export function ChatStudio({
             ))
           )}
           {busy ? (
-            <div className="chat-studio-thinking">
-              <Loader2 size={13} className="spin" /> {t("Thinking…")}
+            <div className="chat-studio-thinking" role="status" aria-live="polite">
+              <div className="studio-run-status-orb chat-studio-thinking-orb" aria-hidden="true">
+                <span />
+                <span />
+                <span />
+                <i className="studio-run-status-spark" />
+                <Bot size={14} />
+              </div>
+              <span>{t("Thinking…")}</span>
             </div>
           ) : null}
           <div ref={bottomRef} />
