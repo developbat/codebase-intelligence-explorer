@@ -460,6 +460,10 @@ Handler modules live in `server/src/ai/tools/` (`types.ts`, `builtins.ts`,
 switch branches will migrate incrementally without changing the action
 protocol. `GET /api/projects/:id/tool-registry` exposes built-in and
 project metadata to the UI; **Settings → Tools** renders the built-in registry.
+Handlers already migrated to `ai/tools` are marked `tryable`; the UI opens a JSON
+args editor and calls `POST /api/projects/:id/tools/try`. Write/command tools
+require an explicit user confirmation for the try. Project tools expose a
+separate **Try** form driven by `inputSchema` and call `/tools/run`.
 
 Test-only verification tasks skip both the edit-wiring and remaining-work finish
 guards, and “eksik ... yok” style summaries are not treated as incomplete

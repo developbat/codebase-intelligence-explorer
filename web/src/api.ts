@@ -773,18 +773,35 @@ export const api = {
         groups: string[];
         description: string;
         whenToUse: string;
+        example: string;
         permission?: "write" | "command";
         destructive?: boolean;
+        tryable: boolean;
       }[];
       project: ProjectToolList["tools"];
     }>(`/api/projects/${projectId}/tool-registry`),
+  tryBuiltinTool: (
+    projectId: string,
+    action: string,
+    args: Record<string, unknown>,
+    options: { allowWrite?: boolean; allowCommands?: boolean; confirmDestructive?: boolean } = {},
+  ) =>
+    request<{
+      ok: boolean;
+      observation: string;
+      changedFiles: string[];
+      evidence: { path: string; label?: string }[];
+    }>(`/api/projects/${projectId}/tools/try`, {
+      method: "POST",
+      body: JSON.stringify({ action, args, ...options }),
+    }),
 
-  runProjectTool: (projectId: string, name: string) =>
-    request<{ tool: ProjectTool; result: RunCommandResult }>(
+  runProjectTool: (projectId: string, name: string, input?: Record<string, unknown>) =>
+    request<{ tool: ProjectTool; result: RunCommandResult; input?: Record<string, unknown> }>(
       `/api/projects/${projectId}/tools/run`,
       {
         method: "POST",
-        body: JSON.stringify({ name }),
+        body: JSON.stringify({ name, input }),
       },
     ),
 

@@ -7,6 +7,7 @@ import { analyzeProject } from "./analyzer";
 import {
   askProject,
   analyzeSymbol,
+  isSecretAgentPath,
   discoverBusinessFlows,
   editSourceFile,
   generateTests,
@@ -28,7 +29,12 @@ import { recordUsage } from "./ai/usage";
 import { saveResearchNote, webFetch } from "./webResearch";
 import { isBrowserCheckAvailable, runBrowserCheck } from "./browserCheck";
 import { liveSessionStatus, streamLiveSession } from "./liveBrowser";
-import { findProjectTool, listProjectTools, recordProjectToolRun } from "./projectTools";
+import {
+  findProjectTool,
+  listProjectTools,
+  recordProjectToolRun,
+  validateProjectToolInput,
+} from "./projectTools";
 import {
   bootMobileDevice,
   captureMobileScreenshot,
@@ -51,6 +57,8 @@ import { loadQueue, removeTask, reorderTasks, saveQueue, updateTask } from "./ta
 import type { ProjectTask } from "../../shared/tasks";
 import { getPublicSettings, resolveAgentRole, resolveProvider, updateAiSettings } from "./ai/settings";
 import { allToolSpecs } from "./ai/toolRegistry";
+import { registeredToolActions, runRegisteredTool } from "./ai/tools/registry";
+import type { AgentToolContext } from "./ai/tools/types";
 import { getPrompt, getPromptVersion, listPrompts, renderPrompt, resetPrompt, savePrompt } from "./ai/prompts";
 import { resolvePermission } from "./ai/permissions";
 import { analyzeIntent } from "./ai/intent";
@@ -1164,8 +1172,10 @@ app.get("/api/projects/:id/tool-registry", async (req, res) => {
         groups: tool.groups,
         description: tool.description,
         whenToUse: tool.whenToUse,
+        example: tool.example,
         permission: tool.permission,
         destructive: tool.destructive === true,
+        tryable: registeredToolActions().includes(tool.action),
       })),
       project: projectTools.tools,
     });
@@ -1178,6 +1188,62 @@ app.get("/api/projects/:id/tools", async (req, res) => {
   try {
     const analysis = await loadAnalysis(req.params.id);
     res.json(await listProjectTools(analysis.rootPath));
+  } catch (error) {
+    handleError(res, error, 400);
+  }
+});
+
+app.post("/api/projects/:id/tools/try", async (req, res) => {
+  try {
+    const analysis = await loadAnalysis(req.params.id);
+    const action = typeof req.body?.action === "string" ? req.body.action.trim() : "";
+    if (!action) {
+      res.status(400).json({ error: "A tool action is required." });
+      return;
+    }
+    if (!registeredToolActions().includes(action)) {
+      res.status(400).json({ error: `Tool "${action}" is not tryable from the registry yet.` });
+      return;
+    }
+    const args =
+      req.body?.args && typeof req.body.args === "object" && !Array.isArray(req.body.args)
+        ? (req.body.args as Record<string, unknown>)
+        : {};
+    const evidence: AgentToolContext["evidence"] = [];
+    const changedFiles: string[] = [];
+    const context: AgentToolContext = {
+      projectId: req.params.id,
+      analysis,
+      args,
+      readOnly: false,
+      liveBrowser: false,
+      log: () => undefined,
+      requirePermission: async (kind, _tool, _target, _detail, options) => {
+        if (options?.destructive && req.body?.confirmDestructive !== true) return false;
+        if (kind === "write") return req.body?.allowWrite === true;
+        if (kind === "command") return req.body?.allowCommands === true;
+        return false;
+      },
+      evidence,
+      changedFiles,
+      invalidate: () => undefined,
+      normalizePath: (value) =>
+        typeof value === "string" ? value.trim().replace(/^\.\//, "").replace(/^\/+/, "") : "",
+      pathFromArgs: (input) =>
+        input.path ?? input.file ?? input.filePath ?? input.target ?? input.filename,
+      isSecretPath: isSecretAgentPath,
+    };
+    const result = await runRegisteredTool(action, context);
+    if (!result) {
+      res.status(400).json({ error: `Tool "${action}" is not tryable from the registry yet.` });
+      return;
+    }
+    res.json({
+      ok: result.ok,
+      observation: result.observation,
+      changedFiles,
+      evidence,
+    });
   } catch (error) {
     handleError(res, error, 400);
   }
@@ -1196,11 +1262,22 @@ app.post("/api/projects/:id/tools/run", async (req, res) => {
       res.status(404).json({ error: "Project tool not found." });
       return;
     }
+    const input =
+      req.body?.input && typeof req.body.input === "object" && !Array.isArray(req.body.input)
+        ? (req.body.input as Record<string, unknown>)
+        : {};
+    const inputError = validateProjectToolInput(tool, input);
+    if (inputError) {
+      res.status(400).json({ error: inputError });
+      return;
+    }
+    const inputJson = Object.keys(input).length > 0 ? JSON.stringify(input) : "";
     const result = await runProjectCommand(analysis.rootPath, tool.command, undefined, {
-      timeoutMs: 180_000,
+      timeoutMs: tool.timeoutMs ?? 180_000,
+      env: inputJson ? { CIE_TOOL_INPUT: inputJson } : undefined,
     });
     await recordProjectToolRun(analysis.rootPath, name, result.exitCode === 0).catch(() => undefined);
-    res.json({ tool, result });
+    res.json({ tool, result, input });
   } catch (error) {
     handleError(res, error, 400);
   }
