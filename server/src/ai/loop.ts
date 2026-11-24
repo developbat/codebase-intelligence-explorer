@@ -162,6 +162,8 @@ Rules:
 - 2-8 tasks. Each task must be independently verifiable.
 - Split multi-feature goals: if the goal asks for several independent changes (add X, replace Y, change Z, check W), return one task per feature. Never put the whole goal in one task.
 - Each task must describe one behavior change with its own acceptance check. A task that says "and" for two unrelated features must be split.
+- Keep each task small enough to finish in about 8 tool calls. If it needs more, split it into another behavior task.
+- Do not ask for new check scripts, scenarios, test hooks or verification files. Use the project's existing tests and run command.
 - Do not create tasks that only edit tests, scenarios, test hooks or verification scripts. Fold that work into the behavior task it verifies. A task must change runtime behavior or fix a bug.
 - Order tasks by dependency and value: correctness and item effects first, then spawn frequency, then visual/feedback polish.
 - Never create a task only to deduplicate or normalize existing definitions. Put the "do not re-add existing items" constraint in the relevant behavior task's acceptance instead.
@@ -901,6 +903,8 @@ function taskInstruction(
       : "",
     extractionTask ? "" : "Do not re-read files already fully read by a previous task unless the current task needs exact content after a change.",
     extractionTask ? "" : "Batch up to 4 independent read-only calls in one reply (read_file, find_in_file, search_code, list_files). One context round-trip per batch instead of one per read.",
+    extractionTask ? "" : "Put all UI assertions into one browser_check call (up to 6 steps). Run the verification command once after the final edit; do not repeat a successful check unless code changed.",
+    extractionTask ? "" : "Do not create .cie/agent/checks or .cie/agent/scenarios files for a one-off verification; use the existing tests and browser_check.",
     extractionTask ? "" : "Read the smallest range you need. Do not read a whole large file before planning; read the relevant functions, then edit. If you have read the same file twice without editing, stop reading and make the smallest change.",
     (task.repairAttempts ?? 0) > 0
       ? `Narrow retry: read at most ${RECOVERY_POLICY.maxFilesForNarrowRetry} files (or none when the content is already in context), apply the smallest edit, then verify. Do not repeat earlier reads.`
@@ -909,7 +913,7 @@ function taskInstruction(
     verification && !extractionTask ? `Verification command: ${verification}` : "",
     extractionTask
       ? "Finish only after the extraction tool returned the complete list; do not summarize or omit items."
-      : "Run tests/typecheck/build when relevant. If the task includes validation, permissions, errors or limits, verify both the accepted and rejected path. Finish only when this task is complete, or report the exact blocker.",
+      : "The app runs the detected verification command automatically after this task. Run it yourself only when you need failure output to fix a specific issue; do not run it twice. If the task includes validation, permissions, errors or limits, verify both the accepted and rejected path. Finish only when this task is complete, or report the exact blocker.",
   ]
     .filter(Boolean)
     .join("\n");
@@ -946,6 +950,12 @@ export function taskBudgetForEffort(effort: ProjectTaskEffort): {
   if (effort === "simple") return { tokens: 80_000, costUsd: 0.05 };
   if (effort === "hard") return { tokens: 320_000, costUsd: 0.25 };
   return { tokens: 160_000, costUsd: 0.12 };
+}
+
+export function taskStepBudget(effort: ProjectTaskEffort): number {
+  if (effort === "simple") return 12;
+  if (effort === "hard") return 28;
+  return 20;
 }
 
 interface RetryRecovery {
@@ -1668,6 +1678,7 @@ export async function runProjectLoop(
           interactive: true,
           forceFast: current.effort === "simple",
           forceWrite,
+          maxSteps: taskStepBudget(current.effort),
           tokenBudget,
           costBudgetUsd,
           budgetMode: settings?.taskBudgetMode ?? "off",
@@ -1974,6 +1985,20 @@ export async function runProjectLoop(
       task.tokenUsage ?? emptyUsage(),
       result.tokenUsage,
     ).totalTokens;
+    const taskStartedMs = Date.parse(current.startedAt ?? task.startedAt ?? "");
+    const taskDurationMs = Number.isFinite(taskStartedMs) ? Date.now() - taskStartedMs : 0;
+    if (taskDurationMs > 20_000 || result.steps.length > 10) {
+      emit({
+        type: "log",
+        entry: {
+          id: `log-${Date.now()}-duration-${task.id}`,
+          at: nowIso(),
+          level: "info",
+          label: "Task duration",
+          detail: `${task.id} · ${Math.round(taskDurationMs / 1000)}s · ${result.steps.length} steps · ${taskSpentTokens.toLocaleString()} tokens`,
+        },
+      });
+    }
     const noEditTokenBurn = changedBefore === 0 && taskSpentTokens >= 300_000;
     const failureText = `${result.summary ?? ""}\n${result.steps
       .map((step) => step.observation ?? "")

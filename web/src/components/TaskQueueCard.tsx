@@ -33,6 +33,14 @@ function tokenLabel(tokens?: number): string {
   return tokens >= 1000 ? `${(tokens / 1000).toFixed(1)}k` : String(tokens);
 }
 
+function formatDuration(start?: string, end?: string): string {
+  if (!start || !end) return "";
+  const seconds = Math.round((Date.parse(end) - Date.parse(start)) / 1000);
+  if (!Number.isFinite(seconds) || seconds < 0) return "";
+  if (seconds < 60) return `${seconds}s`;
+  return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+}
+
 function statusIcon(status: ProjectTask["status"]) {
   if (status === "done") return <CheckCircle2 size={11} />;
   if (status === "in_progress") return <Loader2 size={11} className="spin" />;
@@ -198,6 +206,9 @@ export function TaskQueueCard({
                     {task.provider ? ` · ${task.provider}/${task.model ?? ""}` : ""}
                     {task.attempts > 1 ? ` · ${task.attempts} ${t("attempts")}` : ""}
                     {task.tokenUsage?.totalTokens ? ` · ${tokenLabel(task.tokenUsage.totalTokens)} ${t("tokens")}` : ""}
+                    {task.startedAt && task.completedAt
+                      ? ` · ${formatDuration(task.startedAt, task.completedAt)}`
+                      : ""}
                     {task.costUsd ? ` · ${formatUsd(task.costUsd)}` : ""}
                     {task.tokenBudget
                       ? ` · ${t("budget")} ${tokenLabel(task.tokenBudget)}${

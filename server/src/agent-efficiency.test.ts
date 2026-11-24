@@ -6,6 +6,7 @@ import {
   isInspectionAnswer,
   shouldRetryWithEditFirst,
   taskBudgetForEffort,
+  taskStepBudget,
   taskLooksLikeInspection,
   taskLooksLikeVerification,
   taskLooksLikeWrite,
@@ -285,6 +286,9 @@ test("task budgets scale with effort and stop runaway usage", () => {
   assert.deepEqual(taskBudgetForEffort("simple"), { tokens: 80_000, costUsd: 0.05 });
   assert.deepEqual(taskBudgetForEffort("standard"), { tokens: 160_000, costUsd: 0.12 });
   assert.deepEqual(taskBudgetForEffort("hard"), { tokens: 320_000, costUsd: 0.25 });
+  assert.equal(taskStepBudget("simple"), 12);
+  assert.equal(taskStepBudget("standard"), 20);
+  assert.equal(taskStepBudget("hard"), 28);
   assert.equal(
     budgetExceeded({ inputTokens: 0, outputTokens: 0, totalTokens: 80_001 }, undefined, 80_000),
     true,

@@ -4516,6 +4516,8 @@ ${lessons}` : "",
   let unreferencedAssets: string[] = [];
   let assetNudges = 0;
   let browserCheckCalls = 0;
+  let browserCheckBlocked = false;
+  const maxBrowserChecks = testTask ? 2 : 3;
   let realBrowserChecks = 0;
   let syntheticBrowserChecks = 0;
   let realScenarioRuns = 0;
@@ -5497,6 +5499,7 @@ ${lessons}` : "",
       if (
         !readOnlyMode &&
         lastToolFailure &&
+        !(browserCheckBlocked && lastToolFailure.action === "browser_check") &&
         !/Project tool .* was not found|No saved project tools exist/i.test(
           lastToolFailure.observation,
         ) &&
@@ -6731,6 +6734,12 @@ ${lessons}` : "",
         log(result.ok ? "success" : "warn", "Test scenario finished", result.summary.slice(0, 160));
         ok = result.ok;
       } else if (action === "browser_check") {
+        if (browserCheckCalls >= maxBrowserChecks) {
+          browserCheckBlocked = true;
+          throw new Error(
+            `Browser check budget exhausted for this task (${maxBrowserChecks} calls). Do not call browser_check again; report the exact blocker or finish with the evidence you already have.`,
+          );
+        }
         browserCheckCalls += 1;
         const browserPath = typeof args.path === "string" ? args.path : "index.html";
         const rawSteps = Array.isArray(args.steps) ? args.steps : [];
@@ -6762,6 +6771,9 @@ ${lessons}` : "",
         } else {
           browserFailureRepeat = 1;
         }
+        if (!result.ok && browserCheckCalls >= maxBrowserChecks) {
+          browserCheckBlocked = true;
+        }
         lastBrowserKey = browserKey;
         observation = [
           result.summary,
@@ -6787,6 +6799,9 @@ ${lessons}` : "",
                   ? "Stop repeating it: switch to DOM-visible checks or report the exact blocker."
                   : "Change the steps or fix the underlying page; repeating it will not help."
               }`
+            : "",
+          !result.ok && browserCheckCalls >= maxBrowserChecks
+            ? "Browser check budget is now exhausted. Do not call browser_check again; finish with the evidence you have and report the exact blocker."
             : "",
         ]
           .filter(Boolean)
