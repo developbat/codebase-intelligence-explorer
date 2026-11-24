@@ -455,10 +455,9 @@ full OS-level network/FS sandboxing remains a later hardening step.
 
 Handler modules live in `server/src/ai/tools/` (`types.ts`, `builtins.ts`,
 `registry.ts`). `runRegisteredTool` is called before the legacy switch.
-`create_document`, `create_zip`, `create_graphic`, `graphic_check`,
-`check_toolchains` and `list_project_tools` are already modular; the remaining
-switch branches will migrate incrementally without changing the action
-protocol. `GET /api/projects/:id/tool-registry` exposes built-in and
+Twenty-five actions are already modular across `documents.ts`, `research.ts`,
+`skills.ts`, `gitTools.ts`, `mobile.ts` and `builtins.ts`; the remaining switch
+branches will migrate incrementally without changing the action protocol. `GET /api/projects/:id/tool-registry` exposes built-in and
 project metadata to the UI; **Settings → Tools** renders the built-in registry.
 Handlers already migrated to `ai/tools` are marked `tryable`; the UI opens a JSON
 args editor and calls `POST /api/projects/:id/tools/try`. Write/command tools

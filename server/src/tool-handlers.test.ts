@@ -73,6 +73,41 @@ test("registry handlers create documents, archives and graphics", async () => {
     const empty = await runRegisteredTool("list_project_tools", context(root, {}));
     assert.equal(empty?.ok, true);
     assert.match(empty?.observation ?? "", /No saved project tools/);
+
+    const document = await runRegisteredTool(
+      "read_document",
+      context(root, { path: "reports/summary.csv" }),
+    );
+    assert.equal(document?.ok, true);
+    assert.match(document?.observation ?? "", /alpha/);
+
+    const docSearch = await runRegisteredTool(
+      "search_document",
+      context(root, { path: "reports/summary.csv", query: "alpha" }),
+    );
+    assert.equal(docSearch?.ok, true);
+    assert.match(docSearch?.observation ?? "", /line 2/);
+
+    const note = await runRegisteredTool(
+      "save_note",
+      context(root, {
+        title: "Release notes",
+        content: "Shipped the handler registry.",
+        tags: ["release"],
+      }),
+    );
+    assert.equal(note?.ok, true);
+    const notes = await runRegisteredTool("list_notes", context(root, {}));
+    assert.match(notes?.observation ?? "", /Release notes/);
+    const searched = await runRegisteredTool(
+      "search_notes",
+      context(root, { query: "registry" }),
+    );
+    assert.match(searched?.observation ?? "", /Release notes/);
+
+    const skills = await runRegisteredTool("list_skills", context(root, {}));
+    assert.equal(skills?.ok, true);
+    assert.match(skills?.observation ?? "", /skills/);
   } finally {
     await fs.rm(root, { recursive: true, force: true });
   }
