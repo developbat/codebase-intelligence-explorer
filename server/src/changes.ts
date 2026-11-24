@@ -100,7 +100,11 @@ function deriveChangedFiles(previous: AnalysisResult, next: AnalysisResult, git:
     }
   }
 
-  return [...result.values()].sort((a, b) => a.path.localeCompare(b.path));
+  const internal = (filePath: string) =>
+    /^(?:\.cie|\.git|node_modules|dist|build|coverage|vendor)\//.test(filePath);
+  return [...result.values()]
+    .filter((file) => !internal(file.path))
+    .sort((a, b) => a.path.localeCompare(b.path));
 }
 
 function impactAnalysis(analysis: AnalysisResult, changedPaths: Set<string>, changedSymbols: Set<string>) {
@@ -180,12 +184,15 @@ function impactAnalysis(analysis: AnalysisResult, changedPaths: Set<string>, cha
   return { nodes, routes, tests };
 }
 
-export async function buildChangeReport(progressId: string): Promise<{
+export async function buildChangeReport(
+  progressId: string,
+  previousOverride?: AnalysisResult,
+): Promise<{
   report: ChangeReport;
   analysis: AnalysisResult;
 }> {
   const { loadAnalysis } = await import("./store");
-  const previous = await loadAnalysis(progressId);
+  const previous = previousOverride ?? (await loadAnalysis(progressId));
   const next = await analyzeProject(previous.rootPath);
   const git = await getGitStatus(previous.rootPath, previous);
   const structural = structuralDiff(previous, next);

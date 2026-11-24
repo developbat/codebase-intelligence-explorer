@@ -258,6 +258,9 @@ For project verification:
 
 - Python tests using `unittest` are detected as
   `python3 -m unittest discover -s tests -q`; otherwise `pytest -q` is used.
+  If a project has `.venv/bin/python` or `venv/bin/python`, the command is
+  prefixed with that interpreter (for example
+  `./.venv/bin/python -m pytest -q`).
 - Go changes in a multi-module repository use the nearest `go.mod` directory
   (`cd <module> && go test ./...`) when no root `go.mod` exists.
 - Node/React Native projects use the detected `npm test` / `npx tsc --noEmit`
@@ -320,6 +323,39 @@ The 6 buttons are `sound-toggle`, `play-button`, `restart-button`, `move-left`,
 
 `apply_mapped_changes` supports `kind=color` and `kind=text`. Text mapping is
 useful for labels and repeated tokens.
+
+### 6.1 Change report and run output (right panel)
+
+The right panel has three views:
+
+- **Preview** — static/live web preview or file preview.
+- **Run** — latest command output (manual Terminal command or agent
+  `run_command`). Shows command, working directory, exit code, duration and
+  stdout/stderr. For code-only projects it opens automatically after a run.
+- **Changes** — change report after an agent edit:
+  - changed files, additions/deletions and status;
+  - added/removed/changed symbols and edge counts;
+  - impacted nodes, routes and tests;
+  - per-file Git diff when the project is a Git repository.
+
+The report is computed at agent finish from the **run's baseline analysis**, not
+from the possibly watcher-refreshed stored analysis. Internal paths such as
+`.cie/` are excluded.
+
+### 6.2 Project dependency installs
+
+When a project has `requirements.txt` and no virtualenv, the terminal suggestions
+include:
+
+```bash
+python3 -m venv .venv && . .venv/bin/activate && pip install -r requirements.txt
+```
+
+For `fastapi-pydiator-master`, `requirements.txt` already lists `pytest==8.0.0`.
+After the venv is created, verification commands use
+`./.venv/bin/python -m pytest -q`. Do not install Python packages into the
+system interpreter (PEP 668 blocks it on this machine). If tests still fail on
+missing packages, treat that as an install blocker, not as a code failure.
 
 ---
 

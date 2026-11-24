@@ -1008,6 +1008,7 @@ export default function App() {
             recent={recent}
             onSettingsSaved={setAiSettings}
             onRescan={rescan}
+            onAnalysisLoaded={(next) => applyAnalysis(next, false)}
             onOpenProject={() => setDialogOpen(true)}
             onOpenSettings={(tab, addModel) => {
               setSettingsTab(tab);

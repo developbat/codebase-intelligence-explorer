@@ -58,6 +58,15 @@ export async function detectProjectProfile(
     pythonTestFiles.length > 0 && pythonTestFiles.every((file) => file.startsWith("tests/"))
       ? "tests"
       : ".";
+  let pythonVenv: string | null = null;
+  for (const candidate of [".venv", "venv"]) {
+    const interpreter = path.join(rootPath, candidate, "bin", "python");
+    if (await fs.access(interpreter).then(() => true).catch(() => false)) {
+      pythonVenv = candidate;
+      break;
+    }
+  }
+  const pythonCommand = pythonVenv ? `./${pythonVenv}/bin/python` : "python3";
   let pythonUsesUnittest = false;
   for (const file of pythonTestFiles.slice(0, 8)) {
     const content = await fs.readFile(path.join(rootPath, file), "utf8").catch(() => "");
@@ -621,7 +630,7 @@ export async function detectProjectProfile(
           hasTests = true;
         } else if (framework === "Pytest") {
           testFramework = "Pytest";
-          addCommand(testCommands, "pytest -q");
+          addCommand(testCommands, `${pythonCommand} -m pytest -q`);
           hasTests = true;
         }
       }
@@ -637,11 +646,11 @@ export async function detectProjectProfile(
       testFramework = "unittest";
       addCommand(
         testCommands,
-        `python3 -m unittest discover -s ${pythonTestDir} -q`,
+        `${pythonCommand} -m unittest discover -s ${pythonTestDir} -q`,
       );
     } else {
       testFramework = "Pytest";
-      addCommand(testCommands, "pytest -q");
+      addCommand(testCommands, `${pythonCommand} -m pytest -q`);
     }
     hasTests = true;
   }

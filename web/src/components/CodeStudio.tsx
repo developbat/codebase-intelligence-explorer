@@ -89,6 +89,7 @@ import {
   ExternalLink,
   FileCode2,
   Gamepad2,
+  GitCompareArrows,
   Folder,
   FolderOpen,
   GripVertical,
@@ -127,6 +128,7 @@ import {
 } from "lucide-react";
 import type {
   AnalysisResult,
+  ChangeReport,
   RunCommandResult,
   TestDiscovery,
   TestRunResult,
@@ -138,6 +140,7 @@ import { buildTree, collectFolderPaths, type TreeNode } from "../lib/tree";
 import { useI18n } from "../i18n";
 import { ProjectSwitcher } from "./ProjectSwitcher";
 import { MarkdownText } from "./MarkdownText";
+import { GitDiffView } from "./GitDiffView";
 import { formatTokens } from "./UsageDialog";
 import { formatUsd } from "../../../shared/pricing";
 import { modelSupportsStudio } from "../../../shared/modelCapabilities";
@@ -196,6 +199,7 @@ interface CodeStudioProps {
   recent?: RecentProject[];
   onSettingsSaved: (settings: AiSettingsPublic) => void;
   onRescan: () => void;
+  onAnalysisLoaded?: (analysis: AnalysisResult) => void;
   onOpenProject?: () => void;
   onOpenSettings?: (tab: SettingsTab, addModel?: boolean) => void;
   onLoadRecent?: (project: RecentProject) => void;
@@ -603,6 +607,7 @@ export function CodeStudio({
   recent = [],
   onSettingsSaved,
   onRescan,
+  onAnalysisLoaded,
   onOpenProject,
   onOpenSettings,
   onLoadRecent,
@@ -838,12 +843,26 @@ export function CodeStudio({
   const [previewPath, setPreviewPath] = useState("");
   const [previewKey, setPreviewKey] = useState(0);
   const [livePreviewUrl, setLivePreviewUrl] = useState("");
+  const [runResult, setRunResult] = useState<{
+    command: string;
+    cwd: string;
+    output: string;
+    exitCode: number | null;
+    durationMs: number;
+    source: "manual" | "agent";
+    at: string;
+  } | null>(null);
+  const [agentChangeReport, setAgentChangeReport] = useState<ChangeReport | null>(null);
+  const [changeReportBusy, setChangeReportBusy] = useState(false);
+  const [changeReportError, setChangeReportError] = useState<string | null>(null);
+  const [selectedChangePath, setSelectedChangePath] = useState("");
   const requestRef = useRef(0);
   const studioRef = useRef<HTMLDivElement>(null);
   const editorViewRef = useRef<EditorView | null>(null);
   const pendingOpenFileRef = useRef<string | null>(null);
   const [pendingLine, setPendingLine] = useState<number | null>(null);
   const autoRunPromptRef = useRef<string | null>(null);
+  const keepRightTabRef = useRef(false);
 
   useEffect(() => {
     chatHydratedRef.current = false;
@@ -1027,6 +1046,12 @@ export function CodeStudio({
   const lastUserMessage =
     [...chatMessages].reverse().find((message) => message.role === "user")?.content ?? "";
   const blockedRetryQuestion = chatRetryQuestion || lastUserMessage || chatInput;
+  const selectedChange =
+    agentChangeReport?.files.find((file) => file.path === selectedChangePath) ??
+    agentChangeReport?.files[0];
+  const selectedStructural = agentChangeReport?.structural.find(
+    (change) => change.path === selectedChange?.path,
+  );
 
   useEffect(() => {
     if (studioMode !== "build") return;
@@ -1530,6 +1555,10 @@ export function CodeStudio({
       void openFile(pending, true);
       return;
     }
+    if (keepRightTabRef.current) {
+      keepRightTabRef.current = false;
+      return;
+    }
     const initial =
       analysis.files.find((file) =>
         /(^|\/)(public\/index|index|main|app|server|bootstrap|artisan|manage)\.(php|py|ts|tsx|js|jsx)$/i.test(
@@ -2030,6 +2059,18 @@ export function CodeStudio({
     const chunk = `$ ${command}\n${step.observation}\n\n`;
     terminalOutputRef.current[id] = `${terminalOutputRef.current[id] ?? ""}${chunk}`;
     updateTerminal(id, { output: terminalOutputRef.current[id], command, result: null });
+    const exitMatch = step.observation.match(/Exit:\s*(-?\d+|—)/);
+    const durationMatch = step.observation.match(/Duration:\s*(\d+)\s*ms/i);
+    setRunResult({
+      command,
+      cwd: typeof step.args.cwd === "string" ? step.args.cwd : ".",
+      output: step.observation.slice(0, 200_000),
+      exitCode: exitMatch && exitMatch[1] !== "—" ? Number(exitMatch[1]) : null,
+      durationMs: durationMatch ? Number(durationMatch[1]) : 0,
+      source: "agent",
+      at: new Date().toISOString(),
+    });
+    if (htmlFiles.length === 0 && !livePreviewUrl) setRightTab("run");
   }
 
   async function runCommand(nextCommand?: string, terminalId?: string) {
@@ -2040,6 +2081,16 @@ export function CodeStudio({
     if (!trimmed) return;
     rememberCommand(trimmed);
     updateTerminal(id, { command: trimmed, output: "", result: null, busy: true });
+    setRunResult({
+      command: trimmed,
+      cwd: ".",
+      output: "",
+      exitCode: null,
+      durationMs: 0,
+      source: "manual",
+      at: new Date().toISOString(),
+    });
+    if (htmlFiles.length === 0 && !livePreviewUrl) setRightTab("run");
     setBottomTab("terminal");
     setError(null);
     terminalOutputRef.current[id] = "";
@@ -2053,11 +2104,34 @@ export function CodeStudio({
         (event) => {
           if (event.type === "stdout" || event.type === "stderr") {
             pushTerminalOutput(id, event.chunk);
+            setRunResult((current) =>
+              current && current.command === trimmed
+                ? { ...current, output: (current.output + event.chunk).slice(0, 200_000) }
+                : current,
+            );
           } else if (event.type === "exit") {
             updateTerminal(id, { result: event.result });
+            setRunResult((current) =>
+              current && current.command === trimmed
+                ? {
+                    ...current,
+                    output: `${event.result.stdout}${event.result.stderr ? `\n${event.result.stderr}` : ""}`.slice(
+                      0,
+                      200_000,
+                    ),
+                    exitCode: event.result.exitCode,
+                    durationMs: event.result.durationMs,
+                  }
+                : current,
+            );
           } else if (event.type === "error") {
             setError(event.message);
             pushTerminalOutput(id, `\n${event.message}\n`);
+            setRunResult((current) =>
+              current && current.command === trimmed
+                ? { ...current, output: `${current.output}\n${event.message}` }
+                : current,
+            );
           }
         },
         controller.signal,
@@ -2338,6 +2412,29 @@ export function CodeStudio({
     setOpenTabs((current) => [...new Set([...current, ...paths])]);
   }
 
+  async function refreshChangeReport() {
+    setChangeReportBusy(true);
+    setChangeReportError(null);
+    try {
+      const { report, analysis: next } = await api.changes(analysis.id);
+      setAgentChangeReport(report);
+      setSelectedChangePath(report.files[0]?.path ?? "");
+      if (onAnalysisLoaded) {
+        keepRightTabRef.current = true;
+        onAnalysisLoaded(next);
+      } else {
+        onRescan();
+      }
+      setRightTab("changes");
+    } catch (requestError) {
+      setChangeReportError(
+        requestError instanceof Error ? requestError.message : t("Could not build the change report."),
+      );
+    } finally {
+      setChangeReportBusy(false);
+    }
+  }
+
   async function summarizeFullProject() {
     if (!active || summaryBusy) return;
     setSummaryBusy(true);
@@ -2598,6 +2695,8 @@ export function CodeStudio({
     const useTaskLoop = true;
     setTaskQueue(null);
     setDismissedQueueAt(null);
+    setAgentChangeReport(null);
+    setSelectedChangePath("");
 
     const handleEvent = (event: AiAgentEvent) => {
       if (event.type === "intent" || event.type === "plan" || event.type === "start") {
@@ -2741,9 +2840,19 @@ export function CodeStudio({
       ]);
       if (result.changedFiles.length > 0) {
         await refreshAgentFiles(result.changedFiles);
-        setRightTab(result.changedFiles[0]);
-        if (useTaskLoop) {
-          window.setTimeout(() => onRescan(), 500);
+        if (result.changeReport) {
+          setAgentChangeReport(result.changeReport);
+          setSelectedChangePath(result.changeReport.files[0]?.path ?? "");
+          setRightTab("changes");
+          keepRightTabRef.current = true;
+          onRescan();
+        } else if (onAnalysisLoaded) {
+          await refreshChangeReport();
+        } else {
+          setRightTab(result.changedFiles[0]);
+          if (useTaskLoop) {
+            window.setTimeout(() => onRescan(), 500);
+          }
         }
       }
     }
@@ -5217,6 +5326,19 @@ export function CodeStudio({
           >
             <Eye size={11} /> {t("Preview")}
           </button>
+          <button
+            className={rightTab === "run" ? "is-active" : ""}
+            onClick={() => setRightTab("run")}
+          >
+            <Terminal size={11} /> {t("Run")}
+          </button>
+          <button
+            className={rightTab === "changes" ? "is-active" : ""}
+            onClick={() => setRightTab("changes")}
+          >
+            <GitCompareArrows size={11} /> {t("Changes")}
+            {agentChangeReport ? <b>{agentChangeReport.summary.changedFiles}</b> : null}
+          </button>
           {openTabs.map((filePath) => (
             <div key={filePath} className={`studio-right-tab ${rightTab === filePath ? "is-active" : ""}`}>
               <button
@@ -5238,7 +5360,7 @@ export function CodeStudio({
               </button>
             </div>
           ))}
-          {rightTab !== "preview" && activeFile ? (
+          {rightTab !== "preview" && rightTab !== "run" && rightTab !== "changes" && activeFile ? (
             <>
               <button
                 className="studio-right-icon"
@@ -5264,7 +5386,7 @@ export function CodeStudio({
               </button>
             </>
           ) : null}
-          {rightTab !== "preview" ? (
+          {rightTab !== "preview" && rightTab !== "run" && rightTab !== "changes" ? (
             <button
               className="studio-right-save"
               onClick={() => void saveFile()}
@@ -5277,7 +5399,181 @@ export function CodeStudio({
         </div>
 
         <div className="studio-right-body">
-          {rightTab === "preview" ? (
+          {rightTab === "run" ? (
+            <div className="studio-run-panel">
+              <div className="studio-run-head">
+                <span>
+                  <Terminal size={11} /> {t("Run output")}
+                </span>
+                {runResult ? (
+                  <b
+                    className={
+                      runResult.exitCode === null
+                        ? "is-running"
+                        : runResult.exitCode === 0
+                          ? "is-ok"
+                          : "is-fail"
+                    }
+                  >
+                    {runResult.exitCode === null
+                      ? t("Running…")
+                      : runResult.exitCode === 0
+                        ? t("Passed")
+                        : t("Failed")}
+                  </b>
+                ) : null}
+              </div>
+              {runResult ? (
+                <>
+                  <div className="studio-run-meta">
+                    <code>{runResult.command}</code>
+                    <span>{runResult.cwd}</span>
+                    {runResult.source === "agent" ? <span>{t("Agent")}</span> : null}
+                    {runResult.exitCode !== null ? (
+                      <span>
+                        {t("Exit")} {runResult.exitCode} · {runResult.durationMs} ms
+                      </span>
+                    ) : null}
+                  </div>
+                  <pre className="studio-run-output">
+                    {runResult.output || t("No output yet.")}
+                  </pre>
+                </>
+              ) : (
+                <div className="studio-preview-empty">
+                  <Terminal size={18} />
+                  <span>{t("Run a command or ask the agent to run tests to see output here.")}</span>
+                </div>
+              )}
+            </div>
+          ) : rightTab === "changes" ? (
+            <div className="studio-changes-panel">
+              <div className="studio-changes-head">
+                <span>
+                  <GitCompareArrows size={11} /> {t("Changes")}
+                </span>
+                <button onClick={() => void refreshChangeReport()} disabled={changeReportBusy}>
+                  {changeReportBusy ? <Loader2 size={11} className="spin" /> : <RefreshCw size={11} />}
+                  {t("Refresh")}
+                </button>
+              </div>
+              {changeReportBusy ? (
+                <div className="source-loading">
+                  <Loader2 size={13} className="spin" /> {t("Building change report…")}
+                </div>
+              ) : changeReportError ? (
+                <div className="source-error">
+                  <AlertTriangle size={13} /> {changeReportError}
+                </div>
+              ) : !agentChangeReport ? (
+                <div className="studio-preview-empty">
+                  <GitCompareArrows size={18} />
+                  <span>{t("Edit a file with the agent to see changed files, symbols, impact and diff here.")}</span>
+                </div>
+              ) : (
+                <>
+                  <div className="studio-change-summary">
+                    <span>
+                      <b>{agentChangeReport.summary.changedFiles}</b> {t("files")}
+                    </span>
+                    <span>
+                      <b>{agentChangeReport.summary.changedSymbols}</b> {t("symbols")}
+                    </span>
+                    <span>
+                      <b>{agentChangeReport.impact.routes.length}</b> {t("routes")}
+                    </span>
+                    <span>
+                      <b>{agentChangeReport.impact.tests.length}</b> {t("tests")}
+                    </span>
+                    <span>
+                      <b>{agentChangeReport.summary.impactNodes}</b> {t("impacted nodes")}
+                    </span>
+                  </div>
+                  <div className="studio-change-body">
+                    <div className="studio-change-files">
+                      {agentChangeReport.files.map((file) => (
+                        <button
+                          key={file.path}
+                          className={selectedChange?.path === file.path ? "is-active" : ""}
+                          onClick={() => setSelectedChangePath(file.path)}
+                          title={file.path}
+                        >
+                          <span>{file.path.split("/").pop()}</span>
+                          <small>
+                            {file.status}
+                            {file.additions !== undefined || file.deletions !== undefined
+                              ? ` · +${file.additions ?? 0}/-${file.deletions ?? 0}`
+                              : ""}
+                          </small>
+                        </button>
+                      ))}
+                    </div>
+                    <div className="studio-change-detail">
+                      {selectedChange ? (
+                        <div className="studio-change-detail-head">
+                          <code>{selectedChange.path}</code>
+                          <button onClick={() => void openFile(selectedChange.path)}>
+                            <FileCode2 size={11} /> {t("Open file")}
+                          </button>
+                        </div>
+                      ) : null}
+                      {selectedStructural ? (
+                        <div className="studio-structural-list">
+                          {selectedStructural.addedSymbols.length > 0 ? (
+                            <div className="is-added">
+                              + {selectedStructural.addedSymbols.join(", ")}
+                            </div>
+                          ) : null}
+                          {selectedStructural.removedSymbols.length > 0 ? (
+                            <div className="is-removed">
+                              − {selectedStructural.removedSymbols.join(", ")}
+                            </div>
+                          ) : null}
+                          {selectedStructural.changedSymbols.length > 0 ? (
+                            <div className="is-changed">
+                              ~ {selectedStructural.changedSymbols.join(", ")}
+                            </div>
+                          ) : null}
+                          {selectedStructural.addedEdges + selectedStructural.removedEdges > 0 ? (
+                            <div className="is-edges">
+                              {t("Edges")} +{selectedStructural.addedEdges}/-
+                              {selectedStructural.removedEdges}
+                            </div>
+                          ) : null}
+                        </div>
+                      ) : null}
+                      {selectedChange?.affectedNodes && selectedChange.affectedNodes.length > 0 ? (
+                        <div className="studio-change-impact">
+                          <strong>{t("Affected")}</strong>
+                          <span>
+                            {selectedChange.affectedNodes
+                              .slice(0, 8)
+                              .map((node) => node.label)
+                              .join(", ")}
+                          </span>
+                        </div>
+                      ) : null}
+                      {selectedChange ? (
+                        agentChangeReport.git.available ? (
+                          <GitDiffView
+                            analysisId={analysis.id}
+                            filePath={selectedChange.path}
+                            base={agentChangeReport.git.analysisHead ?? analysis.git?.head}
+                          />
+                        ) : (
+                          <div className="studio-change-nogit">
+                            {t(
+                              "This project is not a Git repository; the structural change summary above is the available diff.",
+                            )}
+                          </div>
+                        )
+                      ) : null}
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+          ) : rightTab === "preview" ? (
             <div className="studio-right-preview">
               <div className="studio-preview-head">
                 <span className="studio-preview-title">

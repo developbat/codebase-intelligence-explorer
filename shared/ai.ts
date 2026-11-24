@@ -1,5 +1,6 @@
 import type { ClarificationRequest, IntentAnalysis } from "./intent";
 import type { ProjectTaskQueue } from "./tasks";
+import type { ChangeReport } from "./types";
 
 export type BuiltInAiProviderId =
   | "openai"
@@ -705,6 +706,8 @@ export interface AiAgentResult {
   planPath?: string;
   logs?: AiAgentLogEntry[];
   taskQueue?: ProjectTaskQueue;
+  /** Diff/impact report for the files changed by this run. */
+  changeReport?: ChangeReport;
 }
 
 export type AiPermissionKind = "write" | "command";

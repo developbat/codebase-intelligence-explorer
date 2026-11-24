@@ -1133,6 +1133,7 @@ function aggregateResult(
           ? "budget"
           : "max_steps";
   const planPath = taskResults.find((result) => result.planPath)?.planPath;
+  const changeReport = [...taskResults].reverse().find((result) => result.changeReport)?.changeReport;
   const lines = [
     `Task loop finished for: **${goal}**`,
     "",
@@ -1166,6 +1167,7 @@ function aggregateResult(
     costUsd: costUsd > 0 ? Number(costUsd.toFixed(6)) : undefined,
     planPath,
     taskQueue: queue,
+    changeReport,
   };
 }
 

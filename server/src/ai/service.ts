@@ -3,6 +3,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import type {
   AnalysisResult,
+  ChangeReport,
   SymbolRecord,
 } from "../../../shared/types";
 import type {
@@ -115,6 +116,7 @@ import { getPrompt, renderPrompt } from "./prompts";
 import { listSkills, loadSkillsForPrompt, renderSkillsForPrompt, runSkillScript, setSkillEnabled } from "../skills";
 import { appendLesson, readLessons } from "../tasks";
 import { ensureProjectMap } from "../projectMap";
+import { buildChangeReport } from "../changes";
 import {
   applyMappingsToContent,
   extractEntities,
@@ -8103,6 +8105,19 @@ ${lessons}` : "",
     // health tracking must never break an agent run
   });
 
+  let changeReport: ChangeReport | undefined;
+  if (!readOnlyMode && changedFiles.length > 0) {
+    try {
+      changeReport = (await buildChangeReport(projectId, analysis)).report;
+    } catch (error) {
+      log(
+        "warn",
+        "Change report unavailable",
+        error instanceof Error ? error.message.slice(0, 200) : "could not build change report",
+      );
+    }
+  }
+
   return {
     instruction: instruction.trim(),
     summary,
@@ -8124,5 +8139,6 @@ ${lessons}` : "",
     tokenUsage: tokenTotal,
     costUsd,
     logs,
+    changeReport,
   };
 }
