@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { diffLines } from "diff";
 import fs from "node:fs/promises";
 import path from "node:path";
 import type {
@@ -95,6 +96,7 @@ import {
   deleteProjectPath,
   readSourceFile,
   renameProjectPath,
+  restoreLatestEditorBackup,
   runProjectCommand,
   writeSourceFile,
 } from "../editor";
@@ -250,6 +252,21 @@ function symbolByGraphId(analysis: AnalysisResult, symbolId: string): SymbolReco
 function nodeLabel(analysis: AnalysisResult, nodeId: string): string {
   const node = analysis.nodes.find((candidate) => candidate.id === nodeId);
   return node?.metadata?.qualifiedName ?? node?.label ?? nodeId;
+}
+
+function mappedPreview(before: string, after: string): string {
+  const changes = diffLines(before, after).filter((part) => part.added || part.removed);
+  return changes
+    .slice(0, 8)
+    .map((part) =>
+      `${part.added ? "+" : "-"} ${part.value
+        .split("\n")
+        .filter(Boolean)
+        .slice(0, 3)
+        .join(" / ")
+        .slice(0, 220)}`,
+    )
+    .join("\n");
 }
 
 function extractionTableOf(result: EntityResult): ExtractionTable {
@@ -2984,6 +3001,7 @@ export async function agentSearch(
 const ACTION_TOOL_GROUPS: Partial<Record<string, AgentToolGroup[]>> = {
   write_file: ["edit"],
   apply_mapped_changes: ["edit"],
+  undo_change: ["edit"],
   replace_in_file: ["edit"],
   replace_many: ["edit"],
   append_text: ["edit"],
@@ -3166,6 +3184,8 @@ export function agentToolCatalog(
     '{"action":"extract_entities","args":{"kind":"document"}}',
     '{"action":"apply_mapped_changes","args":{"kind":"color","scope":["styles.css"],"mapping":{"#22d3ee":"#ff5c8a"}}}',
     '{"action":"apply_mapped_changes","args":{"kind":"text","mapping":{"PLAY AGAIN":"RESTART"}}}',
+    '{"action":"apply_mapped_changes","args":{"kind":"color","dryRun":true,"mapping":{"#fff":"#000","#000":"#fff"}}}',
+    '{"action":"undo_change","args":{"path":"styles.css"}}',
     '{"action":"json_query","args":{"path":"package.json","pointer":"scripts"}}',
     '{"action":"find_symbols","args":{"query":"UserService","kind":"class","limit":20}}',
     '{"action":"sqlite_query","args":{"path":"data/app.db","query":"SELECT name FROM sqlite_schema"}}',
@@ -4355,6 +4375,7 @@ ${lessons}` : "",
     "\n- For any complete list/audit (colors, inputs, buttons, links, functions, classes, components, env, routes, imports, selectors, assets, documents, markdown, todos, files), call extract_entities with the matching kind instead of manually reading/counting. Finish immediately with every item in the user's language; do not summarize or omit entries." +
     "\n- For a color/background/button color change, call extract_entities(kind=color) first, then apply the change with apply_mapped_changes or replace_many; never rewrite whole files without a mapping." +
     "\n- For non-color value changes (button labels, import paths, env keys), use apply_mapped_changes(kind=text) or replace_many; verify with a text extraction or search that the old value is gone." +
+    "\n- Mappings are applied simultaneously, so color swaps like {\"#fff\":\"#000\",\"#000\":\"#fff\"} are safe. Use dryRun:true to preview a multi-file mapping before writing. If a mapped change was wrong, call undo_change with the file path to restore its latest backup." +
     "\n- For each new item or effect, prove the effect itself with a runtime step (state before/after, expectText/expectStable, canvas/state probe); an event counter alone is not proof." +
     "\n- If PROJECT_MAP reports code files missing from the index, call rescan_project before trusting symbol search." +
     "\n- Test-only artifacts (debug hooks, stable markers, scenario files) must never change the visible game UI. Keep them hidden or under .cie/." +
@@ -4892,6 +4913,7 @@ ${lessons}` : "",
       "list_colors",
       "extract_entities",
       "apply_mapped_changes",
+      "undo_change",
       "json_query",
       "find_symbols",
       "sqlite_query",
@@ -4980,6 +5002,7 @@ ${lessons}` : "",
         list_colors: "Listing CSS colors…",
         extract_entities: "Extracting project entities…",
         apply_mapped_changes: "Applying mapped changes…",
+        undo_change: "Restoring the last backup…",
         json_query: "Inspecting JSON…",
         find_symbols: "Searching symbols…",
         sqlite_query: "Querying SQLite…",
@@ -6325,6 +6348,7 @@ ${lessons}` : "",
             "A mapping of old value to new value is required, e.g. {'#22d3ee':'#ff5c8a'}. First call extract_entities(kind=color) to list the current colors.",
           );
         }
+        const dryRun = args.dryRun === true || args.preview === true;
         const scope = (args.scope ?? args.path) as string | string[] | undefined;
         const targetFiles = new Set<string>();
         if (kind === "color") {
@@ -6360,13 +6384,23 @@ ${lessons}` : "",
             if (!file) continue;
             const mapped = applyMappingsToContent(file.content, kind, pairs);
             if (mapped.count === 0 || mapped.content === file.content) continue;
+            const preview = `${pairs.map(([from, to]) => `${from} → ${to}`).join("\n")}\n\n${mappedPreview(
+              file.content,
+              mapped.content,
+            )}`.slice(0, 2_000);
+            if (dryRun) {
+              changed.push(`${file.filePath} (${mapped.count})\n${mappedPreview(file.content, mapped.content)}`);
+              replacements += mapped.count;
+              changedFilesCount += 1;
+              continue;
+            }
             // eslint-disable-next-line no-await-in-loop
             const allowed = await requirePermission(
               "write",
               "apply_mapped_changes",
               filePath,
               `${mapped.count} mapped replacement(s) in ${filePath}`,
-              { preview: pairs.map(([from, to]) => `${from} → ${to}`).join("\n").slice(0, 1_000) },
+              { preview },
             );
             if (!allowed) throw new Error("The user denied permission to apply mapped changes.");
             // eslint-disable-next-line no-await-in-loop
@@ -6378,6 +6412,18 @@ ${lessons}` : "",
             changedFilesCount += 1;
             replacements += mapped.count;
           }
+          if (dryRun) {
+            observation =
+              changedFilesCount > 0
+                ? `Preview only: ${replacements} mapped replacement(s) in ${changedFilesCount} file(s). No files were written.\n\n${changed.join("\n\n")}\n\nCall apply_mapped_changes again without dryRun to apply.`
+                : "Preview only: the mapping matched no occurrences; no files were changed.";
+            log(
+              "info",
+              "Mapped changes preview",
+              `${replacements} replacement(s) · ${changedFilesCount} file(s)`,
+            );
+            ok = true;
+          } else {
           invalidateReadCaches();
           let verificationText = "";
           let remainingCount = 0;
@@ -6451,7 +6497,25 @@ ${lessons}` : "",
             `${replacements} replacement(s) · ${changedFilesCount} file(s)`,
           );
           ok = true;
+          }
         }
+      } else if (action === "undo_change") {
+        const filePath = normalizeAgentPath(analysis.rootPath, pathFromArgs(args));
+        if (!filePath) throw new Error("A file path is required.");
+        if (isSecretAgentPath(filePath)) throw new Error("Editing environment, key or Git internals files is denied.");
+        const allowed = await requirePermission(
+          "write",
+          "undo_change",
+          filePath,
+          "Restore the latest editor backup for this file.",
+        );
+        if (!allowed) throw new Error("The user denied the undo request.");
+        const restored = await restoreLatestEditorBackup(projectId, analysis.rootPath, filePath);
+        invalidateReadCaches();
+        observation = `Restored ${restored.filePath} from its latest backup (${restored.backupPath}).`;
+        evidence.push({ path: restored.filePath, label: "Restored backup" });
+        log("success", "Backup restored", restored.filePath);
+        ok = true;
       } else if (action === "json_query") {
         const filePath = normalizeAgentPath(analysis.rootPath, pathFromArgs(args));
         if (!filePath) throw new Error("A file path is required.");

@@ -82,6 +82,7 @@ import {
   deleteProjectPath,
   readSourceFile,
   renameProjectPath,
+  restoreLatestEditorBackup,
   runProjectCommand,
   writeProjectAsset,
   writeSourceFile,
@@ -2495,6 +2496,20 @@ app.put("/api/projects/:id/file", async (req, res) => {
       return;
     }
     res.json(await writeSourceFile(req.params.id, analysis.rootPath, file, content));
+  } catch (error) {
+    handleError(res, error, 400);
+  }
+});
+
+app.post("/api/projects/:id/file/restore", async (req, res) => {
+  try {
+    const analysis = await loadAnalysis(req.params.id);
+    const file = typeof req.body?.filePath === "string" ? req.body.filePath : "";
+    if (!file) {
+      res.status(400).json({ error: "A file path is required." });
+      return;
+    }
+    res.json(await restoreLatestEditorBackup(req.params.id, analysis.rootPath, file));
   } catch (error) {
     handleError(res, error, 400);
   }

@@ -6,8 +6,10 @@ import test from "node:test";
 import {
   createSourceFile,
   deleteProjectPath,
+  listEditorBackups,
   readSourceFile,
   renameProjectPath,
+  restoreLatestEditorBackup,
   runProjectCommand,
   writeProjectAsset,
   writeSourceFile,
@@ -38,6 +40,29 @@ test("Code Studio file write and command runner work inside the project root", a
     assert.equal(command.timedOut, false);
 
     await assert.rejects(() => readSourceFile(root, "../outside.ts"));
+  } finally {
+    if (previousDataDir === undefined) delete process.env.CIE_DATA_DIR;
+    else process.env.CIE_DATA_DIR = previousDataDir;
+    await fs.rm(root, { recursive: true, force: true });
+    await fs.rm(dataDir, { recursive: true, force: true });
+  }
+});
+
+test("restores the latest editor backup for a file", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "cie-restore-"));
+  const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), "cie-restore-data-"));
+  const previousDataDir = process.env.CIE_DATA_DIR;
+  process.env.CIE_DATA_DIR = dataDir;
+  const projectId = "bbbbbbbbbbbbbbbb";
+  try {
+    await fs.writeFile(path.join(root, "demo.ts"), "export const value = 1;\n");
+    await writeSourceFile(projectId, root, "demo.ts", "export const value = 2;\n");
+    await writeSourceFile(projectId, root, "demo.ts", "export const value = 3;\n");
+    const backups = await listEditorBackups(projectId, root, "demo.ts");
+    assert.equal(backups.length, 2);
+    const restored = await restoreLatestEditorBackup(projectId, root, "demo.ts");
+    assert.equal(restored.filePath, "demo.ts");
+    assert.equal(await fs.readFile(path.join(root, "demo.ts"), "utf8"), "export const value = 2;\n");
   } finally {
     if (previousDataDir === undefined) delete process.env.CIE_DATA_DIR;
     else process.env.CIE_DATA_DIR = previousDataDir;

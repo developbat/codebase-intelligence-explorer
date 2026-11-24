@@ -1042,27 +1042,40 @@ export function applyMappingsToContent(
   kind: "color" | "text",
   mapping: Array<readonly [string, string]>,
 ): MappedContentResult {
-  let next = content;
-  let count = 0;
-  const replacements: MappedReplacement[] = [];
-  const ordered = [...mapping]
+  const entries = [...mapping]
     .filter(([from, to]) => from.length > 0 && to.length > 0)
     .sort((a, b) => b[0].length - a[0].length);
-  for (const [from, to] of ordered) {
-    let found = 0;
-    if (kind === "color" && /^#[0-9a-f]{3,8}$/i.test(from)) {
-      const escaped = from.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-      const pattern = new RegExp(`${escaped}(?![0-9a-fA-F])`, "gi");
-      found = (next.match(pattern) ?? []).length;
-      next = next.replace(pattern, to);
-    } else {
-      found = next.split(from).length - 1;
-      next = next.split(from).join(to);
-    }
-    if (found > 0) {
-      replacements.push({ from, to, count: found });
-      count += found;
-    }
+  if (entries.length === 0) {
+    return { content, count: 0, replacements: [] };
+  }
+  const escape = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const targets = new Map<string, string>();
+  for (const [from, to] of entries) {
+    targets.set(kind === "color" ? from.toLowerCase() : from, to);
+  }
+  const alternatives = entries
+    .map(([from]) =>
+      kind === "color" && /^#[0-9a-f]{3,8}$/i.test(from)
+        ? `${escape(from)}(?![0-9a-fA-F])`
+        : escape(from),
+    )
+    .join("|");
+  const pattern = new RegExp(`(?:${alternatives})`, kind === "color" ? "gi" : "g");
+  const counts = new Map<string, number>();
+  const next = content.replace(pattern, (match) => {
+    const key = kind === "color" ? match.toLowerCase() : match;
+    const replacement = targets.get(key);
+    if (replacement === undefined) return match;
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+    return replacement;
+  });
+  const replacements: MappedReplacement[] = [];
+  let count = 0;
+  for (const [from, to] of entries) {
+    const found = counts.get(kind === "color" ? from.toLowerCase() : from) ?? 0;
+    if (found === 0) continue;
+    replacements.push({ from, to, count: found });
+    count += found;
   }
   return { content: next, count, replacements };
 }

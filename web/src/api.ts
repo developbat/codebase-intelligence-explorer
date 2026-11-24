@@ -159,6 +159,15 @@ export const api = {
       body: JSON.stringify({ filePath, content }),
     }),
 
+  restoreFile: (id: string, filePath: string) =>
+    request<{ filePath: string; backupPath: string; bytes: number; backupOfCurrent?: string }>(
+      `/api/projects/${id}/file/restore`,
+      {
+        method: "POST",
+        body: JSON.stringify({ filePath }),
+      },
+    ),
+
   createFile: (id: string, filePath: string) =>
     request<SourceFileContent>(`/api/projects/${id}/files`, {
       method: "POST",

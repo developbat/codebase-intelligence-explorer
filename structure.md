@@ -365,6 +365,15 @@ used for button labels, import paths, environment keys and repeated tokens; it
 targets every file containing the exact old value and verifies that the old
 value is gone afterwards.
 
+Mappings are applied in one simultaneous pass:
+
+- swaps such as `#fff ↔ #000` are safe;
+- the permission prompt shows a line-level before/after preview;
+- `dryRun: true` returns the same preview without writing;
+- `undo_change` (agent) or the **Undo** button in Changes restores the latest
+  editor backup for a file. Backup filenames include a random suffix so rapid
+  consecutive writes cannot overwrite each other.
+
 ### 6.1 Change report and run output (right panel)
 
 The right panel has three views:

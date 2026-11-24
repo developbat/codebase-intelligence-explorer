@@ -217,4 +217,21 @@ test("applies mapped color and text changes without prefix corruption", () => {
   const untouched = applyMappingsToContent("#ffffffff", "color", [["#fff", "#000"]]);
   assert.equal(untouched.content, "#ffffffff");
   assert.equal(untouched.count, 0);
+
+  const swapped = applyMappingsToContent(
+    "<b>#fff</b><i>#000</i>",
+    "color",
+    [
+      ["#fff", "#000"],
+      ["#000", "#fff"],
+    ],
+  );
+  assert.equal(swapped.content, "<b>#000</b><i>#fff</i>");
+  assert.equal(swapped.count, 2);
+
+  const textSwapped = applyMappingsToContent("A B A", "text", [
+    ["A", "B"],
+    ["B", "A"],
+  ]);
+  assert.equal(textSwapped.content, "B A B");
 });

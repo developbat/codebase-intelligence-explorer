@@ -607,6 +607,7 @@ export type AiAgentAction =
   | "list_colors"
   | "extract_entities"
   | "apply_mapped_changes"
+  | "undo_change"
   | "json_query"
   | "find_symbols"
   | "sqlite_query"

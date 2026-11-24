@@ -121,6 +121,7 @@ import {
   Wand2,
   User,
   Upload,
+  Undo2,
   TestTube2,
   WandSparkles,
   Wrench,
@@ -861,6 +862,7 @@ export function CodeStudio({
   const [changeReportBusy, setChangeReportBusy] = useState(false);
   const [changeReportError, setChangeReportError] = useState<string | null>(null);
   const [selectedChangePath, setSelectedChangePath] = useState("");
+  const [undoBusy, setUndoBusy] = useState(false);
   const requestRef = useRef(0);
   const studioRef = useRef<HTMLDivElement>(null);
   const editorViewRef = useRef<EditorView | null>(null);
@@ -2437,6 +2439,29 @@ export function CodeStudio({
       );
     } finally {
       setChangeReportBusy(false);
+    }
+  }
+
+  async function undoChange(filePath: string) {
+    if (undoBusy) return;
+    const ok = window.confirm(
+      t("Restore the latest editor backup for {file}?", { file: filePath }),
+    );
+    if (!ok) return;
+    setUndoBusy(true);
+    setChangeReportError(null);
+    try {
+      await api.restoreFile(analysis.id, filePath);
+      await refreshAgentFiles([filePath]);
+      setAgentChangeReport(null);
+      setSelectedChangePath("");
+      onRescan();
+    } catch (requestError) {
+      setChangeReportError(
+        requestError instanceof Error ? requestError.message : t("Could not restore the backup."),
+      );
+    } finally {
+      setUndoBusy(false);
     }
   }
 
@@ -5562,6 +5587,14 @@ export function CodeStudio({
                           <code>{selectedChange.path}</code>
                           <button onClick={() => void openFile(selectedChange.path)}>
                             <FileCode2 size={11} /> {t("Open file")}
+                          </button>
+                          <button
+                            onClick={() => void undoChange(selectedChange.path)}
+                            disabled={undoBusy}
+                            title={t("Restore the latest editor backup for this file.")}
+                          >
+                            {undoBusy ? <Loader2 size={11} className="spin" /> : <Undo2 size={11} />}
+                            {t("Undo")}
                           </button>
                         </div>
                       ) : null}

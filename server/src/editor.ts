@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import { spawn } from "node:child_process";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -108,7 +109,7 @@ export async function writeSourceFile(
     await fs.mkdir(backupDir, { recursive: true, mode: 0o700 });
     const stamp = new Date().toISOString().replace(/[:.]/g, "-");
     const safeName = relative.replace(/[\\/]/g, "__");
-    backupPath = path.join(backupDir, `${stamp}-${safeName}`);
+    backupPath = path.join(backupDir, `${stamp}-${crypto.randomUUID().slice(0, 8)}-${safeName}`);
     await fs.writeFile(backupPath, previous, { encoding: "utf8", mode: 0o600 });
   }
   await fs.mkdir(path.dirname(absolute), { recursive: true });
@@ -117,6 +118,60 @@ export async function writeSourceFile(
     // index updates must not fail a save
   });
   return { filePath: relative, bytes: Buffer.byteLength(content, "utf8"), backupPath };
+}
+
+export interface EditorBackupInfo {
+  filePath: string;
+  backupPath: string;
+  createdAt: string;
+}
+
+export async function listEditorBackups(
+  projectId: string,
+  rootPath: string,
+  filePath: string,
+): Promise<EditorBackupInfo[]> {
+  const { relative } = await resolveProjectFile(rootPath, filePath);
+  const backupDir = path.join(getDataDir(), "editor-backups", projectId);
+  const safeName = relative.replace(/[\\/]/g, "__");
+  const entries = await fs.readdir(backupDir).catch(() => [] as string[]);
+  const backups = await Promise.all(
+    entries
+      .filter((name) => name.endsWith(`-${safeName}`))
+      .map(async (name) => {
+        const backupPath = path.join(backupDir, name);
+        const stat = await fs.stat(backupPath).catch(() => null);
+        return {
+          filePath: relative,
+          backupPath,
+          createdAt: name.slice(0, name.length - safeName.length - 1),
+          mtimeMs: stat?.mtimeMs ?? 0,
+        };
+      }),
+  );
+  return backups
+    .sort((a, b) => b.mtimeMs - a.mtimeMs || b.createdAt.localeCompare(a.createdAt))
+    .map(({ mtimeMs: _mtimeMs, ...backup }) => backup);
+}
+
+export async function restoreLatestEditorBackup(
+  projectId: string,
+  rootPath: string,
+  filePath: string,
+): Promise<{ filePath: string; backupPath: string; bytes: number; backupOfCurrent?: string }> {
+  const backups = await listEditorBackups(projectId, rootPath, filePath);
+  const latest = backups[0];
+  if (!latest) {
+    throw new Error(`No editor backup was found for ${filePath}.`);
+  }
+  const content = await fs.readFile(latest.backupPath, "utf8");
+  const written = await writeSourceFile(projectId, rootPath, latest.filePath, content);
+  return {
+    filePath: written.filePath,
+    backupPath: latest.backupPath,
+    bytes: written.bytes,
+    backupOfCurrent: written.backupPath,
+  };
 }
 
 export interface PathChangeResult {
