@@ -453,12 +453,29 @@ export const api = {
       text: string;
       tokenUsage?: { inputTokens: number; outputTokens: number; totalTokens: number };
       costUsd?: number;
-      sources: { url: string; title?: string; status?: number; error?: string }[];
+      sources: {
+        url: string;
+        title?: string;
+        status?: number;
+        error?: string;
+        snippet?: string;
+      }[];
     }>("/api/ai/studio/chat", {
       method: "POST",
       body: JSON.stringify(input),
       signal,
     }),
+
+  webSearch: (query: string, language?: string, limit = 6) =>
+    request<{
+      query: string;
+      provider: "google-cse" | "google-news" | "duckduckgo";
+      results: { title: string; url: string; snippet?: string; source?: string; publishedAt?: string }[];
+      fetchedAt: string;
+      warning?: string;
+    }>(`/api/web/search?q=${encodeURIComponent(query)}&limit=${limit}&language=${encodeURIComponent(
+      language ?? "en",
+    )}`),
 
   imageStudio: (input: {
     prompt: string;

@@ -259,7 +259,7 @@ export function ChatStudio({
             <h2>{active?.title ?? t("Chat Studio")}</h2>
             <span>
               {model ? `${model.provider}/${model.model}` : t("Choose a model")}
-              {useWeb ? ` · ${t("URL fetch on")}` : ""}
+              {useWeb ? ` · ${t("Web search on")}` : ""}
             </span>
           </div>
           {messages.length > 0 ? (
@@ -281,7 +281,7 @@ export function ChatStudio({
               <h3>{t("What should we work on?")}</h3>
               <p>
                 {t(
-                  "Ask a question, paste a link, or attach a file. This studio chats and researches; it does not edit code.",
+                  "Ask, research, summarize or plan. Web search can bring current results when needed.",
                 )}
               </p>
             </div>
@@ -456,7 +456,7 @@ export function ChatStudio({
                   checked={useWeb}
                   onChange={(event) => setUseWeb(event.target.checked)}
                 />
-                <Globe2 size={11} /> {t("Fetch URLs")}
+                <Globe2 size={11} /> {t("Web search")}
               </label>
             </div>
             {busy ? (

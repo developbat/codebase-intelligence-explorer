@@ -439,6 +439,15 @@ scenario first), non-empty `eval.value`, runtime/console evidence and
 suggestion cases, including site inspection, list, test, run, file read, Excel
 output and error location.
 
+### 4.13.2 Chat Studio research and web search
+
+Chat Studio uses a concise research prompt: user language first, current date,
+no self-introduction or capability-disclaimer list, and no long refusal when
+live data is missing. With **Web search** enabled it searches news/current
+questions through Google News RSS, optional Google Custom Search (`GOOGLE_CSE_API_KEY`
++ `GOOGLE_CSE_ID`) and a DuckDuckGo HTML fallback. Results become cited sources
+and source chips in the answer. `GET /api/web/search` exposes the same chain.
+
 ### 4.14 Tool registry and capability metadata
 
 `server/src/ai/toolRegistry.ts` is the single source of truth for the built-in
