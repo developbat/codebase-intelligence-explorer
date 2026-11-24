@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowUp,
   BrainCircuit,
@@ -169,6 +169,9 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [step, setStep] = useState(0);
   const [lastPath, setLastPath] = useState(() => localStorage.getItem(LAST_PATH_KEY) ?? "");
+  // Guards against a slow rescan/load from overwriting the project the user
+  // switched to afterwards.
+  const projectRequestRef = useRef(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -179,11 +182,14 @@ export default function App() {
         setRecent(projects);
         const lastId = localStorage.getItem(LAST_PROJECT_KEY);
         if (lastId && projects.some((project) => project.id === lastId)) {
+          const requestId = ++projectRequestRef.current;
           try {
             const result = await api.project(lastId);
-            if (!cancelled) applyAnalysis(result);
+            if (!cancelled && requestId === projectRequestRef.current) applyAnalysis(result);
           } catch {
-            localStorage.removeItem(LAST_PROJECT_KEY);
+            if (requestId === projectRequestRef.current) {
+              localStorage.removeItem(LAST_PROJECT_KEY);
+            }
           }
         }
       } catch (requestError) {
@@ -315,18 +321,22 @@ export default function App() {
 
   async function analyze(path: string) {
     if (busy) return;
+    const requestId = ++projectRequestRef.current;
     setBusy("analyze");
     setError(null);
     try {
       const result = await api.analyze(path);
+      if (requestId !== projectRequestRef.current) return;
       applyAnalysis(result);
       localStorage.setItem(LAST_PATH_KEY, path);
       setLastPath(path);
       setDialogOpen(false);
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : t("Analysis failed"));
+      if (requestId === projectRequestRef.current) {
+        setError(requestError instanceof Error ? requestError.message : t("Analysis failed"));
+      }
     } finally {
-      setBusy(null);
+      if (requestId === projectRequestRef.current) setBusy(null);
     }
   }
 
@@ -362,38 +372,48 @@ export default function App() {
   }
 
   async function loadRecent(project: RecentProject) {
-    if (busy) return;
+    if (busy === "analyze") return;
+    const requestId = ++projectRequestRef.current;
     setBusy("load");
     setError(null);
     try {
       const result = await api.project(project.id);
+      if (requestId !== projectRequestRef.current) return;
       applyAnalysis(result);
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : t("Project could not be loaded"));
+      if (requestId === projectRequestRef.current) {
+        setError(requestError instanceof Error ? requestError.message : t("Project could not be loaded"));
+      }
     } finally {
-      setBusy(null);
+      if (requestId === projectRequestRef.current) setBusy(null);
     }
   }
 
   async function rescan() {
     if (!analysis || busy) return;
+    const requestId = ++projectRequestRef.current;
     setBusy("rescan");
     setError(null);
     try {
       const result = await api.rescan(analysis.id);
+      if (requestId !== projectRequestRef.current) return;
       applyAnalysis(result, false);
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : t("Rescan failed"));
+      if (requestId === projectRequestRef.current) {
+        setError(requestError instanceof Error ? requestError.message : t("Rescan failed"));
+      }
     } finally {
-      setBusy(null);
+      if (requestId === projectRequestRef.current) setBusy(null);
     }
   }
 
   async function reloadUpdatedAnalysis() {
     if (!analysis) return;
+    const requestId = projectRequestRef.current;
     setError(null);
     try {
       const result = await api.project(analysis.id);
+      if (requestId !== projectRequestRef.current) return;
       setAnalysis(result);
       setChangeReport(null);
       setGitStatus(null);
@@ -842,7 +862,7 @@ export default function App() {
             <span className="breadcrumb-item">
               <Code2 size={12} className="breadcrumb-sep" />
               <span className="is-current">{analysis?.projectName ?? t("Code Studio")}</span>
-              <span className="studio-top-pill">{t("Write mode")}</span>
+              <span className="studio-top-pill">{t("Agent workspace")}</span>
             </span>
           ) : product === "chat" ? (
             <span className="breadcrumb-item">
@@ -972,6 +992,7 @@ export default function App() {
           }
         >
           <CodeStudio
+            key={analysis.id}
             analysis={analysis}
             aiSettings={aiSettings}
             recent={recent}
@@ -1003,6 +1024,7 @@ export default function App() {
           }
         >
           <ChatStudio
+            key={analysis?.id ?? "no-project"}
             aiSettings={aiSettings}
             projectId={analysis?.id}
             analysis={analysis}
@@ -1032,6 +1054,7 @@ export default function App() {
           }
         >
           <ImageStudio
+            key={analysis?.id ?? "no-project"}
             aiSettings={aiSettings}
             projectId={analysis?.id}
             analysis={analysis}
@@ -1060,6 +1083,7 @@ export default function App() {
           }
         >
           <VideoStudio
+            key={analysis?.id ?? "no-project"}
             aiSettings={aiSettings}
             projectId={analysis?.id}
             analysis={analysis}
@@ -1448,7 +1472,7 @@ export default function App() {
             product === "studio" ? (
               <>
                 <span className="status-dot" />
-                {t("Code Studio")} · {t("Write mode")}
+                {t("Code Studio")} · {t("Agent workspace")}
                 <span className="status-sep" />
                 <span className="status-muted">
                   {analysis.projectName}

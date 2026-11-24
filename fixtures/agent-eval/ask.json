@@ -6,7 +6,7 @@
       "id": "cbe-task-form",
       "projectId": "2f97a1dcd90d1acf",
       "language": "tr",
-      "instruction": "G\u00f6rev ekleme formu ve addTask fonksiyonu nerede? Hangi dosya ve sat\u0131rda? K\u0131sa cevap ver.",
+      "instruction": "Görev ekleme formu ve addTask fonksiyonu nerede? Hangi dosya ve satırda? Kısa cevap ver.",
       "expect": [
         "js/script.js"
       ]
@@ -33,7 +33,7 @@
       "id": "laravel-gate",
       "projectId": "5b42c28a16dd210a",
       "language": "tr",
-      "instruction": "AdminGate s\u0131n\u0131f\u0131 nerede? Hangi dosya ve sat\u0131rda? K\u0131sa cevap ver.",
+      "instruction": "AdminGate sınıfı nerede? Hangi dosya ve satırda? Kısa cevap ver.",
       "expect": [
         "app/Admin/AdminGate.php"
       ]
@@ -72,6 +72,60 @@
       "instruction": "List the todo use-case classes and the files that define them.",
       "expect": [
         "app/data/todo/usecases"
+      ]
+    },
+    {
+      "id": "neon-colors",
+      "projectId": "4541796f07101515",
+      "language": "tr",
+      "instruction": "Tüm renkleri listele. Her rengi ve benzersiz kodları eksiksiz göster.",
+      "expect": [
+        "#22d3ee"
+      ]
+    },
+    {
+      "id": "cbe-inputs",
+      "projectId": "2f97a1dcd90d1acf",
+      "language": "tr",
+      "instruction": "Tüm form girişlerini (input, textarea, select) dosya ve satırıyla eksiksiz listele.",
+      "expect": [
+        "task-input"
+      ]
+    },
+    {
+      "id": "laravel-routes",
+      "projectId": "5b42c28a16dd210a",
+      "language": "tr",
+      "instruction": "Tüm uygulama rotalarını (HTTP metodu ve yol) dosya ve satırıyla eksiksiz listele.",
+      "expect": [
+        "/about"
+      ]
+    },
+    {
+      "id": "sample-functions",
+      "projectId": "7651e1e027cf6d46",
+      "language": "en",
+      "instruction": "List every function in src/services/order.service.ts with its line number.",
+      "expect": [
+        "cancelOrder"
+      ]
+    },
+    {
+      "id": "python-routes",
+      "projectId": "375385130b822e59",
+      "language": "en",
+      "instruction": "List every API route with its HTTP method and path.",
+      "expect": [
+        "v1/todos"
+      ]
+    },
+    {
+      "id": "neon-buttons",
+      "projectId": "4541796f07101515",
+      "language": "tr",
+      "instruction": "Oyundaki tüm butonları (statik HTML ve JS ile oluşturulanlar dahil) dosya ve satırıyla eksiksiz listele.",
+      "expect": [
+        "fire-button"
       ]
     }
   ]

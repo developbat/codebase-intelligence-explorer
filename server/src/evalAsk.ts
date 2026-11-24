@@ -19,6 +19,7 @@ const WRITE_ACTIONS = new Set([
   "delete_file",
   "rename_path",
   "format_file",
+  "apply_mapped_changes",
 ]);
 
 async function main(): Promise<void> {

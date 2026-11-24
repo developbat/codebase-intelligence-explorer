@@ -45,6 +45,7 @@ import {
 import { estimateUsageCost } from "./pricing";
 import { removeIndexedPath } from "../indexer";
 import { formatUsd } from "../../../shared/pricing";
+import { resolveWorkBrief } from "../extractors";
 import {
   continuationFindings,
   looksLikePlanningText,
@@ -677,19 +678,21 @@ export async function planProjectTasks(
   return queue;
 }
 
+const TASK_WRITE_VERBS =
+  /\b(add|create|implement|update|change|edit|write|refactor|fix|remove|delete|rename|move|append|replace|insert|build|generate|repair|wire|restore|ensure|enable|tune|adjust|enforce|expose|register|convert|support|extend|validate|improve|optimize|enhance)\b|oluştur|ekle|güncelle|değiştir|düzelt|sil|taşı|yaz|kaldır|onar|bağla|kaydet|düzenle|iyileştir|optimize et/i;
+const TASK_INSPECTION_VERBS =
+  /\b(inspect|read|review|verify|check|analy[sz]e|research|understand|plan|list|show|explain|find|enumerate|count)\b|incele|oku|gözden geçir|doğrula|kontrol et|araştır|listele|listeler|listeleme|liste|göster|açıkla|say/i;
+
 export function taskLooksLikeWrite(task: ProjectTask): boolean {
-  const text = `${task.title} ${task.detail}`;
-  if (
-    /\b(inspect|read|review|verify|check|analy[sz]e|research|understand|plan)\b|incele|oku|gözden geçir|doğrula|kontrol et|araştır/i.test(
-      task.title,
-    ) &&
-    !/\b(fix|update|add|create|write|implement|change|remove|repair|wire|restore|ensure|enable|tune|adjust|enforce|report|expose|register|route|convert|support|extend|validate|return|reject|handle|respond)\b|düzelt|ekle|oluştur|yaz|güncelle|onar|bağla/i.test(task.title)
-  ) {
-    return false;
-  }
-  return /\b(add|create|implement|update|change|edit|write|refactor|fix|remove|delete|rename|move|append|replace|insert|build|generate|repair|wire|restore|ensure|enable|tune|adjust|enforce|report|expose|register|route|convert|support|extend|validate|return|reject|handle|respond)\b|oluştur|ekle|güncelle|değiştir|düzelt|sil|taşı|yaz|kaldır|onar|bağla/i.test(
-    text,
-  );
+  const title = task.title;
+  const titleWrite = TASK_WRITE_VERBS.test(title);
+  // The title is the user's actual goal. The detail is model-generated planning
+  // text and often says "create a list", "report" or "build an inventory" even
+  // for a read-only question. Never let that wording turn a list/question into
+  // a project edit.
+  if (TASK_INSPECTION_VERBS.test(title) && !titleWrite) return false;
+  if (titleWrite) return true;
+  return TASK_WRITE_VERBS.test(task.detail);
 }
 
 export function blockDependentsOf(
@@ -833,6 +836,8 @@ function taskInstruction(
   existingCode: string[] = [],
   inspection = false,
 ): string {
+  const brief = resolveWorkBrief(task.title);
+  const extractionTask = brief?.mode === "extract";
   const prior = priorTasks
     .filter((item) => item.status === "done" && item.resultSummary)
     .slice(-8)
@@ -848,29 +853,39 @@ function taskInstruction(
     task.acceptance ? `Acceptance: ${task.acceptance}` : "",
     task.notes ? `Retry note: ${task.notes}` : "",
     prior ? `Previous task summaries (use this before reading context.md):\n${prior}` : "",
-    continuation
-      ? "This is a continuation of your previous answer. Its findings are authoritative. Do not rescan or re-read the project; read only the exact lines you will edit, then apply the change and verify it on the real app."
-      : "Read .cie/agent/context-digest.md first for compact prior context. Read .cie/agent/context.md only when the digest and summaries are insufficient; if it is large, search it with find_in_file or read only the relevant tail. Append useful durable context if you learn something new.",
-    inspection
-      ? "This is a read-only inspection/diagnosis task. Do not edit files. Collect the minimum evidence, then finish with a compact diagnosis: root cause, file:line evidence, runtime proof, and the exact fix that would be needed. Do not keep reading after you have evidence."
-      : "Before editing, check whether the requested behavior already exists. If it does, verify it and finish with evidence instead of adding a duplicate implementation.",
-    existingCode.length > 0
-      ? `Existing code that may already implement this task: ${existingCode.join(
-          "; ",
-        )}. Inspect these exact symbols first. If they satisfy the request, verify and finish without editing.`
-      : "",
-    "For a field/control change, wire all layers: data model, creation form/markup, rendering and persistence. A selector referenced in JS but absent from the markup is incomplete; run browser_check when the change is visual and available.",
-    changedSinceGoal.length > 0
+    extractionTask
+      ? "This is a read-only complete-list task. Do not read .cie/agent context files, do not run grep/shell commands, do not use list_items or browser_check. Call extract_entities with the matching kind once, then finish with every item in the user's language."
+      : continuation
+        ? "This is a continuation of your previous answer. Its findings are authoritative. Do not rescan or re-read the project; read only the exact lines you will edit, then apply the change and verify it on the real app."
+        : "Read .cie/agent/context-digest.md first for compact prior context. Read .cie/agent/context.md only when the digest and summaries are insufficient; if it is large, search it with find_in_file or read only the relevant tail. Append useful durable context if you learn something new.",
+    extractionTask
+      ? "Do not edit files and do not add runtime checks; the extraction table is the evidence."
+      : inspection
+        ? "This is a read-only inspection/diagnosis task. Do not edit files. Collect the minimum evidence, then finish with a compact diagnosis: root cause, file:line evidence, runtime proof, and the exact fix that would be needed. Do not keep reading after you have evidence."
+        : "Before editing, check whether the requested behavior already exists. If it does, verify it and finish with evidence instead of adding a duplicate implementation.",
+    extractionTask
+      ? ""
+      : existingCode.length > 0
+        ? `Existing code that may already implement this task: ${existingCode.join(
+            "; ",
+          )}. Inspect these exact symbols first. If they satisfy the request, verify and finish without editing.`
+        : "",
+    extractionTask
+      ? ""
+      : "For a field/control change, wire all layers: data model, creation form/markup, rendering and persistence. A selector referenced in JS but absent from the markup is incomplete; run browser_check when the change is visual and available.",
+    changedSinceGoal.length > 0 && !extractionTask
       ? `Files changed since this goal started: ${changedSinceGoal.join(
           ", ",
         )}. They may contain partial work from an interrupted run. Inspect them first. If the requested behavior already exists, verify it and finish with evidence; do not rewrite or duplicate it.`
       : "",
-    "Do not re-read files already fully read by a previous task unless the current task needs exact content after a change.",
-    "Batch up to 4 independent read-only calls in one reply (read_file, find_in_file, search_code, list_files). One context round-trip per batch instead of one per read.",
-    "Read the smallest range you need. Do not read a whole large file before planning; read the relevant functions, then edit. If you have read the same file twice without editing, stop reading and make the smallest change.",
+    extractionTask ? "" : "Do not re-read files already fully read by a previous task unless the current task needs exact content after a change.",
+    extractionTask ? "" : "Batch up to 4 independent read-only calls in one reply (read_file, find_in_file, search_code, list_files). One context round-trip per batch instead of one per read.",
+    extractionTask ? "" : "Read the smallest range you need. Do not read a whole large file before planning; read the relevant functions, then edit. If you have read the same file twice without editing, stop reading and make the smallest change.",
     "Stay scoped to this task. Do not do later tasks. Do not revert earlier work.",
-    verification ? `Verification command: ${verification}` : "",
-    "Run tests/typecheck/build when relevant. If the task includes validation, permissions, errors or limits, verify both the accepted and rejected path. Finish only when this task is complete, or report the exact blocker.",
+    verification && !extractionTask ? `Verification command: ${verification}` : "",
+    extractionTask
+      ? "Finish only after the extraction tool returned the complete list; do not summarize or omit items."
+      : "Run tests/typecheck/build when relevant. If the task includes validation, permissions, errors or limits, verify both the accepted and rejected path. Finish only when this task is complete, or report the exact blocker.",
   ]
     .filter(Boolean)
     .join("\n");
@@ -1194,7 +1209,9 @@ export function intentTask(
         ? "A concrete plan with ordered tasks, acceptance criteria and verification is saved."
         : workspaceMode === "research"
           ? "The answer cites the evidence and states open questions."
-          : "The requested change is implemented and verified.",
+          : readOnly
+            ? "The question is answered with code-referenced evidence; no project files are changed."
+            : "The requested change is implemented and verified.",
     status: "pending",
     effort,
     role:
@@ -1355,10 +1372,11 @@ export async function runProjectLoop(
   const readOnlyRequest = workspaceMode === "ask" || workspaceMode === "research";
   const questionGoal =
     intent?.kind === "question" ||
+    intent?.kind === "analyze" ||
     /\?|\bnasıl\b|\bneden\b|\bne zaman\b|\bnerede\b/i.test(goal);
   if (readOnlyRequest && !questionGoal && queue.tasks.some((task) => taskLooksLikeWrite(task))) {
     throw new Error(
-      "This goal changes the project, but the current workspace mode is read-only. Switch to Build (Geliştir) mode before running it; read-only mode only inspects and cannot apply edits.",
+      "This request needs project file edits, but the current mode is read-only. Switch to Build and run it again. Agent notes under .cie/agent are not project changes. [READ_ONLY_WRITE_BLOCKED]",
     );
   }
 
@@ -1518,6 +1536,8 @@ export async function runProjectLoop(
     const changedSinceGoal = await filesChangedSince(analysis, queue.createdAt);
     const existingCode = featureExistenceHints(analysis, current);
     const inspectionRun = !forceWrite && taskLooksLikeInspection(current);
+    const taskBrief = resolveWorkBrief(current.title);
+    const extractionTask = taskBrief?.mode === "extract";
     if (changedSinceGoal.length > 0) {
       emit({
         type: "log",
@@ -1550,8 +1570,8 @@ export async function runProjectLoop(
           model: taskConfig.model,
           workspaceMode: inspectionRun ? "ask" : workspaceMode,
           mode: inspectionRun ? "ask" : "auto",
-          allowWrite: options.allowWrite === true,
-          allowCommands: options.allowCommands === true,
+          allowWrite: options.allowWrite === true && !inspectionRun && !extractionTask,
+          allowCommands: options.allowCommands === true && !inspectionRun && !extractionTask,
           language: options.language,
           interactive: true,
           forceFast: current.effort === "simple",
@@ -1562,6 +1582,7 @@ export async function runProjectLoop(
           maxOutputTokens: settings?.agentMaxOutputTokens ?? 16_000,
           startingUsage: current.tokenUsage,
           intent: options.intent,
+          workBriefText: current.title,
           history: options.history?.slice(-8),
         },
         (event) => {

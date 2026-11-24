@@ -116,6 +116,13 @@ import { listSkills, loadSkillsForPrompt, renderSkillsForPrompt, runSkillScript,
 import { appendLesson, readLessons } from "../tasks";
 import { ensureProjectMap } from "../projectMap";
 import {
+  applyMappingsToContent,
+  extractEntities,
+  resolveWorkBrief,
+  type EntityKind,
+  type EntityResult,
+} from "../extractors";
+import {
   createSkill,
   installSkills,
   previewSkillSource,
@@ -1798,6 +1805,8 @@ const READ_ONLY_ACTIONS = new Set([
   "lsp_completion",
   "list_items",
   "count_matches",
+  "list_colors",
+  "extract_entities",
   "json_query",
   "find_symbols",
   "sqlite_query",
@@ -2910,6 +2919,7 @@ export async function agentSearch(
 
 const ACTION_TOOL_GROUPS: Partial<Record<string, AgentToolGroup[]>> = {
   write_file: ["edit"],
+  apply_mapped_changes: ["edit"],
   replace_in_file: ["edit"],
   replace_many: ["edit"],
   append_text: ["edit"],
@@ -3082,6 +3092,15 @@ export function agentToolCatalog(
     '{"action":"lsp_completion","args":{"path":"src/app.ts","line":42,"character":10}}',
     '{"action":"list_items","args":{"path":"data/items.html","limit":100}}',
     '{"action":"count_matches","args":{"path":"src","query":"TODO","limit":20}}',
+    '{"action":"list_colors","args":{"path":"styles.css"}}',
+    '{"action":"extract_entities","args":{"kind":"input","scope":["index.html"]}}',
+    '{"action":"extract_entities","args":{"kind":"button"}}',
+    '{"action":"extract_entities","args":{"kind":"function","scope":["src"]}}',
+    '{"action":"extract_entities","args":{"kind":"route"}}',
+    '{"action":"extract_entities","args":{"kind":"color","scope":["styles.css"]}}',
+    '{"action":"extract_entities","args":{"kind":"asset"}}',
+    '{"action":"extract_entities","args":{"kind":"document"}}',
+    '{"action":"apply_mapped_changes","args":{"kind":"color","scope":["styles.css"],"mapping":{"#22d3ee":"#ff5c8a"}}}',
     '{"action":"json_query","args":{"path":"package.json","pointer":"scripts"}}',
     '{"action":"find_symbols","args":{"query":"UserService","kind":"class","limit":20}}',
     '{"action":"sqlite_query","args":{"path":"data/app.db","query":"SELECT name FROM sqlite_schema"}}',
@@ -3168,6 +3187,172 @@ export function agentToolCatalog(
     })
     .map((tool) => `- ${tool}`)
     .join("\n");
+}
+
+const COLOR_VALUE_PATTERN = /#[0-9a-fA-F]{3,8}\b|rgba?\([^)]*\)|hsla?\([^)]*\)/g;
+
+async function auditColorCoverage(
+  analysis: AnalysisResult,
+  steps: AiAgentStep[],
+  summary: string,
+): Promise<{ path: string; total: number; missing: string[] } | null> {
+  const cssStep = [...steps]
+    .reverse()
+    .find(
+      (step) =>
+        step.action === "read_file" &&
+        typeof step.args.path === "string" &&
+        /\.css$/i.test(step.args.path),
+    );
+  const filePath =
+    (cssStep?.args.path as string | undefined) ??
+    (analysis.files.some((file) => file.path === "styles.css") ? "styles.css" : undefined);
+  if (!filePath) return null;
+  const file = await readSourceFile(analysis.rootPath, filePath).catch(() => null);
+  if (!file) return null;
+  const colors = [...new Set([...file.content.matchAll(COLOR_VALUE_PATTERN)].map((match) => match[0]))];
+  if (colors.length < 3) return null;
+  const normalize = (value: string) => value.toLowerCase().replace(/\s+/g, "");
+  const answer = normalize(summary);
+  return {
+    path: filePath,
+    total: colors.length,
+    missing: colors.filter((color) => !answer.includes(normalize(color))),
+  };
+}
+
+interface ColorEntry {
+  line: number;
+  selector: string;
+  property: string;
+  color: string;
+}
+
+interface ColorList {
+  path: string;
+  entries: ColorEntry[];
+  unique: [string, number][];
+}
+
+function buildColorAnswer(list: ColorList): string {
+  const rows = list.entries
+    .map(
+      (entry) =>
+        `| ${entry.line} | \`${entry.selector || "—"}\` | \`${entry.property || "—"}\` | \`${entry.color}\` |`,
+    )
+    .join("\n");
+  return [
+    `## ${list.path} renk listesi`,
+    "",
+    "| Satır | Seçici | Özellik | Renk |",
+    "|---:|---|---|---|",
+    rows,
+    "",
+    "## Benzersiz renk kodları",
+    "",
+    ...list.unique.map(([color, count]) => `- \`${color}\` — ${count} kez`),
+  ].join("\n");
+}
+
+const ENTITY_TITLES_TR: Record<string, string> = {
+  color: "Renk",
+  input: "Girdi",
+  button: "Buton",
+  link: "Bağlantı",
+  function: "Fonksiyon",
+  class: "Sınıf",
+  component: "Bileşen",
+  env: "Ortam değişkeni",
+  todo: "Yapılacak",
+  route: "Rota",
+  import: "İçe aktarım",
+  selector: "Seçici",
+  asset: "Varlık",
+  markdown: "Markdown",
+  document: "Belge",
+  file: "Dosya",
+  text: "Metin",
+};
+
+const ENTITY_COLUMNS_TR: Record<string, string> = {
+  file: "Dosya",
+  line: "Satır",
+  name: "Ad",
+  type: "Tür",
+  placeholder: "Yer tutucu",
+  text: "Metin",
+  href: "Bağlantı",
+  selector: "Seçici",
+  property: "Özellik",
+  color: "Renk",
+  bytes: "Boyut",
+  extension: "Uzantı",
+  loc: "Satır",
+  value: "Değer",
+  method: "Metot",
+  path: "Yol",
+};
+
+function buildMappedSummary(
+  changed: string[],
+  verification: string,
+  language: string,
+): string {
+  const turkish = language.toLowerCase().startsWith("tr");
+  const heading = turkish ? "## Yapılan değişiklik" : "## Change applied";
+  const details = changed.map((entry) => `- ${entry}`).join("\n");
+  return `${heading}\n\n${details}\n\n${verification}`;
+}
+
+function mappedVerificationSummary(
+  verified: boolean,
+  remaining: number,
+  totalColors: number | undefined,
+  language: string,
+): string {
+  const turkish = language.toLowerCase().startsWith("tr");
+  if (turkish) {
+    if (verified) {
+      return totalColors === undefined
+        ? "Doğrulama: kalan eski değer yok."
+        : `Doğrulama: kalan eski değer yok; kapsamda ${totalColors} renk kullanımı korunuyor.`;
+    }
+    return `Doğrulama: ${remaining} eski değer hâlâ duruyor.`;
+  }
+  if (verified) {
+    return totalColors === undefined
+      ? "Verification: 0 remaining old value(s)."
+      : `Verification: 0 remaining old value(s); ${totalColors} color occurrence(s) remain in scope.`;
+  }
+  return `Verification: ${remaining} old value(s) still remain.`;
+}
+
+function buildEntityAnswer(result: EntityResult, language: string): string {
+  const turkish = language.toLowerCase().startsWith("tr");
+  const title = turkish
+    ? `${ENTITY_TITLES_TR[result.kind] ?? result.kind} listesi`
+    : `${result.kind} list`;
+  const headers = result.headers.map((header) => ({
+    ...header,
+    label: turkish ? ENTITY_COLUMNS_TR[header.key] ?? header.label : header.label,
+  }));
+  const escape = (value: string | undefined) =>
+    (value ?? "").replace(/\|/g, "\\|").replace(/\s+/g, " ").slice(0, 180);
+  const rows = result.items.map(
+    (item) => `| ${headers.map((header) => escape(item.values[header.key])).join(" | ")} |`,
+  );
+  const table = [
+    `| ${headers.map((header) => header.label).join(" | ")} |`,
+    `|${headers.map(() => "---").join("|")}|`,
+    ...rows,
+  ].join("\n");
+  const uniqueSection =
+    result.kind === "color"
+      ? `\n\nBenzersiz renk kodları:\n${[
+          ...new Set(result.items.map((item) => item.values.color)),
+        ].join("\n")}`
+      : "";
+  return `## ${title} (${result.total})\n\n${table}${uniqueSection}`;
 }
 
 function buildInspectionSummary(steps: AiAgentStep[]): string {
@@ -3588,6 +3773,8 @@ export async function runAgentTask(
     interactive?: boolean;
     forceFast?: boolean;
     forceWrite?: boolean;
+    /** Original user goal when `instruction` is wrapped task-loop boilerplate. */
+    workBriefText?: string;
     tokenBudget?: number;
     costBudgetUsd?: number;
     budgetMode?: "off" | "warn" | "stop";
@@ -3918,6 +4105,19 @@ export async function runAgentTask(
     (options.intent?.scope === "trivial" || options.intent?.scope === "small");
   const contextMode = options.intent?.context ?? "project";
   const historyMode = options.intent?.history ?? "recent";
+  const workBriefSource = options.workBriefText?.trim() || instruction;
+  const workBrief = contextMode !== "none" ? resolveWorkBrief(workBriefSource) : null;
+  const extractionBrief = workBrief?.mode === "extract";
+  const compoundChange =
+    workBrief?.mode === "change" &&
+    /\b(ekle|ekley|eklen|oluştur|olustur|add|create|implement|refactor|yeniden düzenle)\w*/i.test(
+      instruction,
+    );
+  const workBriefText = workBrief
+    ? workBrief.mode === "extract"
+      ? `Work brief: complete extraction task (kind=${workBrief.kind}). Call extract_entities with kind="${workBrief.kind}". Omit scope to scan the whole project unless the user restricted specific files. This is a read-only list task: ignore any generic task-loop boilerplate about reading context files, editing or browser checks. Do not use shell/grep, list_items or browser_check. Do not manually enumerate. Finish with every item in a table written in the user's language; do not summarize or omit entries.`
+      : `Work brief: change task (kind=${workBrief.kind}). First call extract_entities with kind="${workBrief.kind}" to identify the current targets; then apply the requested change with replace_many or apply_mapped_changes and verify it. Do not rewrite whole files or invent existing items. After apply_mapped_changes reports Verification with 0 remaining, call finish immediately; do not chase rgb/rgba equivalents, variable names or visual variants unless the user explicitly asked for them.`
+    : "";
   const projectMap =
     contextMode === "none"
       ? ""
@@ -4082,6 +4282,8 @@ ${lessons}` : "",
     "\n- Prove runtime behavior with browser_check and expectStable (800-1200ms), then save the steps to .cie/agent/scenarios/<name>.json and run them with run_test_scenario." +
     "\n- A failed tool call is not a blocker: fix its arguments (path/content) and retry in the same run. Read .cie/agent/runs/ to see the exact failed action." +
     "\n- Do not claim a feature from a config or variable that is never read at runtime. Wire it into the update/draw path or remove it." +
+    "\n- For any complete list/audit (colors, inputs, buttons, links, functions, classes, components, env, routes, imports, selectors, assets, documents, markdown, todos, files), call extract_entities with the matching kind instead of manually reading/counting. Finish immediately with every item in the user's language; do not summarize or omit entries." +
+    "\n- For a color/background/button color change, call extract_entities(kind=color) first, then apply the change with apply_mapped_changes or replace_many; never rewrite whole files without a mapping." +
     "\n- For each new item or effect, prove the effect itself with a runtime step (state before/after, expectText/expectStable, canvas/state probe); an event counter alone is not proof." +
     "\n- If PROJECT_MAP reports code files missing from the index, call rescan_project before trusting symbol search." +
     "\n- Test-only artifacts (debug hooks, stable markers, scenario files) must never change the visible game UI. Keep them hidden or under .cie/." +
@@ -4214,6 +4416,16 @@ ${lessons}` : "",
   let readDecisionNudged = false;
   let inspectionNudged = false;
   let inspectionReadRejections = 0;
+  let colorNudges = 0;
+  let completeColorList: ColorList | null = null;
+  let completeExtraction: EntityResult | null = null;
+  let completeListRejections = 0;
+  let extractionRejections = 0;
+  let mappedChangeVerified = false;
+  let lastMappedObservation = "";
+  let lastMappedSummary = "";
+  let mapVerifyReads = 0;
+  let mapVerifyRejections = 0;
   let codeChangeCount = 0;
   let tokensAtLastCodeChange = 0;
   let postChangeNudged = false;
@@ -4569,6 +4781,9 @@ ${lessons}` : "",
       "lsp_completion",
       "list_items",
       "count_matches",
+      "list_colors",
+      "extract_entities",
+      "apply_mapped_changes",
       "json_query",
       "find_symbols",
       "sqlite_query",
@@ -4654,6 +4869,9 @@ ${lessons}` : "",
         lsp_completion: "Reading LSP completions…",
         list_items: "Extracting list items…",
         count_matches: "Counting matches…",
+        list_colors: "Listing CSS colors…",
+        extract_entities: "Extracting project entities…",
+        apply_mapped_changes: "Applying mapped changes…",
         json_query: "Inspecting JSON…",
         find_symbols: "Searching symbols…",
         sqlite_query: "Querying SQLite…",
@@ -4718,6 +4936,7 @@ ${lessons}` : "",
     if (
       askMode &&
       inspectionNudged &&
+      !options.intent?.needsExhaustiveEvidence &&
       READ_ONLY_ACTIONS.has(action) &&
       !VERIFICATION_ACTIONS.has(action)
     ) {
@@ -4729,9 +4948,16 @@ ${lessons}` : "",
       recordStep(step);
       log("warn", "Inspection read blocked", action);
       if (inspectionReadRejections >= 2) {
-        stoppedReason = "finished";
-        summary = buildInspectionSummary(steps);
-        log("warn", "Inspection finished with collected evidence", `${steps.length} steps`);
+        if (options.intent?.needsExhaustiveEvidence) {
+          stoppedReason = "error";
+          summary =
+            "Stopped: the exhaustive list was not completed. Read the target with list_colors/read_file and finish with every item in the user's language.";
+          errorMessage = summary;
+        } else {
+          stoppedReason = "finished";
+          summary = buildInspectionSummary(steps);
+          log("warn", "Inspection finished with collected evidence", `${steps.length} steps`);
+        }
       }
       if (stoppedReason === "finished") break;
       continue;
@@ -4761,6 +4987,92 @@ ${lessons}` : "",
       continue;
     }
 
+    const completeSource = completeColorList
+      ? { kind: "color", markdown: buildColorAnswer(completeColorList) }
+      : completeExtraction
+        ? {
+            kind: completeExtraction.kind,
+            markdown: buildEntityAnswer(
+              completeExtraction,
+              options.language ?? "en",
+            ),
+          }
+        : null;
+    if (extractionBrief && workBrief && !completeExtraction && action !== "extract_entities") {
+      extractionRejections += 1;
+      step.ok = false;
+      step.observation = `This is a complete ${workBrief.kind} list request. Call extract_entities with {"kind":"${workBrief.kind}"} now instead of searching or reading manually. Omit scope to scan the whole project unless the user restricted specific files.`;
+      step.durationMs = Date.now() - started;
+      recordStep(step);
+      transcript.push({
+        role: "user",
+        content: `Observation (step ${index}) [extraction-required]: ${step.observation}`,
+      });
+      log("warn", "Extraction tool required", workBrief.kind);
+      if (extractionRejections >= 2) {
+        const extracted = await extractEntities(analysis, { kind: workBrief.kind });
+        stoppedReason = "finished";
+        summary = buildEntityAnswer(extracted, options.language ?? "en");
+        log("warn", "Finished from the fallback extraction", `${workBrief.kind} · ${extracted.total}`);
+      }
+      if (stoppedReason === "finished") break;
+      continue;
+    }
+    if (
+      askMode &&
+      (extractionBrief ||
+        (options.intent?.needsExhaustiveEvidence && workBrief?.mode !== "change")) &&
+      completeSource &&
+      action !== "finish"
+    ) {
+      completeListRejections += 1;
+      step.ok = false;
+      step.observation = `The complete ${completeSource.kind} list is already available from the extraction tool. Call finish now with that list; do not read, count, or search again. Include every item in the user's language.`;
+      step.durationMs = Date.now() - started;
+      recordStep(step);
+      transcript.push({
+        role: "user",
+        content: `Observation (step ${index}) [complete-list]: ${step.observation}`,
+      });
+      log("warn", "Complete list already available", "finish is required");
+      if (completeListRejections >= 2) {
+        stoppedReason = "finished";
+        summary = completeSource.markdown;
+        log("warn", "Finished from the complete extraction", `${completeSource.kind}`);
+      }
+      if (stoppedReason === "finished") break;
+      continue;
+    }
+
+    if (
+      !readOnlyMode &&
+      mappedChangeVerified &&
+      workBrief?.mode === "change" &&
+      !compoundChange &&
+      READ_ONLY_ACTIONS.has(action)
+    ) {
+      mapVerifyReads += 1;
+      if (mapVerifyReads >= 3) {
+        mapVerifyRejections += 1;
+        step.ok = false;
+        step.observation =
+          "The mapped change is already verified: 0 old values remain. Call finish now with the changed files and the verification result. Only call apply_mapped_changes again if another mapping is still required.";
+        step.durationMs = Date.now() - started;
+        recordStep(step);
+        transcript.push({
+          role: "user",
+          content: `Observation (step ${index}) [mapped-verified]: ${step.observation}`,
+        });
+        log("warn", "Mapped change already verified", "finish is required");
+        if (mapVerifyRejections >= 2) {
+          stoppedReason = "finished";
+          summary = lastMappedSummary || lastMappedObservation || "Mapped changes applied and verified.";
+        }
+        if (stoppedReason === "finished") break;
+        continue;
+      }
+    }
+
     if (action === "finish") {
       let rawSummary = String(args.summary ?? parsed.summary ?? parsed.final ?? "").trim();
       if (isToolCallLeak(rawSummary)) {
@@ -4778,6 +5090,56 @@ ${lessons}` : "",
         });
         transcript.push({ role: "user", content: `Observation (step ${index}) [invalid]: ${observation}` });
         continue;
+      }
+
+      const colorRequest =
+        Boolean(options.intent?.needsExhaustiveEvidence) &&
+        /(?:renk|color)/i.test(
+          `${instruction} ${options.intent?.understanding ?? ""}`,
+        );
+      if (colorRequest) {
+        const coverage = await auditColorCoverage(analysis, steps, rawSummary);
+        if (coverage && coverage.missing.length > 0) {
+          if (colorNudges < 2) {
+            colorNudges += 1;
+            const observation = `The color list is incomplete: ${coverage.missing.length}/${
+              coverage.total
+            } unique codes from ${coverage.path} are missing (${coverage.missing
+              .slice(0, 20)
+              .join(
+                ", ",
+              )}). Call list_colors on ${coverage.path} and include every occurrence and unique code in the final answer. Write the entire answer in the user's language; do not summarize or omit entries.`;
+            log("warn", "Finish rejected: incomplete color list", `${coverage.missing.length} missing`);
+            recordStep({
+              index,
+              action: "invalid",
+              args: {},
+              observation,
+              ok: false,
+              durationMs: Date.now() - started,
+              tokenUsage: stepUsage,
+            });
+            transcript.push({ role: "user", content: `Observation (step ${index}) [colors]: ${observation}` });
+            continue;
+          }
+          if (completeColorList) {
+            stoppedReason = "finished";
+            summary = buildColorAnswer(completeColorList);
+            log("warn", "Finished from the complete color list", `${completeColorList.unique.length} unique colors`);
+            break;
+          }
+          if (completeExtraction?.kind === "color") {
+            stoppedReason = "finished";
+            summary = buildEntityAnswer(completeExtraction, options.language ?? "en");
+            log("warn", "Finished from the extracted color list", `${completeExtraction.unique} unique colors`);
+            break;
+          }
+          stoppedReason = "error";
+          summary = `Stopped: the complete color list was not produced. ${coverage.missing.length}/${coverage.total} codes from ${coverage.path} are still missing. Run list_colors and include every code in the answer.`;
+          errorMessage = summary;
+          log("error", "Stopped with an incomplete color list", `${coverage.missing.length} missing`);
+          break;
+        }
       }
 
       if (
@@ -4839,6 +5201,7 @@ ${lessons}` : "",
         !readOnlyMode &&
         modelTurns < maxSteps &&
         wiringNudges < 2 &&
+        !(mappedChangeVerified && workBrief?.mode === "change" && workBrief.kind === "color" && !compoundChange) &&
         reportsIncompleteWiring(rawSummary)
       ) {
         wiringNudges += 1;
@@ -5079,6 +5442,7 @@ ${lessons}` : "",
 
       if (
         !readOnlyMode &&
+        !mappedChangeVerified &&
         verifyNudges < 1 &&
         projectHasHtml &&
         uiFilesChanged &&
@@ -5109,6 +5473,7 @@ ${lessons}` : "",
 
       if (
         !readOnlyMode &&
+        !mappedChangeVerified &&
         verifyNudges < 2 &&
         uiFilesChanged &&
         claimsVerified &&
@@ -5162,6 +5527,30 @@ ${lessons}` : "",
         }
       }
 
+      if (askMode && completeExtraction && completeExtraction.total > 0) {
+        const answerText = rawSummary.toLowerCase();
+        const missing = completeExtraction.items.filter((item) => {
+          const primary =
+            item.values.name ||
+            item.values.color ||
+            item.values.text ||
+            item.values.href ||
+            item.values.file ||
+            item.key;
+          return primary ? !answerText.includes(primary.toLowerCase()) : true;
+        });
+        if (missing.length > 0) {
+          rawSummary = `${rawSummary}\n\n${buildEntityAnswer(
+            completeExtraction,
+            options.language ?? "en",
+          )}`;
+          log(
+            "info",
+            "Appended complete extraction table",
+            `${missing.length} item(s) were missing from the summary`,
+          );
+        }
+      }
       summary = rawSummary || "The agent finished without a summary.";
       if (!readOnlyMode && missingSelectors.length > 0 && !explainedMissingSelectors) {
         summary += `\n\n**UI wiring warning:** ${missingSelectors
@@ -5653,6 +6042,226 @@ ${lessons}` : "",
         for (const entry of top.slice(0, 10)) evidence.push({ path: entry.path, label: "Counted matches" });
         log("info", `${scanned} files scanned · ${total} matches`, query);
         ok = true;
+      } else if (action === "list_colors") {
+        const filePath = normalizeAgentPath(
+          analysis.rootPath,
+          pathFromArgs(args) ?? "styles.css",
+        );
+        if (!filePath) throw new Error("A file path is required.");
+        if (isSecretAgentPath(filePath)) throw new Error("Reading environment, key or Git internals files is denied.");
+        const file = await readSourceFile(analysis.rootPath, filePath);
+        const lines = file.content.split("\n");
+        const colorPattern = /#[0-9a-fA-F]{3,8}\b|rgba?\([^)]*\)|hsla?\([^)]*\)/g;
+        const entries: { line: number; selector: string; property: string; color: string }[] = [];
+        let selector = "";
+        for (let index = 0; index < lines.length; index += 1) {
+          const line = lines[index];
+          if (line.includes("{")) selector = line.split("{")[0].trim();
+          const property = line.split(":")[0].trim();
+          for (const match of line.matchAll(colorPattern)) {
+            entries.push({ line: index + 1, selector, property, color: match[0] });
+          }
+        }
+        if (entries.length === 0) {
+          observation = `No color values were found in ${filePath}.`;
+        } else {
+          const counts = new Map<string, number>();
+          for (const entry of entries) counts.set(entry.color, (counts.get(entry.color) ?? 0) + 1);
+          completeColorList = {
+            path: filePath,
+            entries,
+            unique: [...counts.entries()],
+          };
+          observation = [
+            `Color audit: ${filePath} — ${entries.length} occurrences, ${counts.size} unique colors`,
+            ...entries.map(
+              (entry) =>
+                `${filePath}:${entry.line} — ${entry.selector || "(no selector)"} · ${entry.property}: ${entry.color}`,
+            ),
+            "",
+            "Unique codes:",
+            ...[...counts.entries()].map(([color, count]) => `${color} (${count})`),
+          ].join("\n");
+        }
+        evidence.push({ path: filePath, label: "Color audit" });
+        log("info", "CSS colors listed", `${entries.length} occurrences · ${new Set(entries.map((entry) => entry.color)).size} unique`);
+        ok = true;
+      } else if (action === "extract_entities") {
+        const kind = String(args.kind ?? "").trim() as EntityKind;
+        if (!kind) {
+          throw new Error(
+            "An extraction kind is required. Supported kinds: color, input, button, link, function, class, component, env, todo, route, import, selector, asset, document, markdown, file, text.",
+          );
+        }
+        if (workBrief?.mode === "extract" && kind !== workBrief.kind) {
+          throw new Error(
+            `This request asks for a complete ${workBrief.kind} list. Call extract_entities with kind="${workBrief.kind}" instead of "${kind}".`,
+          );
+        }
+        const result = await extractEntities(analysis, {
+          kind,
+          scope: (args.scope ?? args.path) as string | string[] | undefined,
+          query: typeof args.query === "string" ? args.query : undefined,
+          limit: Number(args.limit) || undefined,
+        });
+        completeExtraction = result;
+        observation = result.markdown;
+        if (result.items[0]) {
+          evidence.push({ path: result.items[0].file, label: "Extraction" });
+        }
+        if (extractionBrief && workBrief?.mode === "extract") {
+          observation += `\n\nComplete list ready (${result.total} item(s)). Call finish now with every item in the user's language; do not search or read again.`;
+        }
+        log(
+          "info",
+          "Entities extracted",
+          `${result.kind} · ${result.total} item(s) · ${result.unique} unique`,
+        );
+        ok = true;
+      } else if (action === "apply_mapped_changes") {
+        const kind = String(args.kind ?? "color").trim().toLowerCase();
+        if (kind !== "color" && kind !== "text") {
+          throw new Error("apply_mapped_changes supports kind=color or kind=text.");
+        }
+        const rawMapping =
+          args.mapping && typeof args.mapping === "object" && !Array.isArray(args.mapping)
+            ? (args.mapping as Record<string, unknown>)
+            : {};
+        const pairs = Object.entries(rawMapping)
+          .map(([from, to]) => [from.trim(), typeof to === "string" ? to : ""] as const)
+          .filter(([from, to]) => from.length > 0 && to.length > 0);
+        if (pairs.length === 0) {
+          throw new Error(
+            "A mapping of old value to new value is required, e.g. {'#22d3ee':'#ff5c8a'}. First call extract_entities(kind=color) to list the current colors.",
+          );
+        }
+        const scope = (args.scope ?? args.path) as string | string[] | undefined;
+        const targetFiles = new Set<string>();
+        if (kind === "color") {
+          const extracted = await extractEntities(analysis, {
+            kind: "color",
+            scope,
+            limit: 2_000,
+          });
+          for (const item of extracted.items) targetFiles.add(item.file);
+        } else {
+          for (const [from] of pairs) {
+            // eslint-disable-next-line no-await-in-loop
+            const extracted = await extractEntities(analysis, {
+              kind: "text",
+              scope,
+              query: from,
+              limit: 2_000,
+            });
+            for (const item of extracted.items) targetFiles.add(item.file);
+          }
+        }
+        const files = [...targetFiles];
+        if (files.length === 0) {
+          observation = `No ${kind} targets were found in the selected scope; no changes were made.`;
+          ok = true;
+        } else {
+          let changedFilesCount = 0;
+          let replacements = 0;
+          const changed: string[] = [];
+          for (const filePath of files) {
+            // eslint-disable-next-line no-await-in-loop
+            const file = await readSourceFile(analysis.rootPath, filePath).catch(() => null);
+            if (!file) continue;
+            const mapped = applyMappingsToContent(file.content, kind, pairs);
+            if (mapped.count === 0 || mapped.content === file.content) continue;
+            // eslint-disable-next-line no-await-in-loop
+            const allowed = await requirePermission(
+              "write",
+              "apply_mapped_changes",
+              filePath,
+              `${mapped.count} mapped replacement(s) in ${filePath}`,
+              { preview: pairs.map(([from, to]) => `${from} → ${to}`).join("\n").slice(0, 1_000) },
+            );
+            if (!allowed) throw new Error("The user denied permission to apply mapped changes.");
+            // eslint-disable-next-line no-await-in-loop
+            const written = await writeSourceFile(projectId, analysis.rootPath, filePath, mapped.content);
+            if (!changedFiles.includes(written.filePath)) changedFiles.push(written.filePath);
+            evidence.push({ path: written.filePath, label: "Mapped change" });
+            const summary = mapped.replacements.map((entry) => `${entry.from}→${entry.to}×${entry.count}`).join(", ");
+            changed.push(`${written.filePath} (${mapped.count}${summary ? `: ${summary}` : ""})`);
+            changedFilesCount += 1;
+            replacements += mapped.count;
+          }
+          invalidateReadCaches();
+          let verificationText = "";
+          let remainingCount = 0;
+          let totalColorsAfter: number | undefined;
+          observation =
+            changedFilesCount > 0
+              ? `Applied ${replacements} mapped replacement(s) in ${changedFilesCount} file(s):\n${changed.join("\n")}`
+              : "The mapping matched no occurrences; no files were changed.";
+          if (changedFilesCount > 0 && kind === "color") {
+            const after = await extractEntities(analysis, {
+              kind: "color",
+              scope,
+              limit: 2_000,
+            });
+            const remaining = after.items.filter((item) =>
+              pairs.some(
+                ([from]) =>
+                  item.values.color?.toLowerCase() === from.toLowerCase(),
+              ),
+            ).length;
+            remainingCount = remaining;
+            totalColorsAfter = after.total;
+            mappedChangeVerified = remaining === 0;
+            verificationText = mappedChangeVerified
+              ? `Verification: 0 remaining ${pairs
+                  .map(([from]) => from)
+                  .join(", ")} occurrence(s); ${after.total} color occurrence(s) remain in scope.`
+              : `Verification: ${remaining} old color occurrence(s) still remain; fix them before finishing.`;
+            observation += `\n\n${verificationText}${
+              mappedChangeVerified ? " The mapped change is verified; call finish after any remaining requested mapping." : ""
+            }`;
+          } else if (changedFilesCount > 0) {
+            let remainingOld = 0;
+            for (const [from] of pairs) {
+              // eslint-disable-next-line no-await-in-loop
+              const after = await extractEntities(analysis, {
+                kind: "text",
+                scope,
+                query: from,
+                limit: 2_000,
+              });
+              remainingOld += after.items.length;
+            }
+            mappedChangeVerified = remainingOld === 0;
+            remainingCount = remainingOld;
+            verificationText = mappedChangeVerified
+              ? `Verification: 0 remaining "${pairs
+                  .map(([from]) => from)
+                  .join('", "')}" occurrence(s).`
+              : `Verification: ${remainingOld} old text occurrence(s) still remain; fix them before finishing.`;
+            observation += `\n\n${verificationText}`;
+          }
+          if (changedFilesCount > 0) {
+            lastMappedObservation = observation;
+            lastMappedSummary = buildMappedSummary(
+              changed,
+              mappedVerificationSummary(
+                mappedChangeVerified,
+                remainingCount,
+                totalColorsAfter,
+                options.language ?? "en",
+              ),
+              options.language ?? "en",
+            );
+            mapVerifyReads = 0;
+            mapVerifyRejections = 0;
+          }
+          log(
+            changedFilesCount > 0 ? "success" : "warn",
+            "Mapped changes applied",
+            `${replacements} replacement(s) · ${changedFilesCount} file(s)`,
+          );
+          ok = true;
+        }
       } else if (action === "json_query") {
         const filePath = normalizeAgentPath(analysis.rootPath, pathFromArgs(args));
         if (!filePath) throw new Error("A file path is required.");
@@ -6901,6 +7510,49 @@ ${lessons}` : "",
         observation = effectiveChange
           ? `Applied ${edits.length} localized edits to ${written.filePath} in one write (${written.bytes} bytes).`
           : `The edits produced identical content in ${written.filePath}; no effective change was made.`;
+        if (effectiveChange && workBrief?.mode === "change" && workBrief.kind === "color") {
+          const normalizeColor = (value: string) => value.toLowerCase().replace(/\s+/g, "");
+          const oldColors = [
+            ...new Set(
+              edits.flatMap((edit) => {
+                const found =
+                  edit.find.match(/#[0-9a-fA-F]{3,8}\b|rgba?\([^)]*\)|hsla?\([^)]*\)/g) ?? [];
+                const replaced = new Set(
+                  (edit.replace.match(/#[0-9a-fA-F]{3,8}\b|rgba?\([^)]*\)|hsla?\([^)]*\)/g) ?? []).map(
+                    normalizeColor,
+                  ),
+                );
+                return found.map(normalizeColor).filter((color) => !replaced.has(color));
+              }),
+            ),
+          ];
+          if (oldColors.length > 0) {
+            const after = await extractEntities(analysis, { kind: "color", limit: 2_000 });
+            const remaining = after.items.filter((item) =>
+              oldColors.includes(normalizeColor(item.values.color ?? "")),
+            ).length;
+            mappedChangeVerified = remaining === 0;
+            const verificationText = mappedChangeVerified
+              ? `Verification: 0 remaining target color occurrence(s).`
+              : `Verification: ${remaining} old color occurrence(s) still remain.`;
+            observation += `\n\n${verificationText}${
+              mappedChangeVerified ? " The mapped change is verified; call finish after any remaining requested edit." : ""
+            }`;
+            lastMappedObservation = observation;
+            lastMappedSummary = buildMappedSummary(
+              [`${written.filePath} (${edits.length} localized edits)`],
+              mappedVerificationSummary(
+                mappedChangeVerified,
+                remaining,
+                undefined,
+                options.language ?? "en",
+              ),
+              options.language ?? "en",
+            );
+            mapVerifyReads = 0;
+            mapVerifyRejections = 0;
+          }
+        }
         log("success", "File edited with multiple replacements", written.filePath);
         ok = true;
       } else if (action === "format_file") {
@@ -7078,6 +7730,10 @@ ${lessons}` : "",
     const observationLimit =
       step.action === "read_file" || step.action === "find_in_file"
         ? 3_200
+        : step.action === "list_colors"
+          ? 12_000
+        : step.action === "extract_entities"
+          ? 14_000
         : step.action === "append_text"
           ? 2_000
           : step.action === "diagnostics"
@@ -7130,8 +7786,9 @@ ${lessons}` : "",
       inspectionNudged = true;
       transcript.push({
         role: "system",
-        content:
-          "Inspection decision point: you have enough evidence. Finish now with a compact diagnosis: root cause, file:line evidence, runtime proof, and the minimal fix that would be needed. Do not read more files. browser_check, run_test_scenario and game_check remain available if one final runtime proof is needed.",
+        content: options.intent?.needsExhaustiveEvidence
+          ? "Exhaustive list task: you have enough evidence. Collect every matching item (for CSS colors call list_colors with the stylesheet path), then finish with the complete list in the user's language. Do not summarize and do not omit entries. browser_check/run_test_scenario remain available if needed."
+          : "Inspection decision point: you have enough evidence. Finish now with a compact diagnosis: root cause, file:line evidence, runtime proof, and the minimal fix that would be needed. Do not read more files. browser_check, run_test_scenario and game_check remain available if one final runtime proof is needed.",
       });
       log("warn", "Inspection decision point", `${readOnlyStepsSinceChange} read-only calls`);
     }

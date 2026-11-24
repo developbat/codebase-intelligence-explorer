@@ -753,6 +753,7 @@ export function CodeStudio({
   const [chatMessages, setChatMessages] = useState<StudioChatMessage[]>([]);
   const [chatTabs, setChatTabs] = useState<StudioChatTab[]>([]);
   const [activeChatId, setActiveChatId] = useState("");
+  const [chatSwitchNotice, setChatSwitchNotice] = useState<string | null>(null);
   const [chatLiveSteps, setChatLiveSteps] = useState<AiAgentStep[]>([]);
   const [chatLiveLogs, setChatLiveLogs] = useState<AiAgentLogEntry[]>([]);
   const [chatLivePlan, setChatLivePlan] = useState<AiAgentPlan | null>(null);
@@ -885,6 +886,7 @@ export function CodeStudio({
       setChatTabs(tabs);
       setActiveChatId(active);
       setChatMessages(readMessages(active));
+      setChatSwitchNotice(null);
     } catch {
       const id = `chat-${Date.now()}`;
       const at = new Date().toISOString();
@@ -1002,6 +1004,37 @@ export function CodeStudio({
         : studioMode === "research"
           ? t("Research the web, a document, or this project…")
           : t("Ask, edit, run, or build something in this project…");
+  const modePillLabel =
+    studioMode === "build"
+      ? t("Write mode")
+      : studioMode === "ask"
+        ? t("Ask · read-only")
+        : studioMode === "plan"
+          ? t("Plan · read-only")
+          : t("Research · read-only");
+  const modePillTitle =
+    studioMode === "build"
+      ? t("Switch to Ask (read-only)")
+      : t("Switch to Build (writes allowed)");
+  const readOnlyBlocked = Boolean(
+    chatError &&
+      /READ_ONLY_WRITE_BLOCKED|current workspace mode is read-only|read-only mode only inspects/i.test(
+        chatError,
+      ),
+  );
+  const lastUserMessage =
+    [...chatMessages].reverse().find((message) => message.role === "user")?.content ?? "";
+  const blockedRetryQuestion = chatRetryQuestion || lastUserMessage || chatInput;
+
+  useEffect(() => {
+    if (studioMode !== "build") return;
+    if (!chatError) return;
+    if (!/READ_ONLY_WRITE_BLOCKED|current workspace mode is read-only|read-only mode only inspects/i.test(chatError)) {
+      return;
+    }
+    setChatError(null);
+    setChatRetryQuestion(null);
+  }, [studioMode, chatError]);
 
   useEffect(() => {
     let cancelled = false;
@@ -2388,6 +2421,7 @@ export function CodeStudio({
     setChatInput("");
     setChatError(null);
     setChatRetryQuestion(null);
+    setChatSwitchNotice(null);
     chatHydratedRef.current = true;
   }
 
@@ -2410,6 +2444,7 @@ export function CodeStudio({
     setChatInput("");
     setChatError(null);
     setChatRetryQuestion(null);
+    setChatSwitchNotice(null);
     setTaskQueue(null);
     chatHydratedRef.current = true;
   }
@@ -2925,7 +2960,15 @@ export function CodeStudio({
             <strong>{analysis.projectName}</strong>
           </div>
           <div className="studio-side-head-actions">
-            <span className="studio-write-pill">{t("Write mode")}</span>
+            <button
+              type="button"
+              className={`studio-write-pill ${studioMode === "build" ? "is-build" : "is-read"}`}
+              onClick={() => setStudioMode(studioMode === "build" ? "ask" : "build")}
+              title={modePillTitle}
+              aria-label={modePillTitle}
+            >
+              {modePillLabel}
+            </button>
             <button
               className="icon-button subtle"
               onClick={() => setLeftWidth(leftWidth <= 155 ? 252 : 150)}
@@ -3039,13 +3082,43 @@ export function CodeStudio({
                 <Plus size={10} />
               </button>
             </div>
+            {chatSwitchNotice ? (
+              <div className="studio-side-chat-notice" role="status">
+                <Info size={10} />
+                <span>{chatSwitchNotice}</span>
+                <button
+                  onClick={() => setChatSwitchNotice(null)}
+                  aria-label={t("Dismiss")}
+                >
+                  <X size={9} />
+                </button>
+              </div>
+            ) : null}
             <div className="studio-side-chat-list">
               {chatTabs.map((tab) => (
                 <div
                   key={tab.id}
                   className={`studio-side-chat-item ${tab.id === activeChatId ? "is-active" : ""}`}
                 >
-                  <button onClick={() => switchChatTab(tab.id)} disabled={chatBusy} title={tab.title}>
+                  <button
+                    onClick={() => {
+                      if (chatBusy) {
+                        setChatSwitchNotice(
+                          t(
+                            "The active run belongs to this chat. Stop it before opening another conversation.",
+                          ),
+                        );
+                        return;
+                      }
+                      setChatSwitchNotice(null);
+                      switchChatTab(tab.id);
+                    }}
+                    title={
+                      chatBusy
+                        ? t("Stop the running agent to switch conversations.")
+                        : tab.title
+                    }
+                  >
                     <MessageSquare size={9} />
                     <span>
                       {tab.title}
@@ -3859,8 +3932,42 @@ export function CodeStudio({
           {chatError ? (
             <div className="studio-ai-inline-error">
               <AlertTriangle size={12} />
-              <span>{chatError}</span>
-              {chatRetryQuestion ? (
+              <span>
+                {readOnlyBlocked
+                  ? t(
+                      "This request needs project edits, but the current mode is read-only. Switch to Build and run it again. Agent notes under .cie/agent are not project changes.",
+                    )
+                  : chatError}
+              </span>
+              {readOnlyBlocked ? (
+                <>
+                  <button
+                    className="studio-chat-retry"
+                    onClick={() => {
+                      const question = blockedRetryQuestion.trim();
+                      if (!question) return;
+                      setStudioMode("build");
+                      setChatError(null);
+                      const shown =
+                        [...chatMessages].reverse().find((message) => message.role === "user")
+                          ?.content === question;
+                      void askProject(question, !shown, {
+                        workspaceMode: "build",
+                        skipClarify: true,
+                      });
+                    }}
+                    disabled={chatBusy || !blockedRetryQuestion.trim()}
+                  >
+                    <Play size={10} /> {t("Switch to Build and run")}
+                  </button>
+                  <button
+                    className="studio-chat-retry"
+                    onClick={() => openSettings("general")}
+                  >
+                    <Settings2 size={10} /> {t("Write settings")}
+                  </button>
+                </>
+              ) : chatRetryQuestion ? (
                 <button
                   className="studio-chat-retry"
                   onClick={() => void askProject(chatRetryQuestion, false, { skipClarify: true })}
@@ -4202,6 +4309,36 @@ export function CodeStudio({
                   <option value="research">{t("Research")}</option>
                 </select>
               </label>
+
+              <button
+                type="button"
+                className={`studio-permission-pill ${
+                  readOnlyMode ? "is-blocked" : agentAllowWrite ? "is-open" : "is-ask"
+                }`}
+                onClick={() => {
+                  if (readOnlyMode) {
+                    setStudioMode("build");
+                  } else {
+                    openSettings("general");
+                  }
+                }}
+                title={
+                  readOnlyMode
+                    ? t("Writes are blocked in Ask, Plan and Research modes. Switch to Build to edit files.")
+                    : agentAllowWrite
+                      ? t("Writes are pre-approved. Open Settings to require a prompt for each write.")
+                      : t("Writes ask for approval. Open Settings to pre-approve file writes.")
+                }
+              >
+                <Settings2 size={12} />
+                <span>
+                  {readOnlyMode
+                    ? t("Writes blocked: read-only")
+                    : agentAllowWrite
+                      ? t("Writes: auto-approved")
+                      : t("Writes: ask each time")}
+                </span>
+              </button>
 
               {studioMode === "plan" ? (
                 <button

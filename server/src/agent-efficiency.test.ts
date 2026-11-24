@@ -232,6 +232,44 @@ test("ask mode is a cheap read-only task profile", () => {
   assert.equal(task.effort, "simple");
   assert.equal(task.role, "main");
   assert.equal(task.verification, undefined);
+  assert.match(task.acceptance ?? "", /question is answered/i);
+});
+
+test("read-only write detection ignores reporting and listing work", () => {
+  const base = {
+    id: "task-1",
+    detail: "",
+    status: "pending" as const,
+    effort: "simple" as const,
+    role: "fast" as const,
+    dependsOn: [],
+    attempts: 0,
+    changedFiles: [],
+    commands: [],
+    createdAt: "",
+    updatedAt: "",
+  };
+  assert.equal(taskLooksLikeWrite({ ...base, title: "List every button and report the result" }), false);
+  assert.equal(taskLooksLikeWrite({ ...base, title: "Inspect the UI and list the buttons" }), false);
+  assert.equal(taskLooksLikeWrite({ ...base, title: "Add a fire button to the game UI" }), true);
+  assert.equal(taskLooksLikeWrite({ ...base, title: "Butonlari listele ve eksik olani ekle" }), true);
+  assert.equal(
+    taskLooksLikeWrite({
+      ...base,
+      title: "bana uygulamadaki buton listesini getir",
+      detail:
+        "Kullanıcı tüm butonları istiyor. Yaklaşım: etiketleri arayıp eksiksiz bir liste oluştur.",
+    }),
+    false,
+  );
+  assert.equal(
+    taskLooksLikeWrite({
+      ...base,
+      title: "List the buttons",
+      detail: "Create a complete inventory and report it.",
+    }),
+    false,
+  );
 });
 
 test("task budgets scale with effort and stop runaway usage", () => {
