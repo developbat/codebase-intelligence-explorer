@@ -134,6 +134,7 @@ import { auditContentInventory, renderContentInventory } from "../contentInvento
 import { createArchive, createDocument, type DocumentFormat } from "../documentWriter";
 import {
   actionPlanInstruction,
+  isSiteInspection,
   resolveActionPlan,
   type ActionPlan,
 } from "./actions";
@@ -4097,12 +4098,14 @@ export async function runAgentTask(
     };
   }
   activePlan = plan;
+  const siteInspection = !plan.needsWrite && isSiteInspection(actionPlanSource);
   const testTask =
     !plan.needsWrite &&
-    (actionPlan.action === "run" ||
+    (siteInspection ||
+      actionPlan.action === "run" ||
       actionPlan.action === "verify" ||
       options.intent?.kind === "run");
-  if (testTask) maxSteps = Math.min(maxSteps, 12);
+  if (testTask) maxSteps = Math.min(maxSteps, siteInspection ? 10 : 12);
   const writeIntent =
     options.forceWrite === true || options.intent?.kind === "edit";
   const narrowEdit =
@@ -4146,6 +4149,12 @@ export async function runAgentTask(
   const toolGroups = resolveToolGroups(options.intent, instruction, workspaceMode);
   if (options.forceWrite === true && !toolGroups.includes("edit")) {
     toolGroups.push("edit");
+  }
+  if (actionPlan.needsBrowser && !toolGroups.includes("browser")) {
+    toolGroups.push("browser");
+  }
+  if (actionPlan.needsCommand && !toolGroups.includes("command")) {
+    toolGroups.push("command");
   }
   if (testTask) {
     // Verification plans must always be able to open the real page and run
@@ -4253,8 +4262,10 @@ ${lessons}` : "",
       ? "agent.plan"
       : workspaceMode === "research"
         ? "agent.research"
-        : testTask
-          ? "agent.test"
+        : siteInspection
+          ? "agent.site"
+          : testTask
+            ? "agent.test"
           : narrowEdit
             ? "agent.focused"
             : focusedRead
@@ -4264,7 +4275,7 @@ ${lessons}` : "",
   const languageInstruction = aiLanguageInstruction(options.language ?? "en");
   const fastSuffix =
     fastTask &&
-    !["agent.focused", "agent.inspect", "agent.test"].includes(prompt.id)
+    !["agent.focused", "agent.inspect", "agent.test", "agent.site"].includes(prompt.id)
       ? "\n\nFast task profile: this is a small, focused change. Read at most 3 files (for a CSS-only change, read only the stylesheet), make the edit, run at most one verification, and finish. Complete every edit-map item before finishing. Do not read unrelated modules, repeat reads, or keep exploring after the edit."
       : "";
   const narrowEditSuffix =
@@ -4342,8 +4353,10 @@ ${lessons}` : "",
   if (testTask) {
     log(
       "info",
-      "Verification profile",
-      `scenario-first · max 12 model turns · project map and full skills skipped`,
+      siteInspection ? "Site inspection profile" : "Verification profile",
+      siteInspection
+        ? "browser-first · max 10 model turns · project map and full skills skipped"
+        : "scenario-first · max 12 model turns · project map and full skills skipped",
     );
   }
   if (lessons) {

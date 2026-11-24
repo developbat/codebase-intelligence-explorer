@@ -19,9 +19,13 @@ const EXPLAIN_WORDS =
 const RUN_WORDS =
   /\b(?:çalıştır|calistir|run|start|başlat|baslat|execute)\b/i;
 const UI_WORDS =
-  /\b(?:ui|arayüz|arayuz|button|buton|screen|ekran|page|sayfa|css|html|canvas|visual|görsel|gorsel)\b/i;
+  /\b(?:ui|arayüz|arayuz|button|buton|screen|ekran|page|sayfa|css|html|canvas|visual|görsel|gorsel|login|giriş|giris|form|akış|akis|flow)\b/i;
 const TOOL_WORDS =
   /\b(?:project tool|proje aracı|proje araci|skill script|run tool|araç çalıştır|arac calistir)/i;
+const SITE_WORDS =
+  /\b(?:site|website|web site|web sitesi|sayfa|page|preview|önizleme|onizleme)\b|site(?:yi|si|de|ye|nin)/i;
+const INSPECT_WORDS =
+  /\b(?:incele|inspect|denetle|audit|göz at|goz at|kontrol et|check)\b/i;
 
 function actionForIntent(intent: IntentAnalysis | undefined): AiActionKind | null {
   if (!intent) return null;
@@ -30,6 +34,10 @@ function actionForIntent(intent: IntentAnalysis | undefined): AiActionKind | nul
   if (intent.kind === "edit") return "edit";
   if (intent.kind === "question" || intent.kind === "analyze") return null;
   return null;
+}
+
+export function isSiteInspection(text: string): boolean {
+  return SITE_WORDS.test(text) && INSPECT_WORDS.test(text);
 }
 
 export function resolveActionPlan(
@@ -76,6 +84,15 @@ export function resolveActionPlan(
       needsWrite: true,
       needsCommand: VERIFY_WORDS.test(text),
       needsBrowser,
+    };
+  }
+  if (isSiteInspection(text)) {
+    return {
+      action: "verify",
+      reason: reason("The request asks to inspect the real site; verify the page in the browser and report runtime evidence."),
+      needsWrite: false,
+      needsCommand: false,
+      needsBrowser: true,
     };
   }
   if (VERIFY_WORDS.test(text) && !EXPLAIN_WORDS.test(text)) {

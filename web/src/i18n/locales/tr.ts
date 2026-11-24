@@ -63,6 +63,8 @@ export const tr: Dictionary = {
   "Recent tool tries": "Son araç denemeleri",
   "Built-in": "Yerleşik",
   "Project": "Proje",
+  "Inspect site": "Siteyi incele",
+  "Inspect the real site: read the entry HTML for the real selectors, open the page with browser_check, check console/runtime errors and the key UI flow, run audit_content, then report what works and what needs fixing.": "Gerçek siteyi incele: gerçek seçiciler için giriş HTML'ini oku, browser_check ile sayfayı aç, konsol/runtime hatalarını ve temel UI akışını kontrol et, audit_content çalıştır, sonra çalışanları ve düzeltilmesi gerekenleri raporla.",
   "Read-only": "Salt okunur",
   "Diagnose": "Teşhis et",
   "Diagnose why the requested behavior is not working. Inspect the real entry points and asset wiring, run browser_check or a saved test scenario, identify the root cause with file:line evidence, then apply the minimal fix and verify it.": "İstenen davranışın neden çalışmadığını teşhis et. Gerçek giriş noktalarını ve varlık bağlantılarını incele, browser_check veya kayıtlı bir test senaryosu çalıştır, kök nedeni dosya:satır kanıtıyla bul, sonra en küçük düzeltmeyi uygula ve doğrula.",

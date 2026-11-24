@@ -3802,6 +3802,19 @@ export function CodeStudio({
                     >
                       {t("Main entry points")}
                     </button>
+                    {htmlFiles.length > 0 ? (
+                      <button
+                        onClick={() =>
+                          void askProject(
+                            t(
+                              "Inspect the real site: read the entry HTML for the real selectors, open the page with browser_check, check console/runtime errors and the key UI flow, run audit_content, then report what works and what needs fixing.",
+                            ),
+                          )
+                        }
+                      >
+                        <Eye size={11} /> {t("Inspect site")}
+                      </button>
+                    ) : null}
                     <button
                       onClick={() =>
                         void askProject(

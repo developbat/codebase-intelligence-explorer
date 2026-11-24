@@ -428,6 +428,17 @@ scrolls instead of ending in a clipped note. New chat tabs show only the agent
 icon and one-line guidance; the full intro and quick actions stay on the first
 chat tab of a project.
 
+### 4.13.1 Prompt-driven tool selection
+
+The deterministic action planner maps natural language to capability families
+before the model runs. Site inspection phrases such as `siteyi incele` set
+`action=verify`, add the `browser` group, select `agent.site`, and cap the run at
+10 turns. The prompt requires real selectors (read the entry HTML or a saved
+scenario first), non-empty `eval.value`, runtime/console evidence and
+`audit_content`. `npm run eval:tools` validates eight prompt → action/group/tool
+suggestion cases, including site inspection, list, test, run, file read, Excel
+output and error location.
+
 ### 4.14 Tool registry and capability metadata
 
 `server/src/ai/toolRegistry.ts` is the single source of truth for the built-in

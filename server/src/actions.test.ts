@@ -33,6 +33,9 @@ test("resolves action classes for list, edit, locate, explain, verify and run", 
     "locate",
   );
   assert.equal(resolveActionPlan("bu projeyi açıkla", intent("analyze")).action, "explain");
+  const site = resolveActionPlan("siteyi incele", intent("analyze"));
+  assert.equal(site.action, "verify");
+  assert.equal(site.needsBrowser, true);
   const verify = resolveActionPlan("testleri çalıştır", intent("analyze"));
   assert.equal(verify.action, "verify");
   assert.equal(verify.needsCommand, true);

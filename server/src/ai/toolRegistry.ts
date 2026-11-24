@@ -865,6 +865,23 @@ export interface ProjectToolHint {
   inputSchema?: { required?: string[]; properties?: Record<string, unknown> };
 }
 
+const TOOL_ALIASES: Record<string, string[]> = {
+  browser_check: [
+    "site", "website", "sayfa", "page", "incele", "inspect", "audit", "denetle",
+    "ui", "arayüz", "arayuz", "ekran", "button", "buton", "test", "doğrula",
+    "dogrula", "verify", "login", "giriş", "giris", "form",
+  ],
+  run_test_scenario: ["test", "senaryo", "scenario", "doğrula", "dogrula", "verify", "site", "incele"],
+  game_check: ["oyun", "game", "canvas"],
+  run_command: ["çalıştır", "calistir", "run", "start", "başlat", "baslat", "test", "build", "server", "sunucu"],
+  create_document: ["excel", "xlsx", "csv", "rapor", "report", "docx", "pdf", "belge", "document", "spreadsheet"],
+  project_search: ["hata", "error", "nerede", "where", "ara", "search", "bul", "find"],
+  find_in_file: ["hata", "error", "nerede", "where", "dosya", "file", "oku", "read"],
+  read_file: ["oku", "read", "dosya", "file", "kod", "source"],
+  extract_entities: ["buton", "button", "listele", "list", "say", "count", "renk", "color", "route", "input"],
+  audit_content: ["asset", "link", "markdown", "içerik", "icerik", "content", "audit", "denetle"],
+};
+
 const SUGGESTION_STOPWORDS = new Set([
   "the", "and", "for", "with", "this", "that", "from", "into", "your", "please",
   "bir", "bu", "şu", "ile", "için", "olan", "ve", "veya", "gibi", "daha", "çok",
@@ -885,6 +902,7 @@ export function suggestToolsForInstruction(
     ),
   ].filter((token) => !SUGGESTION_STOPWORDS.has(token));
   if (tokens.length === 0 && !allowed) return [];
+  const lowerInstruction = instruction.toLowerCase();
   const scored: { action: string; score: number; seed: number }[] = [];
   const seeds = ["project_search", "read_file", "find_in_file"];
   for (const spec of TOOL_SPECS) {
@@ -897,6 +915,9 @@ export function suggestToolsForInstruction(
       if (spec.action.includes(token)) score += 6;
       if (haystack.includes(token)) score += 2;
       if (token.length > 4 && haystack.includes(token.slice(0, token.length - 1))) score += 1;
+    }
+    for (const alias of TOOL_ALIASES[spec.action] ?? []) {
+      if (lowerInstruction.includes(alias)) score += 5;
     }
     if (score > 0) {
       scored.push({ action: spec.action, score, seed: seeds.includes(spec.action) ? 1 : 0 });
