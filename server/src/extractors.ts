@@ -197,13 +197,28 @@ async function readText(analysis: AnalysisResult, file: string): Promise<string 
     }
     fileCacheMisses += 1;
     const content = await fs.readFile(absolute, "utf8");
-    FILE_CONTENT_CACHE.set(key, { mtimeMs: stat.mtimeMs, size: stat.size, content });
-    if (FILE_CONTENT_CACHE.size > 300) {
-      const oldest = FILE_CONTENT_CACHE.keys().next().value;
-      if (oldest) FILE_CONTENT_CACHE.delete(oldest);
+    const previous = FILE_CONTENT_CACHE.get(key);
+    if (previous) fileCacheChars = Math.max(0, fileCacheChars - previous.content.length);
+    if (content.length > MAX_FILE_CACHE_CHARS / 4) {
+      FILE_CONTENT_CACHE.delete(key);
+    } else {
+      FILE_CONTENT_CACHE.set(key, { mtimeMs: stat.mtimeMs, size: stat.size, content });
+      fileCacheChars += content.length;
+      while (
+        FILE_CONTENT_CACHE.size > MAX_FILE_CACHE_ENTRIES ||
+        fileCacheChars > MAX_FILE_CACHE_CHARS
+      ) {
+        const oldest = FILE_CONTENT_CACHE.keys().next().value as string | undefined;
+        if (!oldest) break;
+        const evicted = FILE_CONTENT_CACHE.get(oldest);
+        if (evicted) fileCacheChars = Math.max(0, fileCacheChars - evicted.content.length);
+        FILE_CONTENT_CACHE.delete(oldest);
+      }
     }
     return content;
   } catch {
+    const cached = FILE_CONTENT_CACHE.get(key);
+    if (cached) fileCacheChars = Math.max(0, fileCacheChars - cached.content.length);
     FILE_CONTENT_CACHE.delete(key);
     return null;
   }
@@ -1054,17 +1069,60 @@ const FILE_CONTENT_CACHE = new Map<
   string,
   { mtimeMs: number; size: number; content: string }
 >();
+const MAX_FILE_CACHE_ENTRIES = 300;
+const MAX_FILE_CACHE_CHARS = 16_000_000;
+const MAX_EXTRACTION_CACHE_ENTRIES = 32;
+const MAX_EXTRACTION_CACHE_CHARS = 12_000_000;
 let fileCacheHits = 0;
 let fileCacheMisses = 0;
+let fileCacheChars = 0;
+let extractionCacheChars = 0;
 
-export function extractionFileCacheStats(): { hits: number; misses: number; size: number } {
-  return { hits: fileCacheHits, misses: fileCacheMisses, size: FILE_CONTENT_CACHE.size };
+function extractionEntryChars(entry: ExtractionCacheEntry): number {
+  try {
+    return JSON.stringify(entry.result).length;
+  } catch {
+    return 0;
+  }
+}
+
+function trimExtractionCache(): void {
+  while (
+    EXTRACTION_CACHE.size > MAX_EXTRACTION_CACHE_ENTRIES ||
+    extractionCacheChars > MAX_EXTRACTION_CACHE_CHARS
+  ) {
+    const oldestKey = EXTRACTION_CACHE.keys().next().value as string | undefined;
+    if (!oldestKey) break;
+    const oldest = EXTRACTION_CACHE.get(oldestKey);
+    if (oldest) extractionCacheChars = Math.max(0, extractionCacheChars - extractionEntryChars(oldest));
+    EXTRACTION_CACHE.delete(oldestKey);
+  }
+}
+
+export function extractionFileCacheStats(): {
+  hits: number;
+  misses: number;
+  size: number;
+  chars: number;
+  extractionSize: number;
+  extractionChars: number;
+} {
+  return {
+    hits: fileCacheHits,
+    misses: fileCacheMisses,
+    size: FILE_CONTENT_CACHE.size,
+    chars: fileCacheChars,
+    extractionSize: EXTRACTION_CACHE.size,
+    extractionChars: extractionCacheChars,
+  };
 }
 
 export function resetExtractionFileCache(): void {
   FILE_CONTENT_CACHE.clear();
   fileCacheHits = 0;
   fileCacheMisses = 0;
+  fileCacheChars = 0;
+  extractionCacheChars = 0;
 }
 
 export function invalidateExtractionCache(
@@ -1073,6 +1131,7 @@ export function invalidateExtractionCache(
 ): void {
   if (!projectId) {
     EXTRACTION_CACHE.clear();
+    extractionCacheChars = 0;
     return;
   }
   const prefix = `${projectId}|`;
@@ -1083,10 +1142,12 @@ export function invalidateExtractionCache(
   for (const [key, entry] of EXTRACTION_CACHE.entries()) {
     if (!key.startsWith(prefix)) continue;
     if (!changed) {
+      extractionCacheChars = Math.max(0, extractionCacheChars - extractionEntryChars(entry));
       EXTRACTION_CACHE.delete(key);
       continue;
     }
     if (entry.result.items.some((item) => changed.has(item.file))) {
+      extractionCacheChars = Math.max(0, extractionCacheChars - extractionEntryChars(entry));
       EXTRACTION_CACHE.delete(key);
     }
   }
@@ -1219,10 +1280,14 @@ export async function extractEntities(
       throw new Error(`Unsupported extraction kind: ${String(request.kind)}`);
   }
   result.fromCache = false;
-  EXTRACTION_CACHE.set(key, { createdAt: analysis.createdAt, result });
-  if (EXTRACTION_CACHE.size > 32) {
-    const oldest = EXTRACTION_CACHE.keys().next().value;
-    if (oldest) EXTRACTION_CACHE.delete(oldest);
+  const previous = EXTRACTION_CACHE.get(key);
+  if (previous) extractionCacheChars = Math.max(0, extractionCacheChars - extractionEntryChars(previous));
+  const entry = { createdAt: analysis.createdAt, result };
+  const entryChars = extractionEntryChars(entry);
+  if (entryChars <= MAX_EXTRACTION_CACHE_CHARS / 4) {
+    EXTRACTION_CACHE.set(key, entry);
+    extractionCacheChars += entryChars;
+    trimExtractionCache();
   }
   return result;
 }

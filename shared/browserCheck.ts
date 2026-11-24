@@ -39,6 +39,8 @@ export interface BrowserCheckOptions {
   measureFps?: boolean;
   /** Open a visible local Chrome window while the check runs. */
   visible?: boolean;
+  /** Stream the test page into the in-app Live test panel. */
+  live?: boolean;
 }
 
 export interface BrowserCheckStepResult {

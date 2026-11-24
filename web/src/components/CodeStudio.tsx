@@ -117,6 +117,7 @@ import {
   Square,
   Star,
   Terminal,
+  Monitor,
   Trash2,
   Wand2,
   User,
@@ -733,6 +734,9 @@ export function CodeStudio({
   const [liveBrowser, setLiveBrowser] = useState(
     () => localStorage.getItem("cie:live-browser") !== "0",
   );
+  const [liveFrameReady, setLiveFrameReady] = useState(false);
+  const [liveFrameKey, setLiveFrameKey] = useState(0);
+  const [liveArmed, setLiveArmed] = useState(false);
   useEffect(() => {
     localStorage.setItem("cie:live-browser", liveBrowser ? "1" : "0");
   }, [liveBrowser]);
@@ -2269,11 +2273,16 @@ export function CodeStudio({
     const target = effectivePreviewPath || htmlFiles[0] || "index.html";
     setBrowserCheckBusy(true);
     setBrowserCheckError(null);
+    setLiveArmed(liveBrowser);
+    setLiveFrameReady(false);
+    setLiveFrameKey((value) => value + 1);
+    setRightTab("live");
     try {
       const result = await api.browserCheck(analysis.id, {
         path: target,
         mobile: false,
         screenshot: true,
+        live: liveBrowser,
       });
       setBrowserCheck(result);
       setBottomTab("checks");
@@ -2292,10 +2301,15 @@ export function CodeStudio({
     setBrowserCheckBusy(true);
     setBrowserCheckError(null);
     try {
+      setLiveArmed(liveBrowser);
+      setLiveFrameReady(false);
+      setLiveFrameKey((value) => value + 1);
+      setRightTab("live");
       const result = await api.gameCheck(analysis.id, {
         path: effectivePreviewPath || htmlFiles[0] || "index.html",
         url: livePreviewUrl || undefined,
         screenshot: true,
+        live: liveBrowser,
       });
       setBrowserCheck(result.check);
       setGameEngine(result.engine);
@@ -2731,6 +2745,7 @@ export function CodeStudio({
     setChatLivePlan(null);
     setChatLiveAnswer("");
     chatLiveLogsRef.current = [];
+    if (liveBrowser) setLiveArmed(true);
     setError(null);
     setPermissionQueue([]);
     setPermissionBusy(false);
@@ -2769,6 +2784,12 @@ export function CodeStudio({
       } else if (event.type === "log") {
         chatLiveLogsRef.current = [...chatLiveLogsRef.current, event.entry].slice(-200);
         setChatLiveLogs(chatLiveLogsRef.current);
+        if (event.entry.label === "Live browser opened") {
+          setLiveArmed(true);
+          setLiveFrameReady(false);
+          setLiveFrameKey((value) => value + 1);
+          setRightTab("live");
+        }
       } else if (event.type === "permission") {
         setPermissionQueue((queue) => [...queue, event.request]);
         setPermissionBusy(false);
@@ -4611,8 +4632,15 @@ export function CodeStudio({
               </span>
               <button
                 className={`studio-loop-toggle ${liveBrowser ? "is-on" : ""}`}
-                onClick={() => setLiveBrowser((value) => !value)}
-                title={t("Show a local browser window while the agent tests the project")}
+                onClick={() => {
+                  setLiveBrowser((value) => {
+                    const next = !value;
+                    setLiveArmed(false);
+                    setLiveFrameReady(false);
+                    return next;
+                  });
+                }}
+                title={t("Stream the test browser into the Live test panel")}
               >
                 <Eye size={12} /> {t("Live browser")}
               </button>
@@ -5461,6 +5489,12 @@ export function CodeStudio({
             <Eye size={11} /> {t("Preview")}
           </button>
           <button
+            className={rightTab === "live" ? "is-active" : ""}
+            onClick={() => setRightTab("live")}
+          >
+            <Monitor size={11} /> {t("Live test")}
+          </button>
+          <button
             className={rightTab === "run" ? "is-active" : ""}
             onClick={() => setRightTab("run")}
           >
@@ -5500,7 +5534,7 @@ export function CodeStudio({
               </button>
             </div>
           ))}
-          {rightTab !== "preview" && rightTab !== "run" && rightTab !== "changes" && rightTab !== "assets" && activeFile ? (
+          {rightTab !== "preview" && rightTab !== "live" && rightTab !== "run" && rightTab !== "changes" && rightTab !== "assets" && activeFile ? (
             <>
               <button
                 className="studio-right-icon"
@@ -5526,7 +5560,7 @@ export function CodeStudio({
               </button>
             </>
           ) : null}
-          {rightTab !== "preview" && rightTab !== "run" && rightTab !== "changes" && rightTab !== "assets" ? (
+          {rightTab !== "preview" && rightTab !== "live" && rightTab !== "run" && rightTab !== "changes" && rightTab !== "assets" ? (
             <button
               className="studio-right-save"
               onClick={() => void saveFile()}
@@ -5726,6 +5760,41 @@ export function CodeStudio({
               analysisId={analysis.id}
               onOpenFile={(filePath, line) => void openFileAt(filePath, line)}
             />
+          ) : rightTab === "live" ? (
+            <div className="studio-live-test">
+              <div className="studio-live-test-head">
+                <span>
+                  <Monitor size={11} /> {t("Live test")}
+                </span>
+                <small>
+                  {liveBrowser ? t("Streaming from the test browser") : t("Live test is off")}
+                </small>
+              </div>
+              <div className="studio-live-test-stage">
+                {liveBrowser && liveArmed ? (
+                  <img
+                    key={liveFrameKey}
+                    src={`/api/projects/${analysis.id}/live-browser?run=${liveFrameKey}`}
+                    alt={t("Live test browser")}
+                    onLoad={() => setLiveFrameReady(true)}
+                    onError={() => setLiveFrameReady(false)}
+                  />
+                ) : null}
+                {!liveFrameReady ? (
+                  <div className="studio-live-test-empty">
+                    <Monitor size={20} />
+                    <strong>{t("Waiting for the test browser…")}</strong>
+                    <span>
+                      {!liveBrowser
+                        ? t("Turn on Live browser in the composer to stream tests here.")
+                        : liveArmed
+                          ? t("Start a test or browser check; the page will appear here.")
+                          : t("Start a test or browser check; the page will appear here.")}
+                    </span>
+                  </div>
+                ) : null}
+              </div>
+            </div>
           ) : rightTab === "preview" ? (
             <div className="studio-right-preview">
               <div className="studio-preview-head">

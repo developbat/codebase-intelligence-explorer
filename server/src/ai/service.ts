@@ -214,10 +214,27 @@ async function readCache(projectId: string): Promise<AiCache> {
   }
 }
 
+const MAX_AI_CACHE_ENTRIES = 120;
+const MAX_AI_CACHE_CHARS = 2_000_000;
+
 async function writeCache(projectId: string, cache: AiCache): Promise<void> {
-  const entries = Object.entries(cache.entries)
+  const sorted = Object.entries(cache.entries)
     .sort((a, b) => (a[1].createdAt < b[1].createdAt ? 1 : -1))
-    .slice(0, 120);
+    .slice(0, MAX_AI_CACHE_ENTRIES);
+  const entries: [string, CacheEntry<unknown>][] = [];
+  let chars = 0;
+  for (const entry of sorted) {
+    let size = 0;
+    try {
+      size = JSON.stringify(entry[1]).length;
+    } catch {
+      continue;
+    }
+    if (size > MAX_AI_CACHE_CHARS / 4) continue;
+    if (chars + size > MAX_AI_CACHE_CHARS) break;
+    entries.push(entry);
+    chars += size;
+  }
   const file = cachePath(projectId);
   await fs.mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
   const temp = `${file}.${process.pid}.${Date.now()}.tmp`;
@@ -4497,6 +4514,21 @@ ${lessons}` : "",
             : "small task · focused reads",
     );
   }
+  const contextChars = context.length + systemContent.length;
+  log(
+    "info",
+    "Context plan",
+    `prompt=${prompt.id} · system=${systemContent.length}c · task=${context.length}c · history=${conversation.length} · map=${
+      projectMap ? "on" : "off"
+    } · seed=${seedText.length}c · skills=${includeSkills ? "full" : "index"}`,
+  );
+  if (contextChars > 30_000) {
+    log(
+      "warn",
+      "Large context",
+      `${contextChars} chars estimated. Reusable evidence is compacted; narrow the task if this keeps growing.`,
+    );
+  }
   const system: ChatMessage = {
     role: "system",
     content: systemContent,
@@ -7098,7 +7130,8 @@ ${lessons}` : "",
           url: typeof args.url === "string" ? args.url : undefined,
           steps: gameSteps as BrowserCheckStep[] | undefined,
           screenshot: args.screenshot !== false,
-          visible: options.liveBrowser === true || args.visible === true,
+          live: options.liveBrowser === true,
+          visible: args.visible === true,
           signal,
         });
         if (result.check.screenshotPath) {
@@ -7134,7 +7167,8 @@ ${lessons}` : "",
           mobile: scenario.mobile,
           timeoutMs: scenario.timeoutMs,
           steps: scenario.steps,
-          visible: options.liveBrowser === true || args.visible === true,
+          live: options.liveBrowser === true,
+          visible: args.visible === true,
           signal,
         });
         const failedSteps = result.steps.filter((step) => !step.ok);
@@ -7174,7 +7208,8 @@ ${lessons}` : "",
           steps: rawSteps as BrowserCheckStep[],
           mobile: args.mobile === true,
           screenshot: args.screenshot === true,
-          visible: liveBrowser,
+          live: options.liveBrowser === true,
+          visible: args.visible === true,
           signal,
         });
         if (syntheticCheck) syntheticBrowserChecks += 1;

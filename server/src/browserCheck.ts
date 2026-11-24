@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { chromium, type Browser, type Page } from "playwright-core";
+import { attachLivePage, startLiveSession, stopLiveSession } from "./liveBrowser";
 import type {
   BrowserCheckMetrics,
   BrowserCheckOptions,
@@ -15,6 +16,8 @@ const DEFAULT_TIMEOUT = 8_000;
 export interface BrowserCheckRunOptions extends BrowserCheckOptions {
   /** Stop the check and close the browser when the agent run is aborted. */
   signal?: AbortSignal;
+  /** Stream JPEG frames to the in-app Live test panel. */
+  live?: boolean;
 }
 
 const CHROME_CANDIDATES = [
@@ -283,6 +286,7 @@ export async function runBrowserCheck(
   const stepResults: BrowserCheckStepResult[] = [];
   let page: Page | null = null;
   let showingWindow = options.visible === true && process.env.CIE_BROWSER_HEADLESS !== "1";
+  if (options.live) startLiveSession(projectId, requestedPath);
   const closeOnAbort = () => {
     void browser?.close().catch(() => undefined);
   };
@@ -306,6 +310,7 @@ export async function runBrowserCheck(
     }
     const context = await browser.newContext({ viewport });
     page = await context.newPage();
+    if (options.live) attachLivePage(projectId, page, requestedPath);
     if (showingWindow) await page.bringToFront().catch(() => undefined);
     page.setDefaultTimeout(Math.min(10_000, timeoutMs));
     page.on("console", (message) => {
@@ -429,6 +434,7 @@ export async function runBrowserCheck(
     };
   } finally {
     options.signal?.removeEventListener("abort", closeOnAbort);
+    if (options.live) stopLiveSession(projectId);
     if (browser) {
       await browser.close().catch(() => undefined);
     }

@@ -439,12 +439,19 @@ the agent must switch to DOM-visible checks or report the blocker instead of
 repeating the same step. Test-only summaries such as “proje dosyalarında
 değişiklik yapılmadı” are accepted by the finish guard.
 
-**Visible browser.** The composer exposes a persisted **Live browser** toggle.
-It passes `liveBrowser` through the task loop and agent stream; `browser_check`,
-`game_check` and `run_test_scenario` then launch Chrome headed with `slowMo` and
-short per-step pauses, call `bringToFront()`, and fall back to headless when the
-server has no display. The same option is exposed on the direct browser-check
-route.
+**In-app live browser.** The composer exposes a persisted **Live browser**
+toggle. It passes `liveBrowser` through the task loop and agent stream;
+`browser_check`, `game_check` and `run_test_scenario` run in a headless
+Playwright page and stream JPEG frames at ~4 fps through
+`GET /api/projects/:id/live-browser` into the right-panel **Live test** tab.
+The stream waits briefly for the page, survives the log-before-page race, ends on
+Stop/abort, and keeps the last frame in the panel. An explicit `visible: true`
+still opens a separate Chrome window for debugging.
+
+**Context and cache budgets.** File content, extraction results and AI results
+use entry + byte caps (300 files / 16M chars, 32 extractions / 12M chars, 120 AI
+entries / 2M chars). The agent logs a compact **Context plan** and warns above
+30k chars; older observations are clamped and compacted after six turns.
 
 **Task queue UI.** The queue no longer draws a percentage bar. The summary and
 task rows show `done/total`, live step count, tokens and attempts. Each task has

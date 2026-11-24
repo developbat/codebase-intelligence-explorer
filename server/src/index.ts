@@ -27,6 +27,7 @@ import { estimateUsageCost, getPricingReport, refreshPricing } from "./ai/pricin
 import { recordUsage } from "./ai/usage";
 import { saveResearchNote, webFetch } from "./webResearch";
 import { isBrowserCheckAvailable, runBrowserCheck } from "./browserCheck";
+import { liveSessionStatus, streamLiveSession } from "./liveBrowser";
 import { findProjectTool, listProjectTools, recordProjectToolRun } from "./projectTools";
 import {
   bootMobileDevice,
@@ -1235,6 +1236,8 @@ app.post("/api/projects/:id/game-check", async (req, res) => {
         steps: Array.isArray(req.body?.steps) ? req.body.steps : undefined,
         screenshot: req.body?.screenshot !== false,
         timeoutMs: Number(req.body?.timeoutMs) || undefined,
+        live: req.body?.live === true,
+        visible: req.body?.visible === true,
       }),
     );
   } catch (error) {
@@ -1307,6 +1310,14 @@ app.post("/api/projects/:id/lsp/completion", async (req, res) => {
   }
 });
 
+app.get("/api/projects/:id/live-browser/status", (req, res) => {
+  res.json(liveSessionStatus(req.params.id));
+});
+
+app.get("/api/projects/:id/live-browser", (req, res) => {
+  streamLiveSession(req.params.id, res);
+});
+
 app.post("/api/projects/:id/browser-check", async (req, res) => {
   try {
     const analysis = await loadAnalysis(req.params.id);
@@ -1318,6 +1329,7 @@ app.post("/api/projects/:id/browser-check", async (req, res) => {
       screenshot: req.body?.screenshot === true,
       timeoutMs: Number(req.body?.timeoutMs) || undefined,
       visible: req.body?.visible === true,
+      live: req.body?.live === true,
     });
     res.json(result);
   } catch (error) {

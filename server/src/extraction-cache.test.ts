@@ -27,6 +27,9 @@ test("caches extraction results and invalidates them after writes", async () => 
     const first = await extractEntities(analysis, { kind: "text", query: "needle" });
     assert.equal(first.total, 1);
     assert.equal(first.fromCache, false);
+    const stats = extractionFileCacheStats();
+    assert.ok(stats.chars > 0);
+    assert.ok(stats.extractionChars > 0);
 
     const second = await extractEntities(analysis, { kind: "text", query: "needle" });
     assert.equal(second.total, 1);
