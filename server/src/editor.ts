@@ -269,6 +269,38 @@ export async function writeProjectAsset(
   return { filePath: relative, bytes: buffer.byteLength };
 }
 
+export function safeProcessEnv(extra: Record<string, string> = {}): NodeJS.ProcessEnv {
+  const allowed = new Set([
+    "PATH",
+    "HOME",
+    "USER",
+    "LOGNAME",
+    "SHELL",
+    "TMPDIR",
+    "TEMP",
+    "TMP",
+    "LANG",
+    "TERM",
+    "CI",
+    "NODE_OPTIONS",
+    "NODE_PATH",
+    "PWD",
+    "SYSTEMROOT",
+    "COMSPEC",
+    "PATHEXT",
+    "APPDATA",
+    "LOCALAPPDATA",
+  ]);
+  const env: NodeJS.ProcessEnv = {};
+  for (const [key, value] of Object.entries(process.env)) {
+    if (value === undefined) continue;
+    if (allowed.has(key) || key.startsWith("LC_") || key.startsWith("npm_")) {
+      env[key] = value;
+    }
+  }
+  return { ...env, ...extra };
+}
+
 export async function runProjectCommand(
   rootPath: string,
   command: string,
@@ -277,6 +309,8 @@ export async function runProjectCommand(
     signal?: AbortSignal;
     timeoutMs?: number;
     env?: Record<string, string>;
+    /** "safe" drops API keys/tokens and other secret-like variables. */
+    envMode?: "inherit" | "safe";
     onStdout?: (chunk: string) => void;
     onStderr?: (chunk: string) => void;
   } = {},
@@ -304,7 +338,10 @@ export async function runProjectCommand(
       cwd: realCwd,
       shell: true,
       windowsHide: true,
-      env: { ...process.env, CI: process.env.CI ?? "1", ...(options.env ?? {}) },
+      env:
+        options.envMode === "safe"
+          ? safeProcessEnv({ CI: process.env.CI ?? "1", ...(options.env ?? {}) })
+          : { ...process.env, CI: process.env.CI ?? "1", ...(options.env ?? {}) },
     });
 
     const append = (

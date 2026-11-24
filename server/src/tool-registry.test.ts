@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   allToolSpecs,
   renderAgentToolCatalog,
+  suggestToolsForInstruction,
   toolGroupsFor,
   validateToolArgs,
 } from "./ai/toolRegistry";
@@ -54,6 +55,20 @@ test("argument schemas accept path aliases and reject missing/typed values", () 
   assert.match(validateToolArgs("read_file", { path: 3 }) ?? "", /path must be string/);
   assert.equal(validateToolArgs("write_file", { path: "a.ts", content: "x" }), null);
   assert.match(validateToolArgs("run_command", {}) ?? "", /requires one of: command/);
+});
+
+test("capability suggestions follow the request and selected groups", () => {
+  const game = suggestToolsForInstruction("oyunu oyna ve test et", ["core", "browser"]);
+  assert.ok(game.includes("browser_check") || game.includes("run_test_scenario"));
+  const color = suggestToolsForInstruction("rename button color to red", ["core", "edit"]);
+  assert.ok(
+    color.includes("apply_mapped_changes") ||
+      color.includes("extract_entities") ||
+      color.includes("list_colors"),
+  );
+  const web = suggestToolsForInstruction("fetch the release page", ["web"]);
+  assert.ok(web.includes("web_fetch"));
+  assert.equal(web.includes("write_file"), false);
 });
 
 test("every tool action is unique and grouped", () => {

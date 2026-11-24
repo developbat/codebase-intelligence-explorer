@@ -60,6 +60,9 @@ export const tr: Dictionary = {
   "This tool can write files or run commands. Run it with your approvals for this try?": "Bu araç dosya yazabilir veya komut çalıştırabilir. Bu deneme için onaylarınla çalıştırılsın mı?",
   "Permission": "İzin",
   "Read-only tool": "Salt okunur araç",
+  "Recent tool tries": "Son araç denemeleri",
+  "Built-in": "Yerleşik",
+  "Project": "Proje",
   "Read-only": "Salt okunur",
   "Diagnose": "Teşhis et",
   "Diagnose why the requested behavior is not working. Inspect the real entry points and asset wiring, run browser_check or a saved test scenario, identify the root cause with file:line evidence, then apply the minimal fix and verify it.": "İstenen davranışın neden çalışmadığını teşhis et. Gerçek giriş noktalarını ve varlık bağlantılarını incele, browser_check veya kayıtlı bir test senaryosu çalıştır, kök nedeni dosya:satır kanıtıyla bul, sonra en küçük düzeltmeyi uygula ve doğrula.",
@@ -795,7 +798,6 @@ export const tr: Dictionary = {
   "external package": "harici paket",
 
   // Kind labels
-  "Project": "Proje",
   "Package": "Paket",
   "Folder": "Klasör",
   "File": "Dosya",

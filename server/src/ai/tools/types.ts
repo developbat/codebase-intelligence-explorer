@@ -24,6 +24,7 @@ export interface AgentToolContext {
   ) => Promise<boolean>;
   evidence: AiContextFile[];
   changedFiles: string[];
+  ranCommands: string[];
   invalidate: (paths?: readonly string[]) => void;
   normalizePath: (value: unknown) => string;
   pathFromArgs: (args: Record<string, unknown>) => unknown;

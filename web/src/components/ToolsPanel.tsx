@@ -45,6 +45,45 @@ export function ToolsPanel({ projectId }: { projectId?: string }) {
     text: string;
   } | null>(null);
   const [tryBuiltinBusy, setTryBuiltinBusy] = useState(false);
+  const [history, setHistory] = useState<
+    { at: string; kind: "builtin" | "project"; name: string; ok: boolean; text: string }[]
+  >([]);
+
+  useEffect(() => {
+    if (!projectId) {
+      setHistory([]);
+      return;
+    }
+    try {
+      const raw = localStorage.getItem(`cie:tool-tries:${projectId}`);
+      const parsed = raw ? (JSON.parse(raw) as typeof history) : [];
+      setHistory(Array.isArray(parsed) ? parsed.slice(0, 20) : []);
+    } catch {
+      setHistory([]);
+    }
+  }, [projectId]);
+
+  function recordTry(entry: {
+    kind: "builtin" | "project";
+    name: string;
+    ok: boolean;
+    text: string;
+  }) {
+    setHistory((current) => {
+      const next = [
+        { ...entry, at: new Date().toISOString(), text: entry.text.slice(0, 2_000) },
+        ...current,
+      ].slice(0, 20);
+      if (projectId) {
+        try {
+          localStorage.setItem(`cie:tool-tries:${projectId}`, JSON.stringify(next));
+        } catch {
+          // local history is best-effort
+        }
+      }
+      return next;
+    });
+  }
 
   useEffect(() => {
     if (!projectId) return;
@@ -94,10 +133,15 @@ export function ToolsPanel({ projectId }: { projectId?: string }) {
     setTryError(null);
     try {
       const result = await api.runProjectTool(projectId, name, input);
-      setOutput({
+      const text =
+        [result.result.stdout, result.result.stderr].filter(Boolean).join("\n").slice(-20_000) ||
+        t("No output.");
+      setOutput({ name, ok: result.result.exitCode === 0, text });
+      recordTry({
+        kind: "project",
         name,
         ok: result.result.exitCode === 0,
-        text: [result.result.stdout, result.result.stderr].filter(Boolean).join("\n").slice(-20_000) || t("No output."),
+        text,
       });
       await refresh(true);
     } catch (requestError) {
@@ -160,8 +204,16 @@ export function ToolsPanel({ projectId }: { projectId?: string }) {
         ok: result.ok,
         text: result.observation,
       });
+      recordTry({
+        kind: "builtin",
+        name: tool.action,
+        ok: result.ok,
+        text: result.observation,
+      });
     } catch (error) {
-      setTryBuiltinError(error instanceof Error ? error.message : t("Could not run this tool."));
+      const message = error instanceof Error ? error.message : t("Could not run this tool.");
+      setTryBuiltinError(message);
+      recordTry({ kind: "builtin", name: tool.action, ok: false, text: message });
     } finally {
       setTryBuiltinBusy(false);
     }
@@ -369,6 +421,37 @@ export function ToolsPanel({ projectId }: { projectId?: string }) {
                     ) : null}
                   </div>
                 ) : null}
+              </div>
+            ))}
+          </div>
+        </details>
+      ) : null}
+
+      {history.length > 0 ? (
+        <details className="tools-history">
+          <summary>
+            {t("Recent tool tries")} · {history.length}
+            <button
+              onClick={(event) => {
+                event.preventDefault();
+                setHistory([]);
+                if (projectId) localStorage.removeItem(`cie:tool-tries:${projectId}`);
+              }}
+            >
+              {t("Clear")}
+            </button>
+          </summary>
+          <div className="tools-history-list">
+            {history.map((entry) => (
+              <div key={`${entry.at}-${entry.kind}-${entry.name}`} className={entry.ok ? "is-ok" : "is-error"}>
+                <span>
+                  <b>{entry.kind === "builtin" ? t("Built-in") : t("Project")}</b>
+                  <code>{entry.name}</code>
+                </span>
+                <small>
+                  {new Date(entry.at).toLocaleString()} · {entry.ok ? t("Passed") : t("Failed")}
+                </small>
+                <pre>{entry.text.slice(0, 600)}</pre>
               </div>
             ))}
           </div>

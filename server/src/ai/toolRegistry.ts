@@ -865,6 +865,51 @@ export interface ProjectToolHint {
   inputSchema?: { required?: string[]; properties?: Record<string, unknown> };
 }
 
+const SUGGESTION_STOPWORDS = new Set([
+  "the", "and", "for", "with", "this", "that", "from", "into", "your", "please",
+  "bir", "bu", "şu", "ile", "için", "olan", "ve", "veya", "gibi", "daha", "çok",
+  "the", "a", "an", "to", "of", "in", "on", "it", "is", "are", "be", "do", "does",
+]);
+
+export function suggestToolsForInstruction(
+  instruction: string,
+  groups?: readonly AgentToolGroup[],
+  limit = 8,
+): string[] {
+  const allowed = groups ? new Set(groups) : null;
+  const tokens = [
+    ...new Set(
+      instruction
+        .toLowerCase()
+        .match(/[a-z0-9çğıöşü_]{3,}/g) ?? [],
+    ),
+  ].filter((token) => !SUGGESTION_STOPWORDS.has(token));
+  if (tokens.length === 0 && !allowed) return [];
+  const scored: { action: string; score: number; seed: number }[] = [];
+  const seeds = ["project_search", "read_file", "find_in_file"];
+  for (const spec of TOOL_SPECS) {
+    if (allowed && !spec.groups.some((group) => group === "core" || allowed.has(group))) {
+      continue;
+    }
+    const haystack = `${spec.action} ${spec.description} ${spec.whenToUse} ${spec.groups.join(" ")}`.toLowerCase();
+    let score = 0;
+    for (const token of tokens) {
+      if (spec.action.includes(token)) score += 6;
+      if (haystack.includes(token)) score += 2;
+      if (token.length > 4 && haystack.includes(token.slice(0, token.length - 1))) score += 1;
+    }
+    if (score > 0) {
+      scored.push({ action: spec.action, score, seed: seeds.includes(spec.action) ? 1 : 0 });
+    }
+  }
+  const picked = scored
+    .sort((a, b) => b.score - a.score || b.seed - a.seed)
+    .slice(0, Math.max(1, limit))
+    .map((entry) => entry.action);
+  if (picked.length === 0) return allowed ? [] : seeds.slice(0, 2);
+  return picked;
+}
+
 export function renderAgentToolCatalog(
   readOnly: boolean,
   writeApproved: boolean,

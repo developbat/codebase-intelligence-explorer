@@ -117,7 +117,13 @@ import { AGENT_TOOL_GROUPS } from "../../../shared/intent";
 import { pickAlternateAgentModel } from "./agents";
 import { getPrompt, renderPrompt } from "./prompts";
 import { listSkills, loadSkillForRun, loadSkillsForPrompt, renderSkillsForPrompt, runSkillScript, setSkillEnabled } from "../skills";
-import { renderAgentToolCatalog, toolGroupsFor, validateToolArgs, type ProjectToolHint } from "./toolRegistry";
+import {
+  renderAgentToolCatalog,
+  suggestToolsForInstruction,
+  toolGroupsFor,
+  validateToolArgs,
+  type ProjectToolHint,
+} from "./toolRegistry";
 import { runRegisteredTool } from "./tools/registry";
 import type { AgentToolContext } from "./tools/types";
 import { appendLesson, readLessons } from "../tasks";
@@ -4150,6 +4156,10 @@ export async function runAgentTask(
     const allowed = new Set<AgentToolGroup>(["core", "browser", "command", "document"]);
     toolGroups.splice(0, toolGroups.length, ...toolGroups.filter((group) => allowed.has(group)));
   }
+  const suggestedTools = suggestToolsForInstruction(actionPlanSource, toolGroups, 8);
+  if (suggestedTools.length > 0) {
+    log("info", "Capability suggestions", suggestedTools.join(", "));
+  }
   const projectToolList = await listProjectTools(analysis.rootPath).catch(() => null);
   const seed =
     contextMode === "none"
@@ -4198,6 +4208,9 @@ export async function runAgentTask(
       : "",
     "",
     options.intent?.approach ? `Intent approach: ${options.intent.approach}` : "",
+    suggestedTools.length > 0
+      ? `Likely tools for this request: ${suggestedTools.join(", ")}. Use these before broad exploration.`
+      : "",
     options.intent?.needsExhaustiveEvidence
       ? "Evidence requirement: the answer must be exhaustive; collect every matching item and verify the total before finishing."
       : "",
@@ -5769,6 +5782,7 @@ ${lessons}` : "",
         requirePermission,
         evidence,
         changedFiles,
+        ranCommands,
         invalidate: invalidateReadCaches,
         normalizePath: (value) => normalizeAgentPath(analysis.rootPath, value),
         pathFromArgs,
@@ -6619,69 +6633,6 @@ ${lessons}` : "",
         observation = `Deleted ${deleted.path}${deleted.kind === "directory" ? " (empty directory)" : ""}.`;
         log("success", "Path deleted", deleted.path);
         ok = true;
-      } else if (action === "boot_mobile_device") {
-        const platform = args.platform === "android" ? "android" : "ios";
-        const id = String(args.id ?? "").trim();
-        if (!id) throw new Error("A device id is required.");
-        const allowed = await requirePermission(
-          "command",
-          "boot_mobile_device",
-          id,
-          `Boot ${platform} device ${id}.`,
-        );
-        if (!allowed) throw new Error("The user denied permission to boot the device.");
-        const result = await bootMobileDevice(platform, id);
-        observation = `${result.message}\n${platform} ${result.id} · ${result.state}`;
-        log("info", "Mobile device boot", `${platform} ${id} · ${result.state}`);
-        ok = result.state === "booted" || result.state === "device" || result.state === "starting";
-      } else if (action === "mobile_screenshot") {
-        const platform = args.platform === "android" ? "android" : "ios";
-        const id = String(args.id ?? "").trim();
-        if (!id) throw new Error("A device id is required.");
-        const allowed = await requirePermission(
-          "command",
-          "mobile_screenshot",
-          id,
-          `Capture a ${platform} screenshot from ${id}.`,
-        );
-        if (!allowed) throw new Error("The user denied permission to capture the screenshot.");
-        const shot = await captureMobileScreenshot(analysis.rootPath, platform, id);
-        evidence.push({ path: shot.path, label: "Mobile screenshot" });
-        observation = `Mobile screenshot saved: ${shot.path} (${shot.bytes} bytes).`;
-        log("success", "Mobile screenshot captured", shot.path);
-        ok = true;
-      } else if (action === "install_mobile_app") {
-        const platform = args.platform === "android" ? "android" : "ios";
-        const id = String(args.id ?? "").trim();
-        const appPath = String(args.path ?? "").trim();
-        if (!id || !appPath) throw new Error("Device id and app path are required.");
-        const allowed = await requirePermission(
-          "command",
-          "install_mobile_app",
-          appPath,
-          `Install ${appPath} on ${platform} ${id}.`,
-        );
-        if (!allowed) throw new Error("The user denied permission to install the app.");
-        const result = await installMobileApp(analysis.rootPath, platform, id, appPath);
-        observation = result.message;
-        log("success", "Mobile app installed", result.path);
-        ok = true;
-      } else if (action === "launch_mobile_app") {
-        const platform = args.platform === "android" ? "android" : "ios";
-        const id = String(args.id ?? "").trim();
-        const target = String(args.target ?? "").trim();
-        if (!id || !target) throw new Error("Device id and package/bundle id are required.");
-        const allowed = await requirePermission(
-          "command",
-          "launch_mobile_app",
-          target,
-          `Launch ${target} on ${platform} ${id}.`,
-        );
-        if (!allowed) throw new Error("The user denied permission to launch the app.");
-        const result = await launchMobileApp(platform, id, target);
-        observation = result.message;
-        log("success", "Mobile app launched", target);
-        ok = true;
       } else if (action === "rescan_project") {
         const fresh = await analyzeProject(analysis.rootPath);
         await saveAnalysis(fresh);
@@ -6690,74 +6641,6 @@ ${lessons}` : "",
         invalidateReadCaches();
         observation = `Rescanned project: ${fresh.files.length} files, ${fresh.symbols.length} symbols. Rebuilt the analysis and search index; the project map will refresh on the next run.`;
         log("success", "Project rescanned", `${fresh.files.length} files · ${fresh.symbols.length} symbols`);
-        ok = true;
-      } else if (action === "install_toolchain") {
-        const id = String(args.id ?? "").trim();
-        if (!id) throw new Error("A toolchain id is required.");
-        const allowed = await requirePermission(
-          "command",
-          "install_toolchain",
-          id,
-          `Install the missing ${id} toolchain using the platform package manager.`,
-        );
-        if (!allowed) throw new Error("The user denied permission to install the toolchain.");
-        const result = await installToolchain(id);
-        observation = result.ok
-          ? `${id} installed${result.command ? ` with: ${result.command}` : ""}.\n${result.output}`
-          : `${id} install failed${result.command ? ` (${result.command})` : ""}.\n${result.output}`;
-        log(result.ok ? "success" : "error", result.ok ? "Toolchain installed" : "Toolchain install failed", id);
-        ok = result.ok;
-      } else if (action === "mobile_check") {
-        const allowed = await requirePermission(
-          "command",
-          "mobile_check",
-          String(args.id ?? args.platform ?? "auto"),
-          "Run the unified mobile device check (boot, screenshot, logs, optional URL).",
-        );
-        if (!allowed) throw new Error("The user denied permission for the mobile check.");
-        const check = await runMobileCheck(analysis.rootPath, {
-          platform: args.platform === "android" ? "android" : args.platform === "ios" ? "ios" : undefined,
-          id: typeof args.id === "string" ? args.id : undefined,
-          boot: args.boot === true,
-          screenshot: args.screenshot !== false,
-          logs: args.logs === true,
-          openUrl: typeof args.openUrl === "string" ? args.openUrl : undefined,
-          logLimit: Number(args.logLimit) || undefined,
-        });
-        if (check.screenshot) evidence.push({ path: check.screenshot.path, label: "Mobile check screenshot" });
-        observation = check.summary;
-        ok = Boolean(check.device) && check.warnings.length === 0;
-        log(ok ? "success" : "warn", "Mobile check complete", check.device ? check.device.name : "no device");
-      } else if (action === "open_mobile_url") {
-        const platform = args.platform === "android" ? "android" : "ios";
-        const id = String(args.id ?? "").trim();
-        const url = String(args.url ?? "").trim();
-        if (!id || !url) throw new Error("Device id and URL are required.");
-        const allowed = await requirePermission(
-          "command",
-          "open_mobile_url",
-          url,
-          `Open ${url} on ${platform} ${id}.`,
-        );
-        if (!allowed) throw new Error("The user denied permission to open the URL.");
-        const result = await openMobileUrl(platform, id, url);
-        observation = `${result.message}\n${url}`;
-        log("info", "Mobile URL opened", `${platform} ${id} · ${url}`);
-        ok = true;
-      } else if (action === "mobile_logs") {
-        const platform = args.platform === "android" ? "android" : "ios";
-        const id = String(args.id ?? "").trim();
-        if (!id) throw new Error("A device id is required.");
-        const allowed = await requirePermission(
-          "command",
-          "mobile_logs",
-          id,
-          `Read the last logs from ${platform} ${id}.`,
-        );
-        if (!allowed) throw new Error("The user denied permission to read mobile logs.");
-        const logs = await readMobileLogs(platform, id, Number(args.limit) || 200);
-        observation = clampObservation(`Mobile logs (${logs.lines} lines):\n${logs.output}`);
-        log("info", "Mobile logs read", `${platform} ${id} · ${logs.lines} lines`);
         ok = true;
       } else if (action === "game_check") {
         const gamePath = typeof args.path === "string" ? args.path : "index.html";
@@ -6899,47 +6782,6 @@ ${lessons}` : "",
           `${browserPath} · ${result.steps.length} steps`,
         );
         ok = result.ok;
-      } else if (action === "run_project_tool") {
-        const name = String(args.name ?? "").trim();
-        if (!name) throw new Error("A project tool name is required.");
-        const tool = await findProjectTool(analysis.rootPath, name);
-        if (!tool) throw new Error(`Project tool "${name}" was not found.`);
-        const toolInput =
-          args.input && typeof args.input === "object" && !Array.isArray(args.input)
-            ? (args.input as Record<string, unknown>)
-            : {};
-        const inputError = validateProjectToolInput(tool, toolInput);
-        if (inputError) throw new Error(inputError);
-        const inputJson = Object.keys(toolInput).length > 0 ? JSON.stringify(toolInput) : "";
-        const allowed = await requirePermission(
-          "command",
-          "run_project_tool",
-          tool.command,
-          `Run saved project tool "${tool.name}".`,
-          { preview: [tool.command, inputJson].filter(Boolean).join(" · ").slice(0, 1_000) },
-        );
-        if (!allowed) {
-          observation = `Permission denied for project tool "${tool.name}".`;
-          ok = false;
-        } else {
-          log("info", "Running project tool", `${tool.name} · ${tool.command}`);
-          const result = await runProjectCommand(analysis.rootPath, tool.command, undefined, {
-            timeoutMs: tool.timeoutMs ?? 120_000,
-            signal,
-            env: inputJson ? { CIE_TOOL_INPUT: inputJson } : undefined,
-          });
-          const output = `${result.stdout}${result.stderr ? `\n${result.stderr}` : ""}`.trim();
-          observation = `Project tool "${tool.name}" · exit ${result.exitCode ?? "—"}${
-            inputJson ? ` · input ${inputJson.slice(0, 300)}` : ""
-          }\n${output || "(no output)"}`;
-          ok = result.exitCode === 0;
-          await recordProjectToolRun(analysis.rootPath, tool.name, ok).catch(() => undefined);
-          log(
-            ok ? "success" : "error",
-            ok ? "Project tool passed" : "Project tool failed",
-            tool.name,
-          );
-        }
       } else if (action === "delegate_research") {
         const goal = String(args.goal ?? "").trim();
         if (!goal) throw new Error("A research goal is required.");
@@ -6980,157 +6822,6 @@ ${lessons}` : "",
           tokenTotal.totalTokens += delegated.tokenUsage.totalTokens;
         }
         log("info", "Research subagent completed", goal.slice(0, 160));
-      } else if (action === "placeholder_asset") {
-        const assetPath = normalizeAgentPath(analysis.rootPath, pathFromArgs(args));
-        if (!assetPath) throw new Error("An asset path is required.");
-        if (isSecretAgentPath(assetPath)) throw new Error("Writing environment, key or Git internals assets is denied.");
-        const assetAllowed = await requirePermission(
-          "write",
-          "placeholder_asset",
-          assetPath,
-          "Create a deterministic SVG placeholder asset.",
-          { preview: String(args.kind ?? "icon") },
-        );
-        if (!assetAllowed) throw new Error("The user denied permission to create this asset.");
-        const created = await createPlaceholderAsset(analysis.rootPath, {
-          path: assetPath,
-          kind: args.kind as Parameters<typeof createPlaceholderAsset>[1]["kind"],
-          width: Number(args.width) || undefined,
-          height: Number(args.height) || undefined,
-          label: typeof args.label === "string" ? args.label : undefined,
-          color: typeof args.color === "string" ? args.color : undefined,
-          background: typeof args.background === "string" ? args.background : undefined,
-          format: args.format === "png" ? "png" : undefined,
-          durationMs: Number(args.durationMs) || undefined,
-          frequency: Number(args.frequency) || undefined,
-          loop: args.loop === true,
-          fps: Number(args.fps) || undefined,
-        });
-        if (!changedFiles.includes(created.path)) changedFiles.push(created.path);
-        evidence.push({ path: created.path, label: "Placeholder asset" });
-        observation = `Created ${created.kind} SVG placeholder: ${created.path} (${created.bytes} bytes).`;
-        log("success", "Placeholder asset created", created.path);
-        ok = true;
-      } else if (action === "create_project_tool") {
-        const name = String(args.name ?? "").trim();
-        const code = String(args.code ?? "");
-        if (!name || !code.trim()) throw new Error("Tool name and code are required.");
-        const language = args.language === "ts" ? "ts" : args.language === "py" ? "py" : args.language === "sh" ? "sh" : "js";
-        const allowed = await requirePermission(
-          "write",
-          "create_project_tool",
-          name,
-          `Create a reusable ${language} tool under .cie/agent/tools. It can be run later with run_project_tool.`,
-          { preview: code.slice(0, 600) },
-        );
-        if (!allowed) throw new Error("The user denied permission to create this project tool.");
-        const tool = await createProjectTool(analysis.rootPath, {
-          name,
-          description: typeof args.description === "string" ? args.description : undefined,
-          whenToUse: typeof args.whenToUse === "string" ? args.whenToUse : undefined,
-          inputSchema:
-            args.inputSchema && typeof args.inputSchema === "object"
-              ? (args.inputSchema as Parameters<typeof createProjectTool>[1]["inputSchema"])
-              : undefined,
-          timeoutMs: Number(args.timeoutMs) || undefined,
-          language,
-          code,
-        });
-        observation = `Created project tool: ${tool.name} · ${tool.path}\nRun it with run_project_tool name="${tool.name}".`;
-        log("success", "Project tool created", tool.name);
-        ok = true;
-      } else if (action === "create_skill") {
-        const name = String(args.name ?? "").trim();
-        const description = String(args.description ?? "").trim();
-        const body = String(args.body ?? "").trim();
-        if (!name || !description || !body) throw new Error("Skill name, description and instructions are required.");
-        const allowed = await requirePermission(
-          "write",
-          "create_skill",
-          name,
-          "Create a project skill under .cie/skills. It is enabled for this project unless enable=false.",
-          { preview: body.slice(0, 600) },
-        );
-        if (!allowed) throw new Error("The user denied permission to create this skill.");
-        const skill = await createSkill(analysis.rootPath, projectId, {
-          name,
-          description,
-          body,
-          allowedTools: typeof args.allowedTools === "string" ? args.allowedTools : undefined,
-          enable: args.enable !== false,
-        });
-        observation = `Created skill: ${skill.name} · ${skill.path}${skill.enabled ? " · enabled" : ""}`;
-        log("success", "Skill created", skill.name);
-        ok = true;
-      } else if (action === "git_commit") {
-        const message = String(args.message ?? "").trim();
-        if (!message) throw new Error("A commit message is required.");
-        const allowed = await requirePermission(
-          "write",
-          "git_commit",
-          analysis.projectName,
-          `Create a Git commit: ${message}`,
-          { preview: message },
-        );
-        if (!allowed) throw new Error("The user denied permission to commit.");
-        const result = await gitCommit(analysis.rootPath, message, {
-          files: Array.isArray(args.files) ? args.files.map(String) : undefined,
-          stageAll: args.stageAll === true,
-        });
-        observation = `Commit ${result.commit ?? "created"}.\n${result.output}`;
-        log("success", "Git commit created", result.commit);
-        ok = true;
-      } else if (action === "git_create_branch") {
-        const name = String(args.name ?? "").trim();
-        if (!name) throw new Error("A branch name is required.");
-        const allowed = await requirePermission(
-          "write",
-          "git_create_branch",
-          name,
-          "Create a Git branch.",
-          { preview: name },
-        );
-        if (!allowed) throw new Error("The user denied permission to create a branch.");
-        const result = await gitCreateBranch(analysis.rootPath, name, args.checkout !== false);
-        observation = `Current branch: ${result.branch}\n${result.output}`;
-        log("success", "Git branch created", result.branch);
-        ok = true;
-      } else if (action === "git_remote") {
-        const name = String(args.name ?? "origin").trim();
-        const url = String(args.url ?? "").trim();
-        if (!name) throw new Error("A remote name is required.");
-        if (!url && args.remove !== true) throw new Error("A remote URL is required.");
-        const allowed = await requirePermission(
-          "write",
-          "git_remote",
-          name,
-          args.remove === true ? "Remove a Git remote." : `Set Git remote ${name} to ${url}.`,
-          { preview: url || name },
-        );
-        if (!allowed) throw new Error("The user denied permission to update the remote.");
-        const output = await gitSetRemote(analysis.rootPath, name, url, args.remove === true);
-        observation = output || `Remote ${name} updated.`;
-        log("success", "Git remote updated", name);
-        ok = true;
-      } else if (action === "git_push") {
-        const remote = typeof args.remote === "string" ? args.remote.trim() : "origin";
-        const branch = typeof args.branch === "string" ? args.branch.trim() : undefined;
-        const allowed = await requirePermission(
-          "command",
-          "git_push",
-          `${remote}${branch ? `/${branch}` : ""}`,
-          "Push local commits to a remote. This cannot be undone on the remote.",
-          { destructive: true },
-        );
-        if (!allowed) throw new Error("The user denied permission to push.");
-        const result = await gitPush(analysis.rootPath, {
-          remote,
-          branch,
-          setUpstream: args.setUpstream !== false,
-        });
-        observation = `Pushed ${result.branch} → ${result.remote}.\n${result.output}`;
-        log("success", "Git push completed", `${result.remote}/${result.branch}`);
-        ok = true;
       } else if (action === "search_conversations") {
         const query = String(args.query ?? "").trim();
         if (!query) throw new Error("A conversation search query is required.");
@@ -7415,52 +7106,6 @@ ${lessons}` : "",
         observation = `${formatted.command}\n${formatted.formatted ? "File formatted." : "File was already formatted."}`;
         log("success", "File formatted", formatted.filePath);
         ok = true;
-      } else if (action === "run_skill_script") {
-        const skillName = String(args.skill ?? "").trim();
-        const scriptPath = String(args.path ?? "").trim();
-        if (!skillName || !scriptPath) {
-          throw new Error("A skill name and script path are required.");
-        }
-        const skillList = await listSkills(analysis.rootPath, projectId);
-        const skill = skillList.skills.find(
-          (item) =>
-            item.key === skillName || item.name.toLowerCase() === skillName.toLowerCase(),
-        );
-        if (!skill) throw new Error(`Skill not found: ${skillName}`);
-        const script = skill.files.find(
-          (file) => file.kind === "script" && file.path === scriptPath,
-        );
-        if (!script) {
-          throw new Error("Only scripts listed by this skill can be run.");
-        }
-        const scriptArgs = Array.isArray(args.args)
-          ? args.args.filter((value): value is string => typeof value === "string").slice(0, 20)
-          : [];
-        const scriptAllowed = await requirePermission(
-          "command",
-          "run_skill_script",
-          `${skill.name}/${scriptPath}`,
-          `Skill: ${skill.name}${scriptArgs.length > 0 ? ` · args: ${scriptArgs.join(" ")}` : ""}`,
-          { preview: scriptPath, forceConfirm: true },
-        );
-        if (!scriptAllowed) throw new Error("The user denied permission to run this skill script.");
-        const scriptResult = await runSkillScript(
-          analysis.rootPath,
-          projectId,
-          skill.key,
-          scriptPath,
-          scriptArgs,
-        );
-        ranCommands.push(`${skill.name}/${scriptPath}`);
-        log(
-          scriptResult.exitCode === 0 ? "success" : "error",
-          "Skill script finished",
-          `exit ${scriptResult.exitCode ?? "—"} · ${scriptResult.durationMs} ms`,
-        );
-        observation = clampObservation(
-          `Skill script: ${scriptResult.command}\nExit: ${scriptResult.exitCode ?? "—"}\nDuration: ${scriptResult.durationMs} ms\n${scriptResult.output}`,
-        );
-        ok = scriptResult.exitCode === 0;
       } else if (action === "run_command") {
         if (ranCommands.length >= AGENT_MAX_COMMANDS) throw new Error(`Command limit reached (${AGENT_MAX_COMMANDS}).`);
         const command = String(args.command ?? "").trim();
