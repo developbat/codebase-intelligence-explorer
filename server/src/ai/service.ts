@@ -115,7 +115,7 @@ import type {
 import { AGENT_TOOL_GROUPS } from "../../../shared/intent";
 import { pickAlternateAgentModel } from "./agents";
 import { getPrompt, renderPrompt } from "./prompts";
-import { listSkills, loadSkillsForPrompt, renderSkillsForPrompt, runSkillScript, setSkillEnabled } from "../skills";
+import { listSkills, loadSkillForRun, loadSkillsForPrompt, renderSkillsForPrompt, runSkillScript, setSkillEnabled } from "../skills";
 import { appendLesson, readLessons } from "../tasks";
 import { ensureProjectMap } from "../projectMap";
 import { buildChangeReport } from "../changes";
@@ -1731,6 +1731,7 @@ export async function askProject(
   const chatSkills = await loadSkillsForPrompt(analysis.rootPath, projectId, question).catch(() => ({
     skills: [],
     mentions: [],
+    index: "",
   }));
   const skillsPrompt = renderSkillsForPrompt(chatSkills.skills);
   const messages: ChatMessage[] = [
@@ -1866,6 +1867,7 @@ const READ_ONLY_ACTIONS = new Set([
   "search_notes",
   "git_info",
   "list_skills",
+  "load_skill",
   "preview_skill_source",
   "list_mobile_devices",
 ]);
@@ -3041,6 +3043,7 @@ const ACTION_TOOL_GROUPS: Partial<Record<string, AgentToolGroup[]>> = {
   list_project_tools: ["skills"],
   create_project_tool: ["skills"],
   list_skills: ["skills"],
+  load_skill: ["core", "skills"],
   preview_skill_source: ["skills"],
   install_skill: ["skills"],
   set_skill_enabled: ["skills"],
@@ -3211,6 +3214,7 @@ export function agentToolCatalog(
     '{"action":"list_project_tools","args":{}}',
     '{"action":"list_mobile_devices","args":{}}',
     '{"action":"list_skills","args":{}}',
+    '{"action":"load_skill","args":{"key":"project:project-cie:ui-review"}}',
     '{"action":"preview_skill_source","args":{"source":"owner/repo","ref":"main"}}',
     '{"action":"check_toolchains","args":{}}',
     '{"action":"rescan_project","args":{}}',
@@ -4379,7 +4383,7 @@ ${lessons}` : "",
       ? "\n\nInspection profile: this task is read-only. Read at most 6 files, never re-read the same range, and finish with a compact report. Do not propose a large next-step list."
       : "";
   const skillLoad = await loadSkillsForPrompt(analysis.rootPath, projectId, instruction).catch(
-    () => ({ skills: [] as never[], mentions: [] as string[] }),
+    () => ({ skills: [] as never[], mentions: [] as string[], index: "" }),
   );
   const enabledSkills = skillLoad.skills;
   const mentionedSkill = skillLoad.mentions.length > 0;
@@ -4389,6 +4393,7 @@ ${lessons}` : "",
     toolGroups.includes("skills") ||
     mentionedSkill;
   const skillsPrompt = includeSkills ? renderSkillsForPrompt(enabledSkills) : "";
+  const capabilityIndex = skillLoad.index || "";
   if (skillLoad.mentions.length > 0) {
     log("info", "Skill mention", `${skillLoad.mentions.join(", ")} · used for this run only`);
   }
@@ -4398,7 +4403,7 @@ ${lessons}` : "",
       includeSkills ? "Skills loaded" : "Skills skipped",
       includeSkills
         ? `${enabledSkills.length} enabled · ${skillsPrompt.length} chars ≈ ${Math.round(skillsPrompt.length / 4)} tokens · ${enabledSkills.map((skill) => skill.record.name).join(", ")}`
-        : `${enabledSkills.length} enabled · focused task does not request skills`,
+        : `${enabledSkills.length} enabled · index only; full text loads with load_skill when needed`,
     );
   }
   const systemContent =
@@ -4407,6 +4412,7 @@ ${lessons}` : "",
       language: languageInstruction,
     }) +
     (skillsPrompt ? `\n\n${skillsPrompt}` : "") +
+    (capabilityIndex ? `\n\n${capabilityIndex}` : "") +
     "\n\nOutput protocol: reply with one JSON object per turn using action and args. For independent read-only work (read_file, find_in_file, search_code, list_files, diagnostics) you may batch up to 4 calls in one reply as {\"actions\":[{...},{...}]}; this saves a full context round-trip. Keep mutating actions to one per reply. Never use <commentary>, <analysis>, <thinking> tags, markdown fences, or prose outside the JSON. The JSON must be complete." +
     "\n\nVerification protocol: when the user asks why something is missing or broken, trace the real wiring (HTML <script>/<link>, imports, event handlers, selectors) and use browser_check/run_test_scenario for runtime proof. State the root cause with file:line evidence; never guess from feature names. For UI or game behavior, save a reusable scenario in .cie/agent/scenarios/<name>.json and run it with run_test_scenario. Do not repeat failures recorded in .cie/agent/LESSONS.md. If a tool call fails, correct its arguments (the file path key is \"path\") and retry the same tool in this run; never finish with a blocker for an error you can fix yourself. If a needed tool does not exist, create a project tool or a small script and use it. Before retrying a failed task, read the newest file under .cie/agent/runs/ to see the exact failed action and error instead of guessing. For timers, counters, toasts or end-screen text, verify stability with a browser_check step {\"action\":\"expectStable\",\"selector\":\"...\",\"durationMs\":800}; text that changes every animation frame means it is being rewritten inside requestAnimationFrame, not that the timer is too fast. Verify the REAL project entry page: a synthetic harness under .cie/ is not proof, even when it passes. If the target state is hard to reach, use an eval step on the real page to put it in that state, wait for delayed elements with waitForSelector, then assert them. When the user asks to apply your previous answer, treat its findings as authoritative and start editing; do not rescan the project." +
     "\n\nRuntime UI playbook:" +
@@ -4987,6 +4993,7 @@ ${lessons}` : "",
       "install_toolchain",
       "game_check",
       "list_skills",
+      "load_skill",
       "preview_skill_source",
       "install_skill",
       "set_skill_enabled",
@@ -5075,6 +5082,7 @@ ${lessons}` : "",
         rescan_project: "Rescanning the project index…",
         game_check: "Checking the game scene…",
         list_skills: "Listing skills…",
+        load_skill: "Loading a skill…",
         preview_skill_source: "Previewing a skill source…",
         install_skill: "Installing skills…",
         set_skill_enabled: "Updating a skill…",
@@ -6761,6 +6769,21 @@ ${lessons}` : "",
           ),
         ].join("\n");
         log("info", "Skills listed", `${listed.skills.length} total · ${enabled.length} enabled`);
+        ok = true;
+      } else if (action === "load_skill") {
+        const key = typeof args.key === "string" ? args.key.trim() : "";
+        if (!key) throw new Error("A skill key is required. Use list_skills to find it.");
+        const skill = await loadSkillForRun(analysis.rootPath, projectId, key);
+        observation = [
+          `Skill loaded for this run: ${skill.record.name} (${skill.record.key}) · ${skill.record.scope}`,
+          skill.record.description ? `Description: ${skill.record.description}` : "",
+          skill.record.allowedTools ? `Tools: ${skill.record.allowedTools}` : "",
+          "",
+          skill.content,
+        ]
+          .filter((line) => line !== "")
+          .join("\n");
+        log("info", "Skill loaded", `${skill.record.name} · ${skill.content.length} chars`);
         ok = true;
       } else if (action === "preview_skill_source") {
         const source = typeof args.source === "string" ? args.source.trim() : "";

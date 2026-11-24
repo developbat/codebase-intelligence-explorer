@@ -633,6 +633,7 @@ export type AiAgentAction =
   | "install_toolchain"
   | "game_check"
   | "list_skills"
+  | "load_skill"
   | "preview_skill_source"
   | "install_skill"
   | "set_skill_enabled"

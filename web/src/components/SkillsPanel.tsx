@@ -334,7 +334,7 @@ export function SkillsPanel({ projectId }: SkillsPanelProps) {
 
       <p className="skills-intro">
         {t(
-          "Skills are SKILL.md instruction packs discovered from project, built-in and global agent folders. Disabled skills are never sent automatically. Type @skill-name in a message to use a skill for that run only. Skill scripts run only after explicit approval.",
+          "Installed skills are enabled by default. The agent sees a compact capability index and loads a skill's full instructions only when a task matches it. Type @skill-name to force a skill for one run. Skill scripts run only after explicit approval.",
         )}
       </p>
 
@@ -721,7 +721,7 @@ export function SkillsPanel({ projectId }: SkillsPanelProps) {
         <ShieldCheck size={12} />
         <span>
           {t(
-            "Only enabled skills are injected. The agent uses up to {skills} skills, {chars} characters each, and {total} characters total.",
+            "Only enabled skills appear in the capability index. Full instructions load on demand; up to {skills} skills, {chars} characters each, and {total} characters total.",
             {
               skills: data?.limits.maxPromptSkills ?? 5,
               chars: data?.limits.maxCharsPerSkill ?? 6000,

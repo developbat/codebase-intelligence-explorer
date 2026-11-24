@@ -20,7 +20,7 @@ export function TourButton() {
         element: '[data-tour="open-project"]',
         popover: {
           title: t("Open a project"),
-          description: t("Paste a path or use Browse… to pick a local folder. Scanning is read-only."),
+          description: t("Paste a path or use Browse… to pick a local folder. Scanning builds the project graph, then Code Studio can edit and run it."),
           side: "right",
         },
       },

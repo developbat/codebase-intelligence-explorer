@@ -7,7 +7,9 @@ import {
   getSkill,
   listSkills,
   loadEnabledSkills,
+  loadSkillForRun,
   loadSkillsForPrompt,
+  renderSkillIndex,
   readSkillFile,
   runSkillScript,
   renderSkillsForPrompt,
@@ -77,7 +79,7 @@ test("discovers project, global and external skills with metadata", async () => 
     const review = result.skills.find((skill) => skill.name === "UI Review");
     assert.ok(review);
     assert.equal(review.scope, "project");
-    assert.equal(review.enabled, false);
+    assert.equal(review.enabled, true);
     assert.equal(review.hasScripts, true);
     assert.equal(review.hasReferences, true);
     assert.equal(review.allowedTools, "Read, Grep");
@@ -88,7 +90,7 @@ test("discovers project, global and external skills with metadata", async () => 
     const missing = result.skills.find((skill) => skill.name === "No Description");
     assert.match(missing?.warning ?? "", /no description/i);
     assert.equal(result.sources.find((source) => source.id === "project-cie")?.skillCount, 1);
-    assert.equal(result.enabledCount, 0);
+    assert.equal(result.enabledCount, 4);
   } finally {
     await fs.rm(cleanup, { recursive: true, force: true });
   }
@@ -113,7 +115,11 @@ test("enable state is persisted per project", async () => {
     assert.equal(after.skills[0]?.enabled, true);
     assert.equal(after.enabledCount, 1);
     const otherProject = await listSkills(project, "project-b", { dataDir, homeDir });
-    assert.equal(otherProject.skills[0]?.enabled, false);
+    assert.equal(otherProject.skills[0]?.enabled, true);
+
+    await setSkillEnabled(project, "project-b", otherProject.skills[0].key, false, { dataDir, homeDir });
+    const disabledProject = await listSkills(project, "project-b", { dataDir, homeDir });
+    assert.equal(disabledProject.skills[0]?.enabled, false);
 
     const enabled = await loadEnabledSkills(project, "project-a", { dataDir, homeDir });
     assert.equal(enabled.length, 1);
@@ -216,7 +222,37 @@ test("@skill mention loads a disabled skill for that run only", async () => {
       homeDir,
     });
     assert.equal(plain.mentions.length, 0);
-    assert.equal(plain.skills.length, 0);
+    assert.equal(plain.skills.length, 1);
+    assert.match(plain.index, /project:project-cie:code-review/);
+  } finally {
+    await fs.rm(cleanup, { recursive: true, force: true });
+  }
+});
+
+test("capability index lists enabled skills and loads their text on demand", async () => {
+  const { project, dataDir, homeDir, cleanup } = await roots();
+  try {
+    await writeSkill(
+      path.join(project, ".cie", "skills"),
+      "code-review",
+      "name: Code Review\ndescription: Reviews a diff.",
+      "CHECK THE DIFF",
+    );
+    const result = await listSkills(project, "capability", { dataDir, homeDir });
+    const index = renderSkillIndex(result.skills);
+    assert.match(index, /Capability index/);
+    assert.match(index, /Code Review/);
+    assert.match(index, /load_skill/);
+    const loaded = await loadSkillForRun(project, "capability", result.skills[0].key, {
+      dataDir,
+      homeDir,
+    });
+    assert.match(loaded.content, /CHECK THE DIFF/);
+    await setSkillEnabled(project, "capability", result.skills[0].key, false, { dataDir, homeDir });
+    await assert.rejects(
+      () => loadSkillForRun(project, "capability", result.skills[0].key, { dataDir, homeDir }),
+      /disabled/i,
+    );
   } finally {
     await fs.rm(cleanup, { recursive: true, force: true });
   }

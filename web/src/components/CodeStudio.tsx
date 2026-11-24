@@ -3746,43 +3746,53 @@ export function CodeStudio({
 
         <div className="studio-workflow-log" ref={workflowScrollRef}>
           {chatMessages.length === 0 && !chatBusy ? (
-            <div className="studio-workflow-empty">
+            <div className={`studio-workflow-empty ${chatTabs.length > 1 ? "is-compact" : ""}`}>
               <div className="studio-workflow-empty-icon">
                 <Bot size={20} />
               </div>
-              <strong>{t("One input. The agent handles the rest.")}</strong>
-              <span>
-                {t(
-                  "Ask a question, request an edit, run a command, or build a feature. The agent inspects the project, uses tools, and shows every step.",
-                )}
-              </span>
-              <div className="studio-workflow-quick">
-                <button
-                  onClick={() => void askProject(t("Explain this project using the analyzed graph and key files."))}
-                >
-                  <Sparkles size={11} /> {t("Explain this project")}
-                </button>
-                <button onClick={() => void summarizeFullProject()} disabled={!active || summaryBusy}>
-                  {summaryBusy ? <Loader2 size={11} className="spin" /> : <FileCode2 size={11} />}
-                  {t("Full project summary")}
-                </button>
-                <button
-                  onClick={() => void askProject(t("Find the main entry points and explain the request flow."))}
-                >
-                  {t("Main entry points")}
-                </button>
-                <button
-                  onClick={() =>
-                    void askProject(
-                      t(
-                        "Diagnose why the requested behavior is not working. Inspect the real entry points and asset wiring, run browser_check or a saved test scenario, identify the root cause with file:line evidence, then apply the minimal fix and verify it.",
-                      ),
-                    )
-                  }
-                >
-                  <AlertTriangle size={11} /> {t("Diagnose")}
-                </button>
-              </div>
+              {chatTabs.length <= 1 ? (
+                <>
+                  <strong>{t("One input. The agent handles the rest.")}</strong>
+                  <span>
+                    {t(
+                      "Ask a question, request an edit, run a command, or build a feature. The agent inspects the project, uses tools, and shows every step.",
+                    )}
+                  </span>
+                  <div className="studio-workflow-quick">
+                    <button
+                      onClick={() => void askProject(t("Explain this project using the analyzed graph and key files."))}
+                    >
+                      <Sparkles size={11} /> {t("Explain this project")}
+                    </button>
+                    <button onClick={() => void summarizeFullProject()} disabled={!active || summaryBusy}>
+                      {summaryBusy ? <Loader2 size={11} className="spin" /> : <FileCode2 size={11} />}
+                      {t("Full project summary")}
+                    </button>
+                    <button
+                      onClick={() => void askProject(t("Find the main entry points and explain the request flow."))}
+                    >
+                      {t("Main entry points")}
+                    </button>
+                    <button
+                      onClick={() =>
+                        void askProject(
+                          t(
+                            "Diagnose why the requested behavior is not working. Inspect the real entry points and asset wiring, run browser_check or a saved test scenario, identify the root cause with file:line evidence, then apply the minimal fix and verify it.",
+                          ),
+                        )
+                      }
+                    >
+                      <AlertTriangle size={11} /> {t("Diagnose")}
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <span>
+                  {t(
+                    "Ask a question, request an edit, run a command, or build a feature. The agent inspects the project, uses tools, and shows every step.",
+                  )}
+                </span>
+              )}
             </div>
           ) : (
             chatMessages.map((workflowMessage, index) => {

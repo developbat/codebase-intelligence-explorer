@@ -5,6 +5,7 @@ import {
   ExternalLink,
   Eye,
   EyeOff,
+  HardDrive,
   KeyRound,
   Loader2,
   PlugZap,
@@ -53,6 +54,7 @@ export function AiSettingsDialog({
   const [models, setModels] = useState<string[]>([]);
 
   const [adding, setAdding] = useState(false);
+  const [showLocalModels, setShowLocalModels] = useState(false);
   const [editingCustomId, setEditingCustomId] = useState<string | null>(null);
   const [customName, setCustomName] = useState("");
   const [customBaseUrl, setCustomBaseUrl] = useState("");
@@ -78,6 +80,7 @@ export function AiSettingsDialog({
     }
     const next = settings?.defaultProvider ?? "openai";
     setProvider(next);
+    setShowLocalModels(next === "local");
     if (settings?.providers.find((item) => item.id === next)?.custom) {
       editCustom(next);
     } else {
@@ -117,6 +120,7 @@ export function AiSettingsDialog({
   if (!open) return null;
 
   function startAdd() {
+    setShowLocalModels(false);
     setAdding(true);
     setEditingCustomId(null);
     setCustomName("");
@@ -130,6 +134,7 @@ export function AiSettingsDialog({
   function editCustom(id: string) {
     const target = settings?.providers.find((item) => item.id === id);
     if (!target) return;
+    setShowLocalModels(false);
     setAdding(false);
     setEditingCustomId(id);
     setProvider(id);
@@ -144,6 +149,7 @@ export function AiSettingsDialog({
   function cancelCustom() {
     setAdding(false);
     setEditingCustomId(null);
+    setShowLocalModels(false);
     setProvider(settings?.defaultProvider ?? "openai");
   }
 
@@ -364,18 +370,27 @@ export function AiSettingsDialog({
 
         <div className="ai-settings-layout">
           <div className="ai-provider-list">
-            <LocalModelsPanel onSaved={onSaved} />
-            <button className="ai-provider ai-provider-add" onClick={startAdd}>
+            <button
+              className={`ai-provider ai-provider-local ${showLocalModels ? "is-active" : ""}`}
+              onClick={() => {
+                setShowLocalModels(true);
+                setAdding(false);
+                setEditingCustomId(null);
+                setMessage(null);
+              }}
+            >
               <span className="ai-provider-icon">
-                <Plus size={14} />
+                <HardDrive size={14} />
               </span>
               <span className="ai-provider-main">
-                <span className="ai-provider-name">{t("Add provider")}</span>
-                <span className="ai-provider-state">{t("Custom OpenAI-compatible endpoint")}</span>
+                <span className="ai-provider-name">{t("Local model provider")}</span>
+                <span className="ai-provider-state">{t("Models you can run on your own device")}</span>
               </span>
             </button>
 
-            {providerList.map((item) => (
+            {providerList
+              .filter((item) => item.id !== "local")
+              .map((item) => (
               <button
                 key={item.id}
                 className={`ai-provider ${
@@ -385,6 +400,7 @@ export function AiSettingsDialog({
                   if (item.custom) {
                     editCustom(item.id);
                   } else {
+                    setShowLocalModels(false);
                     setAdding(false);
                     setEditingCustomId(null);
                     setProvider(item.id);
@@ -411,17 +427,44 @@ export function AiSettingsDialog({
                   <span className="ai-default-badge">{t("Default")}</span>
                 ) : null}
               </button>
-            ))}
+              ))}
 
+            <button className="ai-provider ai-provider-add" onClick={startAdd}>
+              <span className="ai-provider-icon">
+                <Plus size={14} />
+              </span>
+              <span className="ai-provider-main">
+                <span className="ai-provider-name">{t("Add custom provider")}</span>
+                <span className="ai-provider-state">{t("OpenAI-compatible endpoint or local server")}</span>
+              </span>
+            </button>
           </div>
 
           <div className="ai-provider-form">
-            {showingCustomForm ? (
+            {showLocalModels ? (
+              <div className="ai-local-pane">
+                <div className="ai-form-heading">
+                  <span>{t("Local model provider")}</span>
+                  <span className="ai-local-badge">{t("On this device")}</span>
+                </div>
+                <p className="ai-field-note">
+                  {t(
+                    "Models you can run on your own device. Download a compatible model once, then use it without an API key.",
+                  )}
+                </p>
+                <LocalModelsPanel onSaved={onSaved} />
+              </div>
+            ) : showingCustomForm ? (
               <>
                 <div className="ai-form-heading">
                   <span>{adding ? t("New provider") : t("Edit provider")}</span>
                   <span className="ai-custom-badge">{t("OpenAI-compatible")}</span>
                 </div>
+                <p className="ai-field-note">
+                  {t(
+                    "Add any OpenAI-compatible endpoint: a hosted provider, a private gateway, LM Studio, vLLM or Ollama.",
+                  )}
+                </p>
 
                 <label className="field-label">{t("Provider name")}</label>
                 <input

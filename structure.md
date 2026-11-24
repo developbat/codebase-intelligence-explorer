@@ -394,7 +394,41 @@ preview and document read/write tools cover the common path.
 Terminal output has an inline search filter; arbitrary log search can also use
 `grep` in the terminal.
 
-### 4.13 Persistence
+### 4.13 Capabilities, prompts and providers
+
+**Skills/capabilities.** Installed skills are enabled by default. The agent
+receives a compact capability index (key, name, description and allowed tools)
+instead of every full skill body. When a task matches, it calls
+`load_skill` with the key; the full instructions are returned for that run
+only. `@skill-name` forces one skill for a run. Disabling a skill removes it
+from the index. Settings → Skills uses a single page scroll, so long lists and
+the skill body are reachable without a nested scroll trap.
+
+**Prompts.** Defaults and global overrides apply to every project. The prompt
+manager now opens on **All projects** unless the selected prompt already has a
+project override; **This project** is an explicit local override. This avoids
+the impression that every prompt is project-specific by default.
+
+**Providers.** Model providers keeps one list; the green **Local model
+provider** entry opens its content on the right with installed models, model
+folder discovery and a compatible-model catalog (name, approximate size,
+description, download). **Add custom provider** is the green action below the
+list and explains that any OpenAI-compatible endpoint (hosted, private gateway,
+LM Studio, vLLM or Ollama) can be added. Built-in provider buttons still open
+their configuration on the right.
+
+**Workspace copy.** Capability-limiting marketing/status strings such as
+“source code is never modified or executed” were removed. Intelligence
+explores the graph; Code Studio can edit, run, test, preview and verify the
+same project. Mode-specific read-only labels (Ask/Plan/Research) remain because
+they describe an explicit user-selected mode.
+
+**Home and new-chat density.** The saved-project list fills the sidebar and
+scrolls instead of ending in a clipped note. New chat tabs show only the agent
+icon and one-line guidance; the full intro and quick actions stay on the first
+chat tab of a project.
+
+### 4.14 Persistence
 
 - Project analysis: application data directory (project id based).
 - Agent notes: `<project>/.cie/agent/`.

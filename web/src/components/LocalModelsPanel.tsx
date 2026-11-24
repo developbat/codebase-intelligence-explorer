@@ -4,7 +4,12 @@ import type { AiSettingsPublic } from "../../../shared/ai";
 import { api } from "../api";
 import { useI18n } from "../i18n";
 
-const SUGGESTED = ["qwen2.5-coder:1.5b", "llama3.2:3b"];
+const SUGGESTED = [
+  { name: "qwen2.5-coder:1.5b", size: "~1.0 GB", note: "Fast code reading and summaries" },
+  { name: "llama3.2:3b", size: "~2.0 GB", note: "Small general-purpose chat model" },
+  { name: "deepseek-coder:6.7b", size: "~3.8 GB", note: "Stronger code understanding" },
+  { name: "qwen2.5-coder:7b", size: "~4.7 GB", note: "Best local coding quality" },
+];
 
 interface LocalStatus {
   installed: boolean;
@@ -26,7 +31,7 @@ function formatSize(bytes: number): string {
 export function LocalModelsPanel({ onSaved }: { onSaved: (settings: AiSettingsPublic) => void }) {
   const { t } = useI18n();
   const [status, setStatus] = useState<LocalStatus | null>(null);
-  const [model, setModel] = useState(SUGGESTED[0]);
+  const [model, setModel] = useState(SUGGESTED[0].name);
   const [dirDraft, setDirDraft] = useState("");
   const [dirs, setDirs] = useState<{ dir: string; models: string[]; sizeBytes: number }[]>([]);
   const [busy, setBusy] = useState<"status" | "start" | "pull" | "dir" | "discover" | "use" | null>(null);
@@ -244,12 +249,36 @@ export function LocalModelsPanel({ onSaved }: { onSaved: (settings: AiSettingsPu
           {t("Download model")}
         </button>
       </div>
-      <div className="local-model-suggestions">
-        {SUGGESTED.map((item) => (
-          <button key={item} onClick={() => void pull(item)} disabled={busy !== null}>
-            {item}
-          </button>
-        ))}
+      <div className="local-model-catalog">
+        <span className="local-model-catalog-head">
+          {t("Compatible models for this device")}
+        </span>
+        {SUGGESTED.map((item) => {
+          const installed = (status?.models ?? []).some((candidate) => candidate === item.name);
+          return (
+            <div key={item.name} className={installed ? "is-installed" : ""}>
+              <span className="local-model-catalog-name">
+                <code>{item.name}</code>
+                <small>{item.note}</small>
+              </span>
+              <span className="local-model-catalog-size">{item.size}</span>
+              <button
+                onClick={() => void pull(item.name)}
+                disabled={busy !== null || installed}
+                title={installed ? t("Already downloaded") : t("Download model")}
+              >
+                {busy === "pull" ? (
+                  <Loader2 size={10} className="spin" />
+                ) : installed ? (
+                  <Check size={10} />
+                ) : (
+                  <Download size={10} />
+                )}
+                {installed ? t("Installed") : t("Download")}
+              </button>
+            </div>
+          );
+        })}
       </div>
       {message ? <small className="local-model-message">{message.slice(-1_000)}</small> : null}
     </section>

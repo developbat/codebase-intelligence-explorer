@@ -20,7 +20,6 @@ import {
   Info,
   Layers,
   ListTree,
-  Lock,
   Network,
   Package,
   Radio,
@@ -426,7 +425,7 @@ export function Inspector({
           </div>
           <span className="inspector-header-actions">
             <span className="inspector-header-meta">
-              <Lock size={11} /> {t("read-only")}
+              <Network size={11} /> {t("graph view")}
             </span>
             <button className="icon-button subtle" onClick={onClose} aria-label={t("Close inspector")}>
               <X size={13} />
@@ -525,7 +524,7 @@ export function Inspector({
         </div>
         <span className="inspector-header-actions">
           <span className="inspector-header-meta">
-            <Lock size={11} /> {t("read-only")}
+            <Network size={11} /> {t("graph view")}
           </span>
           <button className="icon-button subtle" onClick={onClose} aria-label={t("Close inspector")}>
             <X size={13} />

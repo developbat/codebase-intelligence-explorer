@@ -954,11 +954,6 @@ export default function App() {
             </select>
           ) : null}
           {analysis && product === "intelligence" ? (
-            <span className="readonly-pill" title={t("Read-only — source files are never modified")}>
-              <Lock size={11} /> {t("Read-only")}
-            </span>
-          ) : null}
-          {analysis && product === "intelligence" ? (
             <button
               className={`icon-button topbar-icon ${inspectorOpen ? "is-active" : ""}`}
               onClick={() => setInspectorOpen((value) => !value)}
@@ -1521,7 +1516,7 @@ export default function App() {
               {t("{percent}% verified", { percent: confirmedPercent })}
             </>
           ) : (
-            t("Source code is never modified or executed.")
+            t("Analyze, edit, run and verify in one workspace.")
           )}
         </span>
         <span className="status-right">
@@ -1533,7 +1528,7 @@ export default function App() {
             </>
           ) : (
             <>
-              <ShieldCheck size={12} /> {t("read-only")}
+              <ShieldCheck size={12} /> {t("local workspace")}
             </>
           )}
         </span>
@@ -1553,7 +1548,7 @@ export default function App() {
                   : t("Loading project")}
             </h3>
             <p className="busy-sub">
-              {busy === "load" ? t("Opening the saved knowledge graph…") : t("Reading source in read-only mode.")}
+              {busy === "load" ? t("Opening the saved knowledge graph…") : t("Reading project files…")}
             </p>
             {busy !== "load" ? (
               <div className="step-list">
@@ -1567,7 +1562,7 @@ export default function App() {
               </div>
             ) : null}
             <div className="busy-note">
-              <Lock size={12} /> {t("Source files are never modified, executed, or sent anywhere.")}
+              <ShieldCheck size={12} /> {t("Local workspace · analyze, edit, run and verify.")}
             </div>
           </div>
         </div>

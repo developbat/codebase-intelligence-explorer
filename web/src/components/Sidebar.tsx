@@ -13,7 +13,6 @@ import {
   FolderTree,
   GitBranch,
   Globe2,
-  Lock,
   Network,
   Orbit,
   Plus,
@@ -214,7 +213,7 @@ export function Sidebar({
 
   return (
     <aside className="sidebar">
-      <div className="sidebar-section">
+      <div className={`sidebar-section ${analysis ? "" : "is-recent-only"}`}>
         <button className="open-project-button" data-tour="open-project" onClick={onOpenDialog}>
           <Plus size={16} />
           {t("Open Project")}
@@ -274,9 +273,6 @@ export function Sidebar({
                 </div>
               ))}
             </div>
-            <small className="sidebar-recent-note">
-              {t("Click to reopen the saved analysis. Use Open Project for a new folder.")}
-            </small>
           </div>
         ) : null}
 
@@ -455,7 +451,7 @@ export function Sidebar({
         ) : null}
       </div>
 
-      <div className="sidebar-scroll">
+      <div className={`sidebar-scroll ${analysis ? "" : "is-empty"}`}>
         {analysis ? (
           <div className="sidebar-section tree-section" data-tour="tree">
             <div className="section-heading">
@@ -508,7 +504,7 @@ export function Sidebar({
 
       <div className="sidebar-footer">
         <span className="readonly-badge">
-          <Lock size={12} /> {t("Read-only")}
+          <Globe2 size={12} /> {t("Explore & build")}
         </span>
         <span className="footer-meta">{t("{count} functions", { count: functionCount })}</span>
       </div>

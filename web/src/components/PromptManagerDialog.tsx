@@ -59,7 +59,7 @@ export function PromptManagerDialog({
         if (first) {
           setSelectedId(first.id);
           setSystem(first.system);
-          setScope(first.source === "global" || !projectId ? "global" : "project");
+          setScope(first.source === "project" && projectId ? "project" : "global");
         }
       })
       .catch((error) => {
@@ -81,7 +81,7 @@ export function PromptManagerDialog({
   function selectPrompt(prompt: AiPromptDefinition) {
     setSelectedId(prompt.id);
     setSystem(prompt.system);
-    setScope(prompt.source === "global" || !projectId ? "global" : "project");
+    setScope(prompt.source === "project" && projectId ? "project" : "global");
     setShowPreview(false);
     setShowDiff(false);
     setHistoryOpen(false);
@@ -322,11 +322,11 @@ export function PromptManagerDialog({
                   <span>{t("{tokens} tokens", { tokens: tokenEstimate })}</span>
                 </div>
 
-                {scope === "global" ? (
-                  <div className="prompt-warning">
-                    {t("Global overrides affect every project. Use project scope for local changes.")}
-                  </div>
-                ) : null}
+                <div className="prompt-scope-note">
+                  {scope === "project"
+                    ? t("A project override applies only to this project and wins over global/default prompts.")
+                    : t("Global and default prompts apply to every project. Switch to This project only for local changes.")}
+                </div>
 
                 <div className="prompt-variables">
                   {selected.variables.map((variable) => (

@@ -330,7 +330,7 @@ async function scanSource(
       source: source.id,
       sourceLabel: source.label,
       directory: skillDir,
-      enabled: enabledMap[key] === true,
+      enabled: enabledMap[key] !== false,
       hasScripts,
       hasReferences,
       allowedTools: parsed.allowedTools,
@@ -559,12 +559,44 @@ export async function runSkillScript(
   }
 }
 
+export function renderSkillIndex(skills: SkillRecord[]): string {
+  const enabled = skills.filter((skill) => skill.enabled);
+  if (enabled.length === 0) return "";
+  const seen = new Set<string>();
+  const lines: string[] = [
+    "## Capability index (enabled skills)",
+    "These skills are installed and enabled, but their full text is not loaded yet. When a task clearly matches one, call load_skill with its key; the instructions are returned for this run only.",
+  ];
+  for (const skill of enabled.slice(0, 40)) {
+    const name = skill.name.toLowerCase();
+    if (seen.has(name)) continue;
+    seen.add(name);
+    const description = (skill.description || "No description.").replace(/\s+/g, " ").slice(0, 180);
+    const tools = skill.allowedTools ? ` · tools: ${skill.allowedTools}` : "";
+    lines.push(`- ${skill.key} · ${skill.name} [${skill.scope}] — ${description}${tools}`);
+  }
+  return lines.join("\n");
+}
+
+export async function loadSkillForRun(
+  projectRoot: string,
+  projectId: string,
+  key: string,
+  options: SkillsOptions = {},
+): Promise<EnabledSkill> {
+  const { records } = await scanSkills(projectRoot, projectId, options);
+  const record = records.find((item) => item.key === key || item.name.toLowerCase() === key.toLowerCase());
+  if (!record) throw new Error(`Skill not found: ${key}`);
+  if (!record.enabled) throw new Error(`Skill is disabled: ${record.name}`);
+  return { record, content: await readSkillContent(record) };
+}
+
 export async function loadSkillsForPrompt(
   projectRoot: string,
   projectId: string,
   instruction: string,
   options: SkillsOptions = {},
-): Promise<{ skills: EnabledSkill[]; mentions: string[] }> {
+): Promise<{ skills: EnabledSkill[]; mentions: string[]; index: string }> {
   const { records } = await scanSkills(projectRoot, projectId, options);
   const tokens = [...instruction.matchAll(/@([a-zA-Z0-9][\w.-]*)/g)].map((match) =>
     match[1].toLowerCase(),
@@ -590,6 +622,7 @@ export async function loadSkillsForPrompt(
   return {
     skills,
     mentions: mentioned.map((record) => record.name),
+    index: renderSkillIndex(records),
   };
 }
 

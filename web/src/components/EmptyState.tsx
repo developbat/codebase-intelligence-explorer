@@ -33,8 +33,8 @@ interface EmptyStateProps {
 const FEATURES = [
   {
     icon: FolderOpen,
-    title: "Read-only intelligence",
-    text: "Folder trees, manifests and source files are analyzed without changing anything.",
+    title: "Project intelligence",
+    text: "Folder trees, manifests, symbols and source files become a navigable knowledge graph.",
   },
   {
     icon: Code2,
@@ -77,7 +77,7 @@ export function EmptyState({ onAnalyze, busy, error, lastPath }: EmptyStateProps
       <div className="empty-glow" />
       <div className="empty-content">
         <div className="empty-badge">
-          <Sparkles size={13} /> {t("Read-only intelligence + write-enabled Code Studio")}
+          <Sparkles size={13} /> {t("Code intelligence + agentic Code Studio")}
         </div>
         <h1>
           {t("Understand your code.")}
@@ -86,7 +86,7 @@ export function EmptyState({ onAnalyze, busy, error, lastPath }: EmptyStateProps
         </h1>
         <p className="empty-lede">
           {t(
-            "Analyze a TypeScript/JavaScript, PHP or Python project read-only and explore its files, symbols, routes and dependencies as a knowledge graph. Switch to Code Studio to edit the same project, run commands, test, preview and let the agent plan and code.",
+            "Analyze a TypeScript/JavaScript, PHP or Python project and explore its files, symbols, routes and dependencies as a knowledge graph. Edit the same project in Code Studio, run commands, test, preview, and let the agent plan, build and verify the work.",
           )}
         </p>
 
@@ -123,11 +123,11 @@ export function EmptyState({ onAnalyze, busy, error, lastPath }: EmptyStateProps
 
         <div className="empty-product-note">
           <span>
-            <Network size={12} /> {t("Intelligence stays read-only")}
+            <Network size={12} /> {t("Explore the project graph")}
           </span>
           <span className="empty-product-sep" aria-hidden="true">→</span>
           <span>
-            <Code2 size={12} /> {t("Code Studio writes with approvals")}
+            <Code2 size={12} /> {t("Build, run and verify in Code Studio")}
           </span>
         </div>
 
@@ -157,7 +157,7 @@ export function EmptyState({ onAnalyze, busy, error, lastPath }: EmptyStateProps
             <CheckCircle2 size={13} /> {t("TS/JS · PHP · Python · file-level multi-language")}
           </span>
           <span>
-            <Lock size={13} /> {t("Intelligence read-only · Studio writes with approval")}
+            <Code2 size={13} /> {t("Graph, editor, terminal, tests and preview in one workspace")}
           </span>
         </div>
       </div>
@@ -300,7 +300,7 @@ export function OpenProjectDialog({
         {mode === "open" ? (
           <>
             <p className="modal-text">
-              {t("Enter the full path of the folder to analyze. It is opened read-only; no files are changed.")}
+              {t("Enter the full path of the folder to analyze. It opens in the workspace, where you can explore, edit, run and test the same project.")}
             </p>
             <form
               onSubmit={(event) => {
