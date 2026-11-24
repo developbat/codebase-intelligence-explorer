@@ -14194,6 +14194,31 @@ button.canvas-stat {
   font-size: 7px;
 }
 
+.agent-plan-action {
+  padding: 1px 5px;
+  border: 1px solid rgba(74, 222, 128, 0.28);
+  border-radius: 3px;
+  background: rgba(34, 197, 94, 0.08);
+  color: #9df0b8;
+  font-family: var(--mono);
+  font-size: 7px;
+  text-transform: uppercase;
+}
+
+.agent-plan-action.is-list,
+.agent-plan-action.is-locate,
+.agent-plan-action.is-explain {
+  border-color: rgba(110, 168, 254, 0.28);
+  background: rgba(59, 130, 246, 0.08);
+  color: #a9c9f5;
+}
+
+.agent-plan-action.is-verify {
+  border-color: rgba(245, 184, 75, 0.3);
+  background: rgba(245, 184, 75, 0.08);
+  color: #e6c284;
+}
+
 .agent-plan-risk {
   display: inline-flex;
   align-items: center;

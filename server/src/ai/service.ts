@@ -120,6 +120,11 @@ import { appendLesson, readLessons } from "../tasks";
 import { ensureProjectMap } from "../projectMap";
 import { buildChangeReport } from "../changes";
 import { auditClaims } from "./claims";
+import {
+  actionPlanInstruction,
+  resolveActionPlan,
+  type ActionPlan,
+} from "./actions";
 import type { ExtractionTable } from "../../../shared/extraction";
 import {
   applyMappingsToContent,
@@ -3663,12 +3668,14 @@ function buildPlanFromIntent(
   intent: IntentAnalysis,
   activeFile: string | undefined,
   verificationCommand: string | undefined,
+  actionPlan?: ActionPlan,
 ): AiAgentPlan {
-  const needsWrite = intent.kind === "edit" || intent.kind === "scaffold";
+  const needsWrite = actionPlan?.needsWrite ?? (intent.kind === "edit" || intent.kind === "scaffold");
   const needsCommand =
-    intent.kind === "run" ||
-    intent.verification === "test" ||
-    intent.verification === "build";
+    actionPlan?.needsCommand ??
+    (intent.kind === "run" ||
+      intent.verification === "test" ||
+      intent.verification === "build");
   const planIntent: AiAgentPlan["intent"] =
     intent.kind === "question" || intent.kind === "analyze"
       ? "question"
@@ -3688,7 +3695,24 @@ function buildPlanFromIntent(
         ? [activeFile]
         : [];
   const steps: AiAgentPlan["steps"] =
-    planIntent === "question"
+    actionPlan?.action === "list"
+      ? [
+          { label: "Extract the complete inventory with extract_entities" },
+          { label: "Verify the total and answer with every item" },
+        ]
+      : actionPlan?.action === "locate"
+        ? [
+            { label: "Search for the definition" },
+            { label: "Read the exact range" },
+            { label: "Answer with file:line evidence" },
+          ]
+        : actionPlan?.action === "verify"
+          ? [
+              { label: "Inspect the verification setup" },
+              { label: "Run the detected test/typecheck/browser check" },
+              { label: "Report the real result" },
+            ]
+          : planIntent === "question"
       ? [
           { label: "Inspect relevant files" },
           { label: "Answer with evidence" },
@@ -3707,6 +3731,8 @@ function buildPlanFromIntent(
           ];
   return {
     intent: planIntent,
+    action: actionPlan?.action,
+    reason: actionPlan?.reason,
     summary: intent.understanding,
     needsWrite,
     needsCommand,
@@ -4133,13 +4159,20 @@ export async function runAgentTask(
     return verification;
   };
 
+  const actionPlanSource = options.workBriefText?.trim() || instruction;
+  const actionPlan = resolveActionPlan(actionPlanSource, options.intent);
   let plan = options.intent
-    ? buildPlanFromIntent(options.intent, options.activeFile, verificationCommand)
+    ? buildPlanFromIntent(options.intent, options.activeFile, verificationCommand, actionPlan)
     : buildAgentPlan(analysis, instruction, {
         activeFile: options.activeFile,
         askMode: readOnlyMode,
         verificationCommand,
       });
+  plan = {
+    ...plan,
+    action: actionPlan.action,
+    reason: actionPlan.reason,
+  };
   if (readOnlyMode) {
     plan = {
       ...plan,
@@ -4196,7 +4229,7 @@ export async function runAgentTask(
     (options.intent?.scope === "trivial" || options.intent?.scope === "small");
   const contextMode = options.intent?.context ?? "project";
   const historyMode = options.intent?.history ?? "recent";
-  const workBriefSource = options.workBriefText?.trim() || instruction;
+  const workBriefSource = actionPlanSource;
   const workBrief = contextMode !== "none" ? resolveWorkBrief(workBriefSource) : null;
   const extractionBrief = workBrief?.mode === "extract";
   const compoundChange =

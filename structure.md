@@ -158,6 +158,28 @@ Choosing a project option in the UI calls `onOpenProjectWithPrompt`, which loads
 that project and reruns the original request. Candidate projects come from
 `listRecent()`, and the detection logic is shared in `shared/projectMatch.ts`.
 
+#### Action planner
+
+After intent resolution, a deterministic action planner chooses one explicit
+action before tools:
+
+| Action | Used for | Gates |
+|---|---|---|
+| `explain` | explanation questions | read-only |
+| `locate` | where/defined questions | search + focused reads |
+| `list` | complete inventories | `extract_entities` + complete-list gate |
+| `edit` | code/asset changes | focused edit + verification |
+| `verify` | test/typecheck/build requests | command/browser evidence, no edits |
+| `run` | execute app/command | command + real output |
+| `scaffold` | new project/skeleton | create + dependency/build verification |
+| `tool` | project tools/skills | create/reuse tool + run it |
+
+The action is derived from the **original user goal** (`workBriefText`), not
+the task-loop wrapper. It is added to the plan card (`LIST`, `LOCATE`, `VERIFY`,
+…) and injected into the prompt with action-specific instructions. It does not
+replace intent; intent supplies scope/areas/verification, action supplies the
+expected work shape.
+
 ### 4.3 Task queue
 
 `server/src/ai/loop.ts` creates or reuses a task queue:

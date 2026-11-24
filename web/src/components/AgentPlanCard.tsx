@@ -26,8 +26,32 @@ export function AgentPlanCard({
     : allowCommands
       ? t("pre-approved")
       : t("will ask");
+  const actionLabel =
+    plan.action === "list"
+      ? t("List")
+      : plan.action === "locate"
+        ? t("Locate")
+        : plan.action === "verify"
+          ? t("Verify")
+          : plan.action === "run"
+            ? t("Run")
+            : plan.action === "edit"
+              ? t("Edit")
+              : plan.action === "scaffold"
+                ? t("Create project")
+                : plan.action === "tool"
+                  ? t("Project tool")
+                  : t("Explain");
   const summary =
-    plan.intent === "question" || plan.intent === "explain"
+    plan.action === "list"
+      ? t("Extract a complete list and answer with every item.")
+      : plan.action === "locate"
+        ? t("Find the exact definition and answer with file:line evidence.")
+        : plan.action === "verify"
+          ? t("Run the detected verification and report the actual result.")
+          : plan.action === "run"
+            ? t("Inspect the project, run the requested command with permission, and report the output.")
+            : plan.intent === "question" || plan.intent === "explain"
       ? t("Answer from {count} likely files and the project index.", { count: plan.scope.length })
       : plan.intent === "run"
         ? t("Inspect the project, run the requested command with permission, and report the output.")
@@ -44,6 +68,7 @@ export function AgentPlanCard({
           <ListChecks size={12} /> {t("Plan")}
         </span>
         <span className="agent-plan-intent">{t(plan.intent)}</span>
+        {plan.action ? <span className={`agent-plan-action is-${plan.action}`}>{actionLabel}</span> : null}
         <span className={`agent-plan-risk is-${plan.risk}`}>
           {plan.risk === "high" ? <ShieldAlert size={10} /> : <ShieldCheck size={10} />}
           {t(plan.risk)} {t("risk")}

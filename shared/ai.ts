@@ -751,8 +751,22 @@ export interface AiAgentPlanStep {
   detail?: string;
 }
 
+export type AiActionKind =
+  | "explain"
+  | "locate"
+  | "list"
+  | "edit"
+  | "verify"
+  | "run"
+  | "scaffold"
+  | "tool";
+
 export interface AiAgentPlan {
   intent: AiAgentIntent;
+  /** Explicit post-intent action selected by the deterministic action planner. */
+  action?: AiActionKind;
+  /** Short internal reason for the selected action. */
+  reason?: string;
   summary: string;
   needsWrite: boolean;
   needsCommand: boolean;
