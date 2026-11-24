@@ -292,7 +292,22 @@ At finish, `auditClaims()` checks the summary against tool evidence:
 An unsupported claim rejects the finish with an actionable observation. A second
 attempt gets an explicit **Evidence warning** instead of looping forever.
 
-### 4.10 Persistence
+### 4.10 Extraction table UI
+
+When `extract_entities` runs, the last extraction is returned as
+`AiAgentResult.extraction` and rendered under the assistant answer:
+
+- kind/total/unique/truncated header,
+- table with localized column labels,
+- clickable rows that open the file at the extracted line,
+- **Copy CSV**, **Download CSV**, **Copy Markdown**, **Download Markdown**,
+- first 50 rows by default, “Show all” for larger lists.
+
+CSV/Markdown generation is shared in `shared/extraction.ts`, so exports match
+the API extraction data. The chat serializer also persists `extraction`,
+`readMap` and `changeReport` with the conversation.
+
+### 4.11 Persistence
 
 - Project analysis: application data directory (project id based).
 - Agent notes: `<project>/.cie/agent/`.

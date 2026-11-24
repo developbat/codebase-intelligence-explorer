@@ -141,6 +141,8 @@ import { useI18n } from "../i18n";
 import { ProjectSwitcher } from "./ProjectSwitcher";
 import { MarkdownText } from "./MarkdownText";
 import { GitDiffView } from "./GitDiffView";
+import { ExtractionTableView } from "./ExtractionTable";
+import type { ExtractionTable } from "../../../shared/extraction";
 import { formatTokens } from "./UsageDialog";
 import { formatUsd } from "../../../shared/pricing";
 import { modelSupportsStudio } from "../../../shared/modelCapabilities";
@@ -757,6 +759,7 @@ export function CodeStudio({
     intent?: IntentAnalysis;
     changeReport?: ChangeReport;
     readMap?: AiReadMapEntry[];
+    extraction?: ExtractionTable;
   };
   type StudioChatTab = { id: string; title: string; createdAt: string; updatedAt: string };
   const [chatMessages, setChatMessages] = useState<StudioChatMessage[]>([]);
@@ -2477,7 +2480,7 @@ export function CodeStudio({
   function serializeChatMessages(messages: StudioChatMessage[]) {
     return messages
       .slice(-40)
-      .map(({ role, content, evidence, tokenUsage, logs, plan, planPath, mode, provider, model, taskQueue, intent }) => ({
+      .map(({ role, content, evidence, tokenUsage, logs, plan, planPath, mode, provider, model, taskQueue, intent, changeReport, readMap, extraction }) => ({
         role,
         content,
         evidence,
@@ -2490,6 +2493,9 @@ export function CodeStudio({
         model,
         taskQueue,
         intent,
+        changeReport,
+        readMap,
+        extraction,
       }));
   }
 
@@ -2840,6 +2846,7 @@ export function CodeStudio({
           intent: lastIntentRef.current ?? undefined,
           changeReport: result.changeReport,
           readMap: result.readMap,
+          extraction: result.extraction,
         },
       ]);
       if (result.changedFiles.length > 0) {
@@ -3882,6 +3889,12 @@ export function CodeStudio({
                     workflowMessage.content
                   )}
                 </div>
+                {workflowMessage.role === "assistant" && workflowMessage.extraction ? (
+                  <ExtractionTableView
+                    table={workflowMessage.extraction}
+                    onOpenFile={(path, line) => void openFileAt(path, line)}
+                  />
+                ) : null}
                 {workflowMessage.role === "assistant" &&
                 ((workflowMessage.steps && workflowMessage.steps.length > 0) ||
                   (workflowMessage.evidence && workflowMessage.evidence.length > 0)) ? (

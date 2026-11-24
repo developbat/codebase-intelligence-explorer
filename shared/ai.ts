@@ -1,6 +1,7 @@
 import type { ClarificationRequest, IntentAnalysis } from "./intent";
 import type { ProjectTaskQueue } from "./tasks";
 import type { ChangeReport } from "./types";
+import type { ExtractionTable } from "./extraction";
 
 export type BuiltInAiProviderId =
   | "openai"
@@ -723,6 +724,8 @@ export interface AiAgentResult {
   changeReport?: ChangeReport;
   /** Files/ranges/symbols actually read by tools in this run. */
   readMap?: AiReadMapEntry[];
+  /** Last complete extraction produced by extract_entities in this run. */
+  extraction?: ExtractionTable;
 }
 
 export type AiPermissionKind = "write" | "command";

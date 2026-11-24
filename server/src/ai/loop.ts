@@ -1135,6 +1135,7 @@ function aggregateResult(
   const planPath = taskResults.find((result) => result.planPath)?.planPath;
   const changeReport = [...taskResults].reverse().find((result) => result.changeReport)?.changeReport;
   const readMap = taskResults.flatMap((result) => result.readMap ?? []);
+  const extraction = [...taskResults].reverse().find((result) => result.extraction)?.extraction;
   const lines = [
     `Task loop finished for: **${goal}**`,
     "",
@@ -1170,6 +1171,7 @@ function aggregateResult(
     taskQueue: queue,
     changeReport,
     readMap,
+    extraction,
   };
 }
 

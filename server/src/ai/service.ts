@@ -118,6 +118,7 @@ import { appendLesson, readLessons } from "../tasks";
 import { ensureProjectMap } from "../projectMap";
 import { buildChangeReport } from "../changes";
 import { auditClaims } from "./claims";
+import type { ExtractionTable } from "../../../shared/extraction";
 import {
   applyMappingsToContent,
   extractEntities,
@@ -249,6 +250,17 @@ function symbolByGraphId(analysis: AnalysisResult, symbolId: string): SymbolReco
 function nodeLabel(analysis: AnalysisResult, nodeId: string): string {
   const node = analysis.nodes.find((candidate) => candidate.id === nodeId);
   return node?.metadata?.qualifiedName ?? node?.label ?? nodeId;
+}
+
+function extractionTableOf(result: EntityResult): ExtractionTable {
+  return {
+    kind: result.kind,
+    headers: result.headers,
+    items: result.items,
+    total: result.total,
+    unique: result.unique,
+    truncated: result.truncated,
+  };
 }
 
 function evidenceOf(analysis: AnalysisResult, filePath: string, startLine?: number, endLine?: number, label?: string): AiContextFile {
@@ -4514,6 +4526,7 @@ ${lessons}` : "",
   let colorNudges = 0;
   let completeColorList: ColorList | null = null;
   let completeExtraction: EntityResult | null = null;
+  let lastExtraction: ExtractionTable | null = null;
   let completeListRejections = 0;
   let extractionRejections = 0;
   let mappedChangeVerified = false;
@@ -6281,6 +6294,7 @@ ${lessons}` : "",
           limit: Number(args.limit) || undefined,
         });
         completeExtraction = result;
+        lastExtraction = extractionTableOf(result);
         observation = result.markdown;
         if (result.items[0]) {
           evidence.push({ path: result.items[0].file, label: "Extraction" });
@@ -8260,6 +8274,7 @@ ${lessons}` : "",
     costUsd,
     logs,
     changeReport,
+    extraction: lastExtraction ?? undefined,
     readMap: [...readMap.values()]
       .slice(0, 300)
       .map((entry) => ({
