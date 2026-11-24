@@ -453,6 +453,7 @@ export const api = {
       text: string;
       tokenUsage?: { inputTokens: number; outputTokens: number; totalTokens: number };
       costUsd?: number;
+      searchProvider?: string;
       sources: {
         url: string;
         title?: string;

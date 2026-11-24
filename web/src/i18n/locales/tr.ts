@@ -68,7 +68,7 @@ export const tr: Dictionary = {
   "Project intelligence + tools": "Proje zekâsı + araçlar",
   "Live view": "Canlı görünüm",
   "Only controls whether test frames are shown here. Tools run regardless.": "Yalnızca test karelerinin burada gösterilip gösterilmeyeceğini kontrol eder. Araçlar her durumda çalışır.",
-  "Welcome to B.A.D. Tool": "B.A.D. Tool'a hoş geldiniz",
+  "Welcome to B.A.D IDE": "B.A.D IDE'ye hoş geldiniz",
   "Live preview": "Canlı önizleme",
   "Open panel": "Paneli aç",
   "Waiting for the live page…": "Canlı sayfa bekleniyor…",

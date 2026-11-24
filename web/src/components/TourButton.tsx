@@ -10,7 +10,7 @@ export function TourButton() {
     const steps = ([
       {
         popover: {
-          title: t("Welcome to B.A.D. Tool"),
+          title: t("Welcome to B.A.D IDE"),
           description: t(
             "This short tour shows how to move from a project folder to files, symbols, call graphs, Git changes, and the 3D explorer.",
           ),

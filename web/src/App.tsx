@@ -819,7 +819,7 @@ export default function App() {
         <div className="brand">
           <img className="brand-logo" src={`/cbe.png?v=${logoVersion}`} alt="" width={31} height={31} />
           <div className="brand-text">
-            <span className="brand-title">B.A.D. Tool</span>
+            <span className="brand-title">B.A.D IDE</span>
             <span className="brand-sub">{t("Project intelligence + tools")}</span>
           </div>
         </div>

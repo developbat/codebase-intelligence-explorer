@@ -548,6 +548,7 @@ app.post("/api/ai/studio/chat", async (req, res) => {
       snippet?: string;
     }[] = [];
     const webBlocks: string[] = [];
+    let searchProvider: string | undefined;
     for (const url of urls) {
       try {
         // eslint-disable-next-line no-await-in-loop
@@ -582,6 +583,12 @@ app.post("/api/ai/studio/chat", async (req, res) => {
     if (shouldSearch) {
       try {
         const search = await webSearch(searchText, { limit: 6, language });
+        searchProvider =
+          search.provider === "google-news"
+            ? "Google News"
+            : search.provider === "google-cse"
+              ? "Google Search"
+              : "DuckDuckGo";
         for (const result of search.results) {
           sources.push({
             url: result.url,
@@ -602,7 +609,7 @@ app.post("/api/ai/studio/chat", async (req, res) => {
       dateStyle: "full",
     }).format(new Date());
     const system =
-      `You are B.A.D. Tool's research assistant. Be direct, concise and useful. ` +
+      `You are B.A.D IDE's research assistant. Be direct, concise and useful. ` +
       `Reply in the user's language. The UI locale is ${languageName}; if the user writes another language, follow the user. ` +
       `Never open with a capability disclaimer, a self-introduction, or a list of things you cannot do. Do not mention being an AI unless directly asked. ` +
       `Current date: ${currentDate}. Use it when the user asks about today, latest, or current information. ` +
@@ -657,6 +664,7 @@ app.post("/api/ai/studio/chat", async (req, res) => {
       tokenUsage: usage,
       costUsd,
       sources,
+      searchProvider,
     });
   } catch (error) {
     handleError(res, error, 400);
@@ -3220,7 +3228,7 @@ app.use((error: unknown, _req: express.Request, res: express.Response, _next: ex
 
 app.listen(PORT, "127.0.0.1", () => {
   const mode = SERVE_WEB ? "production UI" : "API";
-  console.log(`B.A.D. Tool (${mode}) → http://127.0.0.1:${PORT}`);
+  console.log(`B.A.D IDE (${mode}) → http://127.0.0.1:${PORT}`);
 });
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {

@@ -192,6 +192,7 @@ export function ChatStudio({
           tokenUsage: result.tokenUsage,
           costUsd: result.costUsd,
           sources: result.sources,
+          searchProvider: result.searchProvider,
         } as Partial<StudioEntry>),
       );
     } catch (requestError) {
@@ -320,6 +321,9 @@ export function ChatStudio({
                 </div>
                 {message.sources && message.sources.length > 0 ? (
                   <div className="chat-studio-sources">
+                    {message.searchProvider ? (
+                      <span className="chat-studio-source-provider">{message.searchProvider}</span>
+                    ) : null}
                     {message.sources.map((source) => (
                       <a
                         key={source.url}

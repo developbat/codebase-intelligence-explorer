@@ -342,7 +342,7 @@ export function ShowcaseDemo({ open, analysis, actions, onClose }: ShowcaseDemoP
     setCaption({
       index: total,
       total,
-      title: "B.A.D. Tool",
+      title: "B.A.D IDE",
       description: "Static facts, Git history, and 3D architecture in one local-first workspace.",
     });
   }
@@ -397,7 +397,7 @@ export function ShowcaseDemo({ open, analysis, actions, onClose }: ShowcaseDemoP
             <span className="showcase-step">
               STEP {caption.index} / {caption.total}
             </span>
-            <span className="showcase-caption-brand">B.A.D. Tool</span>
+            <span className="showcase-caption-brand">B.A.D IDE</span>
           </div>
           <h3>{caption.title}</h3>
           <p>{caption.description}</p>

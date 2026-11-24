@@ -1,6 +1,6 @@
 {
-  "name": "B.A.D. Tool",
-  "short_name": "B.A.D. Tool",
+  "name": "B.A.D IDE",
+  "short_name": "B.A.D IDE",
   "description": "Static code intelligence, knowledge graph, Git change review, and optional AI analysis.",
   "start_url": "/",
   "display": "standalone",

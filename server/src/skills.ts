@@ -94,14 +94,14 @@ function sourceList(projectRoot: string, options: SkillsOptions = {}): SkillSour
     },
     {
       id: "builtin",
-      label: "Built-in · B.A.D. Tool",
+      label: "Built-in · B.A.D IDE",
       scope: "global",
       directory: builtinSkillRoot(dataDir),
       priority: 4,
     },
     {
       id: "app-global",
-      label: "Global · B.A.D. Tool",
+      label: "Global · B.A.D IDE",
       scope: "global",
       directory: path.join(dataDir, "skills"),
       priority: 5,

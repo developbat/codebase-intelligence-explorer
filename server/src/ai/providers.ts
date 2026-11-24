@@ -64,7 +64,7 @@ function openAiHeaders(config: ResolvedProvider): Record<string, string> {
   if (config.apiKey) headers.Authorization = `Bearer ${config.apiKey}`;
   if (config.id === "openrouter") {
     headers["HTTP-Referer"] = "http://localhost:4317";
-    headers["X-Title"] = "B.A.D. Tool";
+    headers["X-Title"] = "B.A.D IDE";
   }
   return headers;
 }

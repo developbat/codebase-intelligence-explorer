@@ -29,6 +29,7 @@ export interface StudioEntry {
   costUsd?: number;
   attachment?: string;
   sources?: { url: string; title?: string; status?: number; error?: string }[];
+  searchProvider?: string;
   createdAt: string;
 }
 
