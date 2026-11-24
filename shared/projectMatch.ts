@@ -7,13 +7,19 @@ export interface ProjectUiFacts {
 }
 
 const UI_FILE =
-  /\.(?:html?|xhtml|css|scss|sass|less|styl|jsx|tsx|vue|svelte|astro|tmpl|tpl|ejs|hbs|handlebars|pug|twig|liquid|blade\.php)$/i;
+  /\.(?:html?|xhtml|css|scss|sass|less|styl|jsx|tsx|vue|svelte|astro|tmpl|tpl|ejs|hbs|handlebars|pug|twig|liquid|blade\.php|ipynb)$/i;
+
+const UI_PY_ENTRY =
+  /(?:^|\/)(?:streamlit_app|gradio_app|dash_app|nicegui_app|panel_app|dashboard|app)\.py$/i;
 
 const UI_FRAMEWORK =
-  /\b(?:react|react native|expo|vue|nuxt|svelte|sveltekit|next\.?js|angular|solid|astro|static html|laravel|django|flask|rails|flutter)\b/i;
+  /\b(?:react|react native|expo|vue|nuxt|svelte|sveltekit|next\.?js|angular|solid|astro|static html|laravel|django|flask|rails|flutter|streamlit|gradio|dash|nicegui|panel|bokeh|shiny)\b/i;
 
 const UI_REQUEST =
   /\b(?:game|games|play|button|buttons|ui|ux|screen|screens|page|pages|html|css|frontend|front-end|canvas|layout|interface)\b|oyun\w*|oyna\w*|buton\w*|arayüz\w*|ekran\w*|sayfa\w*|görsel\w*|tasarım\w*/i;
+
+const RUN_PREVIEW_REQUEST =
+  /\b(?:run|runs|running|start|serve|launch|preview)\b|çalıştır\w*|calistir\w*|başlat\w*|baslat\w*|ayağa kaldır\w*|ayaga kaldir\w*|önizleme\w*|onizleme\w*|aktif et\w*|canlandır\w*/i;
 
 const CURRENT_PROJECT_REQUEST =
   /\b(?:this|current|the)\s+project\b|projede|bu projede|proje içinde|proje icinde|depoda|repository|repo\b|var mı|var mi|is there|does (?:it|this project) (?:have|contain)|içeriyor mu|icermiyor mu/i;
@@ -22,12 +28,18 @@ export function requestMentionsUi(text: string): boolean {
   return UI_REQUEST.test(text);
 }
 
+export function requestIsRunPreview(text: string): boolean {
+  return RUN_PREVIEW_REQUEST.test(text);
+}
+
 export function requestIsCurrentProjectScope(text: string): boolean {
-  return CURRENT_PROJECT_REQUEST.test(text);
+  return CURRENT_PROJECT_REQUEST.test(text) || requestIsRunPreview(text);
 }
 
 export function projectHasUi(facts: ProjectUiFacts): boolean {
-  if (facts.files?.some((file) => UI_FILE.test(file.path))) return true;
+  if (facts.files?.some((file) => UI_FILE.test(file.path) || UI_PY_ENTRY.test(file.path))) {
+    return true;
+  }
   if (facts.frameworks?.some((framework) => UI_FRAMEWORK.test(framework))) return true;
   if (facts.languages) {
     const uiLanguages = ["HTML", "CSS", "Vue", "Svelte"];

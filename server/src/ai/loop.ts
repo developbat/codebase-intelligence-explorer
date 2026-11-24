@@ -18,7 +18,9 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { getDataDir, loadAnalysis } from "../store";
 import { readSourceFile } from "../editor";
+import { ensureDevServerForRequest } from "../processes";
 import { checkFileSyntax } from "../syntax";
+import { requestIsRunPreview } from "../../../shared/projectMatch";
 import {
   appendAgentRunEvent,
   appendLesson,
@@ -843,6 +845,7 @@ function taskInstruction(
   changedSinceGoal: string[] = [],
   existingCode: string[] = [],
   inspection = false,
+  runPreviewUrl?: string,
 ): string {
   const brief = resolveWorkBrief(task.title);
   const extractionTask = brief?.mode === "extract";
@@ -867,6 +870,9 @@ function taskInstruction(
     task.acceptance ? `Acceptance: ${task.acceptance}` : "",
     task.notes ? `Retry note: ${task.notes}` : "",
     resumeContract,
+    runPreviewUrl
+      ? `The active project's dev server is already running at ${runPreviewUrl}. Open this URL in the preview; do not start a second server, do not ask which project, and do not switch projects. Use browser_check on this URL when you need UI evidence.`
+      : "",
     prior ? `Previous task summaries (use this before reading context.md):\n${prior}` : "",
     extractionTask
       ? "This is a read-only complete-list task. Do not read .cie/agent context files, do not run grep/shell commands, do not use list_items or browser_check. Call extract_entities with the matching kind once, then finish with every item in the user's language."
@@ -1315,6 +1321,40 @@ export async function runProjectLoop(
     }
   }
   const verification = preferredVerificationCommand(analysis.tooling);
+  const runPreviewRequest = requestIsRunPreview(goal);
+  let runPreviewUrl: string | null = null;
+  if (runPreviewRequest) {
+    const started = await ensureDevServerForRequest(projectId, analysis.rootPath).catch(() => null);
+    if (started) {
+      runPreviewUrl = started.url;
+      emit({
+        type: "log",
+        entry: {
+          id: `log-${Date.now()}-dev-server`,
+          at: nowIso(),
+          level: "success",
+          label: started.url ? "Dev server ready" : "Dev server started",
+          detail: `${started.job.command}${started.url ? ` · ${started.url}` : ""}`,
+        },
+      });
+      await appendTaskContext(
+        analysis.rootPath,
+        "Run preview",
+        `${started.job.command}\nURL: ${started.url ?? "waiting for the server to print a URL"}\nThe preview panel picks this URL up automatically; do not start a second server.`,
+      ).catch(() => undefined);
+    } else {
+      emit({
+        type: "log",
+        entry: {
+          id: `log-${Date.now()}-no-dev-server`,
+          at: nowIso(),
+          level: "warn",
+          label: "No runnable dev server detected",
+          detail: "The agent will inspect the entry points and report the exact command that is missing.",
+        },
+      });
+    }
+  }
   const workspaceMode: AiWorkspaceMode = options.workspaceMode ?? "build";
   let queue = await loadQueue(analysis.rootPath, projectId);
   const sameGoal = queue?.goal.trim() === goal.trim();
@@ -1614,6 +1654,7 @@ export async function runProjectLoop(
           changedSinceGoal,
           existingCode,
           inspectionRun,
+          runPreviewUrl ?? undefined,
         ),
         {
           activeFile: options.activeFile,

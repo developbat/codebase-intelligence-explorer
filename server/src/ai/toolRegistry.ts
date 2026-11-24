@@ -265,15 +265,22 @@ const TOOL_SPECS: AgentToolSpec[] = [
     groups: ["browser"],
     example:
       '{"action":"browser_check","args":{"path":"index.html","steps":[{"action":"fill","selector":"#task-input","value":"Test"},{"action":"click","selector":"#add-task"},{"action":"expectText","selector":"#task-list","text":"Test"}]}}',
-    description: "Drive the real preview in a browser and assert UI state.",
+    description:
+      "Drive the real preview or a running dev server in a browser and assert UI state. Use `url` for a live server (for example http://127.0.0.1:8501); `path` is only for a static project file. A URL placed in `path` is treated as `url`.",
     whenToUse: "Use for UI/game behavior, clicks, forms and console errors; prefer DOM-visible checks over unknown globals.",
     inputSchema: {
       type: "object",
       required: ["steps"],
       properties: {
         steps: { type: "array", items: { type: "object" } },
-        path: { type: "string" },
-        url: { type: "string" },
+        path: {
+          type: "string",
+          description: "Project-relative static file (for example index.html). Do not put a server URL here.",
+        },
+        url: {
+          type: "string",
+          description: "Local dev-server URL, for example http://127.0.0.1:8501.",
+        },
       },
     },
   },

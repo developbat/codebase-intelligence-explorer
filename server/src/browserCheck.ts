@@ -56,6 +56,27 @@ function previewUrl(projectId: string, requestedPath: string): string {
   return `${base}/api/projects/${encodeURIComponent(projectId)}/preview/${encoded}`;
 }
 
+/**
+ * Resolve a browser-check target. Agents often put a running dev-server URL in
+ * `path` instead of `url`; an absolute/localhost value must be used as-is, not
+ * encoded into the static preview route.
+ */
+export function browserCheckTarget(
+  projectId: string,
+  requestedPath: string,
+  explicitUrl?: string,
+): string {
+  const candidate = (explicitUrl ?? requestedPath ?? "").trim();
+  const looksLikeUrl =
+    /^(?:https?:)?\/\//i.test(candidate) ||
+    /^(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\])(?::\d+)?(?:\/|$)/i.test(candidate);
+  if (looksLikeUrl) {
+    const withScheme = /^https?:\/\//i.test(candidate) ? candidate : `http://${candidate}`;
+    return localUrl(withScheme);
+  }
+  return previewUrl(projectId, requestedPath || "index.html");
+}
+
 function stepTimeout(step: BrowserCheckStep): number {
   return Math.max(500, Math.min(30_000, Number(step.timeoutMs) || DEFAULT_TIMEOUT));
 }
@@ -136,8 +157,10 @@ async function runStep(page: Page, step: BrowserCheckStep): Promise<string> {
     return `Value matched in ${selector}`;
   }
   if (step.action === "expectVisible") {
-    const visible = await page.locator(selector!).first().isVisible();
-    if (!visible) throw new Error(`${selector} is not visible.`);
+    // SPAs and Streamlit dashboards render after the initial load event; wait
+    // for visibility instead of failing on the first frame.
+    const locator = page.locator(selector!).first();
+    await locator.waitFor({ state: "visible", timeout: stepTimeout(step) });
     return `${selector} is visible`;
   }
   if (step.action === "expectCount") {
@@ -324,7 +347,7 @@ export async function runBrowserCheck(
         resourceErrors.push(`${response.status()} ${response.url()}`);
       }
     });
-    const url = options.url ? localUrl(options.url) : previewUrl(projectId, requestedPath);
+    const url = browserCheckTarget(projectId, requestedPath, options.url);
     const response = await page.goto(url, { waitUntil: "load", timeout: timeoutMs });
     if (response && !response.ok()) {
       throw new Error(`Preview page returned HTTP ${response.status()}.`);

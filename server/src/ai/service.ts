@@ -5497,6 +5497,9 @@ ${lessons}` : "",
       if (
         !readOnlyMode &&
         lastToolFailure &&
+        !/Project tool .* was not found|No saved project tools exist/i.test(
+          lastToolFailure.observation,
+        ) &&
         toolFailureNudges < 2 &&
         modelTurns < maxSteps &&
         (changedFiles.length === 0 ||
@@ -7179,6 +7182,15 @@ ${lessons}` : "",
       ok = false;
     }
     if (ok && ["write_file", "append_text", "replace_in_file", "replace_many", "rename_path", "delete_file"].includes(action)) {
+      lastToolFailure = null;
+    }
+    // A hallucinated project-tool name is a tool-choice mistake, not a project
+    // defect. Do not let it block finish after a successful verification.
+    if (
+      ok &&
+      lastToolFailure &&
+      /Project tool .* was not found|No saved project tools exist/i.test(lastToolFailure.observation)
+    ) {
       lastToolFailure = null;
     }
 

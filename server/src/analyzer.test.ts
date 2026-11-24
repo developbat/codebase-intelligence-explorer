@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { analyzeProject, projectIdForPath } from "./analyzer";
+import { analysisHasUi } from "../../shared/projectMatch";
 
 test("fixture projesi fonksiyon seviyesinde çağrı grafiği üretir", async () => {
   const root = path.resolve("fixtures/sample-app");
@@ -125,6 +126,25 @@ test("analyzer project map shares ecosystem and tooling detection with tests", a
     assert.ok(result.tooling?.testCommands.includes("go test ./..."));
     assert.ok(result.tooling?.buildCommands.includes("go build ./..."));
     assert.equal(result.tooling?.testFileCount, 1);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("analyzer recognizes a Streamlit dashboard as a UI project", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "cie-streamlit-ui-"));
+  try {
+    await fs.writeFile(
+      path.join(root, "requirements.txt"),
+      "streamlit>=1.41,<2\nplotly>=5.24,<7\npandas>=2.1,<3\n",
+    );
+    await fs.writeFile(
+      path.join(root, "app.py"),
+      "import streamlit as st\n\nst.title('Sales dashboard')\nst.plotly_chart(None)\n",
+    );
+    const result = await analyzeProject(root);
+    assert.ok(result.frameworks?.includes("Streamlit"), `frameworks: ${result.frameworks?.join(", ")}`);
+    assert.equal(analysisHasUi(result), true);
   } finally {
     await fs.rm(root, { recursive: true, force: true });
   }

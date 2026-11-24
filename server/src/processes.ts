@@ -438,6 +438,50 @@ export async function autoStartDevServer(
   });
 }
 
+async function waitForJobUrl(
+  projectId: string,
+  jobId: string,
+  timeoutMs: number,
+): Promise<string | null> {
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    const job = listBackgroundProcesses(projectId).find((item) => item.id === jobId);
+    if (!job) return null;
+    if (job.urls && job.urls.length > 0) return job.urls[0];
+    if (job.status !== "running") return null;
+    await new Promise((resolve) => setTimeout(resolve, 400));
+  }
+  return listBackgroundProcesses(projectId).find((item) => item.id === jobId)?.urls?.[0] ?? null;
+}
+
+/**
+ * The user asked to run the active project / show its interface. Start the
+ * detected dev server (or reuse the running one) and wait until a local URL is
+ * available so the preview can open it. Never falls back to another project.
+ */
+export async function ensureDevServerForRequest(
+  projectId: string,
+  rootPath: string,
+): Promise<{ job: BackgroundJob; url: string | null } | null> {
+  const running = listBackgroundProcesses(projectId).find(
+    (job) => job.status === "running" && isDevServerCommand(job.command),
+  );
+  if (running) {
+    const url = await waitForJobUrl(projectId, running.id, 6_000);
+    const current = listBackgroundProcesses(projectId).find((item) => item.id === running.id) ?? running;
+    return { job: current, url };
+  }
+  const suggestions = await detectDevCommands(rootPath);
+  const server = suggestions.find((suggestion) => suggestion.purpose !== "install");
+  if (!server) return null;
+  const started = await startBackgroundProcess(rootPath, projectId, server.command, undefined, {
+    autoRestart: true,
+  });
+  const url = await waitForJobUrl(projectId, started.id, 12_000);
+  const current = listBackgroundProcesses(projectId).find((item) => item.id === started.id) ?? started;
+  return { job: current, url };
+}
+
 /**
  * Create the project virtual environment and install requirements in the
  * background. Called automatically after a Python project is opened so the

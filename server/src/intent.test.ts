@@ -154,3 +154,33 @@ test("missing context fields fall back to project and recent", () => {
   assert.equal(intent.history, "recent");
   assert.deepEqual(intent.toolGroups, []);
 });
+
+test("run/preview requests override a project-switch clarification", () => {
+  const intent = parseIntentResponse(
+    JSON.stringify({
+      kind: "analyze",
+      understanding: "show the interface",
+      language: "tr",
+      needsClarification: true,
+      question: "Hangi projeyi kullanayım?",
+      options: [{ label: "neon-escape", suffix: "neon-escape projesine geç." }],
+      scope: "small",
+      mode: "single",
+      areas: [],
+      verification: "none",
+      context: "focused",
+      history: "recent",
+      toolGroups: [],
+      approach: "",
+      needsExhaustiveEvidence: false,
+      assumptions: [],
+    }),
+    analysis,
+    "arayüzü aktif et önizleme de göster",
+  );
+  assert.equal(intent.kind, "run");
+  assert.equal(intent.needsClarification, false);
+  assert.equal(intent.verification, "browser");
+  assert.ok(intent.toolGroups.includes("command"));
+  assert.ok(intent.toolGroups.includes("browser"));
+});

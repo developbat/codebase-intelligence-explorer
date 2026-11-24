@@ -5,6 +5,7 @@ import {
   projectHasUi,
   projectSummaryHasUi,
   requestIsCurrentProjectScope,
+  requestIsRunPreview,
   requestMentionsUi,
 } from "../../shared/projectMatch";
 
@@ -41,6 +42,53 @@ test("flags a UI request on an API project but not a current-project audit", () 
   assert.equal(detectProjectMismatch("projede buton var mı?", api).mismatch, false);
   const web = { files: [{ path: "index.html" }] };
   assert.equal(detectProjectMismatch("bana oyundaki butonları getir", web).mismatch, false);
+});
+
+test("run/preview requests stay on the active Python UI project", async () => {
+  const instruction = "arayüzü aktif et önizleme de göster";
+  assert.equal(requestIsRunPreview(instruction), true);
+  assert.equal(requestIsCurrentProjectScope(instruction), true);
+  assert.equal(projectHasUi({ frameworks: ["Streamlit"] }), true);
+  assert.equal(projectHasUi({ files: [{ path: "app.py" }] }), true);
+  assert.equal(projectHasUi({ files: [{ path: "notebook.ipynb" }] }), true);
+
+  const { projectMismatchClarification } = await import("./ai/intent");
+  const intent = {
+    kind: "analyze" as const,
+    understanding: "activate the interface",
+    language: "tr",
+    needsClarification: false,
+    question: undefined,
+    options: [],
+    scope: "small" as const,
+    mode: "single" as const,
+    areas: [],
+    verification: "none" as const,
+    context: "focused" as const,
+    history: "recent" as const,
+    toolGroups: [],
+    approach: "",
+    needsExhaustiveEvidence: false,
+    assumptions: [],
+  };
+  const analysis = {
+    id: "api",
+    projectName: "todo-api",
+    files: [{ path: "app/main.py" }],
+    frameworks: ["FastAPI"],
+    languages: { Python: 74 },
+  } as unknown as Parameters<typeof projectMismatchClarification>[2];
+  const recent = [
+    {
+      id: "game",
+      projectName: "neon-escape",
+      rootPath: "/tmp/neon-escape",
+      frameworks: ["Static HTML"],
+      languages: { HTML: 4, CSS: 2 },
+    },
+  ] as unknown as Parameters<typeof projectMismatchClarification>[3];
+
+  assert.equal(projectMismatchClarification(intent, instruction, analysis, recent), null);
 });
 
 test("builds a project-switch clarification for UI requests on API projects", async () => {

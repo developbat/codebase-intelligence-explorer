@@ -2,6 +2,7 @@ import { createPlaceholderAsset } from "../../placeholderAssets";
 import {
   createProjectTool,
   findProjectTool,
+  listProjectTools,
   recordProjectToolRun,
   validateProjectToolInput,
 } from "../../projectTools";
@@ -155,7 +156,17 @@ const runProjectToolHandler: AgentToolHandler = async (context): Promise<AgentTo
   const name = String(context.args.name ?? "").trim();
   if (!name) throw new Error("A project tool name is required.");
   const tool = await findProjectTool(context.analysis.rootPath, name);
-  if (!tool) throw new Error(`Project tool "${name}" was not found.`);
+  if (!tool) {
+    const available = await listProjectTools(context.analysis.rootPath).catch(() => null);
+    const names = available?.tools.map((item) => item.name).filter(Boolean) ?? [];
+    throw new Error(
+      `Project tool "${name}" was not found.${
+        names.length > 0
+          ? ` Available project tools: ${names.slice(0, 20).join(", ")}.`
+          : " No saved project tools exist in this project. Do not retry with another guessed name; use browser_check or run_command, or create one with create_project_tool."
+      }`,
+    );
+  }
   const toolInput =
     context.args.input && typeof context.args.input === "object" && !Array.isArray(context.args.input)
       ? (context.args.input as Record<string, unknown>)

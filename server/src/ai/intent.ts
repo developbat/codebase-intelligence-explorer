@@ -5,6 +5,7 @@ import {
   analysisHasUi,
   projectSummaryHasUi,
   requestIsCurrentProjectScope,
+  requestIsRunPreview,
   requestMentionsUi,
 } from "../../../shared/projectMatch";
 import { chat } from "./providers";
@@ -356,24 +357,27 @@ export function parseIntentResponse(
         .slice(0, 5)
     : [];
 
-  return {
-    kind,
-    understanding,
-    language,
-    needsClarification,
-    question: needsClarification ? String(parsed.question).trim().slice(0, 300) : undefined,
-    options: needsClarification ? options : undefined,
-    scope,
-    mode,
-    areas,
-    verification,
-    context,
-    history,
-    toolGroups,
-    approach,
-    needsExhaustiveEvidence,
-    assumptions,
-  };
+  return applyRunPreviewIntent(
+    {
+      kind,
+      understanding,
+      language,
+      needsClarification,
+      question: needsClarification ? String(parsed.question).trim().slice(0, 300) : undefined,
+      options: needsClarification ? options : undefined,
+      scope,
+      mode,
+      areas,
+      verification,
+      context,
+      history,
+      toolGroups,
+      approach,
+      needsExhaustiveEvidence,
+      assumptions,
+    },
+    instruction,
+  );
 }
 
 async function resolveIntentModel(options: IntentOptions) {
@@ -471,8 +475,7 @@ function suppressRedundantClarification(
   return intent;
 }
 
-function preserveNegations(intent: IntentAnalysis, instruction: string): IntentAnalysis {
-  const matches = [
+function preserveNegations(intent: IntentAnalysis, instruction: string): IntentAnalysis {  const matches = [
     ...instruction.matchAll(
       /(?:yeniden|tekrar)\s+ekleme|\bekleme\b|kaldırma|silme|değiştirme|\bdo not\s+(?:add|change|remove|delete|rewrite)\b|\bdon't\s+(?:add|change|remove|delete|rewrite)\b|no new/gi,
     ),
@@ -493,6 +496,38 @@ function preserveNegations(intent: IntentAnalysis, instruction: string): IntentA
   };
 }
 
+/**
+ * “Run it / activate the interface / show the preview” is a run request on the
+ * active project. It must not become a project-switch question or a code edit.
+ */
+function applyRunPreviewIntent(intent: IntentAnalysis, instruction: string): IntentAnalysis {
+  if (!requestIsRunPreview(instruction)) return intent;
+  const writeRequest =
+    /\b(?:ekle|ekley|düzelt|değiştir|kaldır|sil|güncelle|oluştur|fix|add|change|remove|delete|update|edit|refactor|implement)\w*/i.test(
+      instruction,
+    );
+  if (writeRequest) return intent;
+  return {
+    ...intent,
+    kind: "run",
+    needsClarification: false,
+    question: "",
+    options: [],
+    mode: "single",
+    scope: "small",
+    verification: "browser",
+    context: intent.context === "none" ? "focused" : intent.context,
+    toolGroups: [...new Set([...intent.toolGroups, "command", "browser"] as AgentToolGroup[])],
+    approach:
+      intent.approach ||
+      "Start the detected dev server for the active project and show the real interface in the preview.",
+    assumptions: [
+      ...intent.assumptions,
+      "Run/preview request on the active project: start its server and show the preview; do not suggest another project.",
+    ].slice(0, 8),
+  };
+}
+
 export function projectMismatchClarification(
   intent: IntentAnalysis,
   instruction: string,
@@ -503,6 +538,8 @@ export function projectMismatchClarification(
   if (intent.kind === "scaffold") return null;
   if (intent.context === "none") return null;
   if (!requestMentionsUi(instruction)) return null;
+  // Run/preview/start is always about the active project.
+  if (requestIsRunPreview(instruction)) return null;
   // “Does this project have a UI?” is a current-project audit, not a request
   // for another project. Let the agent answer it against the active project.
   if (requestIsCurrentProjectScope(instruction)) return null;
@@ -513,8 +550,8 @@ export function projectMismatchClarification(
     .slice(0, 4);
   const turkish = (intent.language || language || "").toLowerCase().startsWith("tr");
   const question = turkish
-    ? `Aktif proje “${analysis.projectName}” bir HTML/JS arayüzü içermiyor. Bu istek başka bir projeye ait olabilir. Hangi projeyi kullanayım?`
-    : `The active project “${analysis.projectName}” has no HTML/JS interface. This request may belong to another project. Which project should I use?`;
+    ? `Aktif proje “${analysis.projectName}” içinde bu isteğe uygun bir arayüz bulunamadı. İstek başka bir projeye ait olabilir. Hangi projeyi kullanayım?`
+    : `The active project “${analysis.projectName}” does not appear to have a matching interface. This request may belong to another project. Which project should I use?`;
   const choices: IntentOption[] = candidates.map((project) => ({
     id: `project:${project.id}`,
     label: project.projectName,
@@ -533,8 +570,8 @@ export function projectMismatchClarification(
     id: "search-anyway",
     label: turkish ? "Yine de bu projede ara" : "Search this project anyway",
     instructionSuffix: turkish
-      ? "Bu projede aramaya devam et; HTML/JS arayüzü yoksa kısaca söyle, buton uydurma."
-      : "Search the current project anyway; if it has no HTML/JS UI, say so briefly and do not invent buttons.",
+      ? "Bu projede aramaya devam et; uygun bir arayüz bulunamazsa kısaca söyle, buton uydurma."
+      : "Search the current project anyway; if no matching interface is found, say so briefly and do not invent buttons.",
   });
   return {
     ...intent,

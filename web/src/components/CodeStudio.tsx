@@ -1667,6 +1667,7 @@ export function CodeStudio({
       !consoleOpen &&
       bottomTab !== "jobs" &&
       !hasRunningJobs &&
+      !chatBusy &&
       rightTab !== "preview" &&
       !livePreviewUrl
     ) {
@@ -1685,7 +1686,7 @@ export function CodeStudio({
     const timer = window.setInterval(() => void tick(), 2000);
     return () => window.clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [consoleOpen, bottomTab, analysis.id, hasRunningJobs, rightTab, livePreviewUrl]);
+  }, [consoleOpen, bottomTab, analysis.id, hasRunningJobs, chatBusy, rightTab, livePreviewUrl]);
 
   function openSettings(tab: SettingsTab, addModel = false) {
     onOpenSettings?.(tab, addModel);
