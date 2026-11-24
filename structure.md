@@ -240,6 +240,11 @@ projectId | analysis.createdAt | kind | scope | query | limit
   naturally bypassed.
 - The tool log distinguishes “Entities extracted” from “Entities extracted from
   cache”.
+- A second, **file-content cache** (path + mtime + size) avoids re-reading
+  unchanged files when a request-level result must be recomputed.
+- Writes invalidate only request-cache entries whose extracted items include the
+  changed file; unrelated cached extractions remain valid until the next
+  rescan/analysis timestamp change.
 
 ### 4.6 Extraction profile
 

@@ -4,10 +4,16 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import type { AnalysisResult } from "../../shared/types";
-import { extractEntities, invalidateExtractionCache } from "./extractors";
+import {
+  extractEntities,
+  extractionFileCacheStats,
+  invalidateExtractionCache,
+  resetExtractionFileCache,
+} from "./extractors";
 
 test("caches extraction results and invalidates them after writes", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "cie-extract-cache-"));
+  resetExtractionFileCache();
   try {
     await fs.writeFile(path.join(root, "notes.txt"), "needle one\n", "utf8");
     const analysis = {
@@ -26,6 +32,14 @@ test("caches extraction results and invalidates them after writes", async () => 
     assert.equal(second.total, 1);
     assert.equal(second.fromCache, true);
 
+    invalidateExtractionCache(analysis.id, ["unrelated.txt"]);
+    const reused = await extractEntities(analysis, { kind: "text", query: "needle" });
+    assert.equal(reused.fromCache, true);
+
+    invalidateExtractionCache(analysis.id);
+    await extractEntities(analysis, { kind: "text", query: "needle" });
+    assert.ok(extractionFileCacheStats().hits >= 1);
+
     await fs.writeFile(path.join(root, "notes.txt"), "needle one\nneedle two\n", "utf8");
     invalidateExtractionCache(analysis.id);
     const third = await extractEntities(analysis, { kind: "text", query: "needle" });
@@ -37,6 +51,7 @@ test("caches extraction results and invalidates them after writes", async () => 
     assert.equal(other.fromCache, false);
   } finally {
     invalidateExtractionCache();
+    resetExtractionFileCache();
     await fs.rm(root, { recursive: true, force: true });
   }
 });

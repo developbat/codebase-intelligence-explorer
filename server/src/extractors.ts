@@ -183,11 +183,27 @@ function scopedFiles(
 async function readText(analysis: AnalysisResult, file: string): Promise<string | null> {
   const absolute = path.resolve(analysis.rootPath, file);
   if (!isWithin(analysis.rootPath, absolute)) return null;
+  const key = `${analysis.rootPath}|${file}`;
   try {
     const stat = await fs.stat(absolute);
     if (!stat.isFile() || stat.size > 900_000) return null;
-    return await fs.readFile(absolute, "utf8");
+    const cached = FILE_CONTENT_CACHE.get(key);
+    if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size) {
+      fileCacheHits += 1;
+      FILE_CONTENT_CACHE.delete(key);
+      FILE_CONTENT_CACHE.set(key, cached);
+      return cached.content;
+    }
+    fileCacheMisses += 1;
+    const content = await fs.readFile(absolute, "utf8");
+    FILE_CONTENT_CACHE.set(key, { mtimeMs: stat.mtimeMs, size: stat.size, content });
+    if (FILE_CONTENT_CACHE.size > 300) {
+      const oldest = FILE_CONTENT_CACHE.keys().next().value;
+      if (oldest) FILE_CONTENT_CACHE.delete(oldest);
+    }
+    return content;
   } catch {
+    FILE_CONTENT_CACHE.delete(key);
     return null;
   }
 }
@@ -1033,15 +1049,45 @@ interface ExtractionCacheEntry {
 }
 
 const EXTRACTION_CACHE = new Map<string, ExtractionCacheEntry>();
+const FILE_CONTENT_CACHE = new Map<
+  string,
+  { mtimeMs: number; size: number; content: string }
+>();
+let fileCacheHits = 0;
+let fileCacheMisses = 0;
 
-export function invalidateExtractionCache(projectId?: string): void {
+export function extractionFileCacheStats(): { hits: number; misses: number; size: number } {
+  return { hits: fileCacheHits, misses: fileCacheMisses, size: FILE_CONTENT_CACHE.size };
+}
+
+export function resetExtractionFileCache(): void {
+  FILE_CONTENT_CACHE.clear();
+  fileCacheHits = 0;
+  fileCacheMisses = 0;
+}
+
+export function invalidateExtractionCache(
+  projectId?: string,
+  changedPaths?: readonly string[],
+): void {
   if (!projectId) {
     EXTRACTION_CACHE.clear();
     return;
   }
   const prefix = `${projectId}|`;
-  for (const key of EXTRACTION_CACHE.keys()) {
-    if (key.startsWith(prefix)) EXTRACTION_CACHE.delete(key);
+  const changed =
+    changedPaths && changedPaths.length > 0
+      ? new Set(changedPaths.map((file) => file.replace(/\\/g, "/")))
+      : null;
+  for (const [key, entry] of EXTRACTION_CACHE.entries()) {
+    if (!key.startsWith(prefix)) continue;
+    if (!changed) {
+      EXTRACTION_CACHE.delete(key);
+      continue;
+    }
+    if (entry.result.items.some((item) => changed.has(item.file))) {
+      EXTRACTION_CACHE.delete(key);
+    }
   }
 }
 

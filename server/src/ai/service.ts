@@ -4547,11 +4547,11 @@ ${lessons}` : "",
   };
   const readOnlyCache = new Map<string, { step: number; ok: boolean }>();
   const findCounts = new Map<string, number>();
-  const invalidateReadCaches = () => {
+  const invalidateReadCaches = (changedPaths?: readonly string[]) => {
     readCoverage.clear();
     readOnlyCache.clear();
     findCounts.clear();
-    invalidateExtractionCache(projectId);
+    invalidateExtractionCache(projectId, changedPaths);
   };
   let modelTurns = 0;
   let writeNudges = 0;
@@ -6419,6 +6419,7 @@ ${lessons}` : "",
           let changedFilesCount = 0;
           let replacements = 0;
           const changed: string[] = [];
+          const writtenPaths: string[] = [];
           for (const filePath of files) {
             // eslint-disable-next-line no-await-in-loop
             const file = await readSourceFile(analysis.rootPath, filePath).catch(() => null);
@@ -6447,6 +6448,7 @@ ${lessons}` : "",
             // eslint-disable-next-line no-await-in-loop
             const written = await writeSourceFile(projectId, analysis.rootPath, filePath, mapped.content);
             if (!changedFiles.includes(written.filePath)) changedFiles.push(written.filePath);
+            if (!writtenPaths.includes(written.filePath)) writtenPaths.push(written.filePath);
             evidence.push({ path: written.filePath, label: "Mapped change" });
             const summary = mapped.replacements.map((entry) => `${entry.from}→${entry.to}×${entry.count}`).join(", ");
             changed.push(`${written.filePath} (${mapped.count}${summary ? `: ${summary}` : ""})`);
@@ -6465,7 +6467,7 @@ ${lessons}` : "",
             );
             ok = true;
           } else {
-          invalidateReadCaches();
+          invalidateReadCaches(writtenPaths);
           let verificationText = "";
           let remainingCount = 0;
           let totalColorsAfter: number | undefined;
@@ -6552,7 +6554,7 @@ ${lessons}` : "",
         );
         if (!allowed) throw new Error("The user denied the undo request.");
         const restored = await restoreLatestEditorBackup(projectId, analysis.rootPath, filePath);
-        invalidateReadCaches();
+        invalidateReadCaches([restored.filePath]);
         observation = `Restored ${restored.filePath} from its latest backup (${restored.backupPath}).`;
         evidence.push({ path: restored.filePath, label: "Restored backup" });
         log("success", "Backup restored", restored.filePath);
@@ -6637,7 +6639,7 @@ ${lessons}` : "",
         });
         changedFiles.push(renamed.to);
         evidence.push({ path: renamed.to, label: "Renamed by agent" });
-        invalidateReadCaches();
+        invalidateReadCaches([renamed.from, renamed.to]);
         observation = `Renamed ${renamed.from} → ${renamed.to}.`;
         log("success", "Path moved", `${renamed.from} → ${renamed.to}`);
         ok = true;
@@ -6659,7 +6661,7 @@ ${lessons}` : "",
         await removeIndexedPath(projectId, deleted.path).catch(() => {
           // index update is best-effort
         });
-        invalidateReadCaches();
+        invalidateReadCaches([deleted.path]);
         observation = `Deleted ${deleted.path}${deleted.kind === "directory" ? " (empty directory)" : ""}.`;
         log("success", "Path deleted", deleted.path);
         ok = true;
@@ -7701,7 +7703,7 @@ ${lessons}` : "",
         const effectiveChange = !previous || previous.content !== content;
         if (effectiveChange) changedFiles.push(written.filePath);
         evidence.push({ path: written.filePath, label: "Written by agent" });
-        invalidateReadCaches();
+        invalidateReadCaches([written.filePath]);
         observation = effectiveChange
           ? `Wrote ${written.bytes} bytes to ${written.filePath}${written.backupPath ? " (backup created)" : ""}.`
           : `Wrote ${written.bytes} bytes to ${written.filePath}, but the content is identical to the previous version (no effective change).`;
@@ -7731,7 +7733,7 @@ ${lessons}` : "",
         const effectiveChange = nextContent !== file.content;
         if (effectiveChange && !changedFiles.includes(written.filePath)) changedFiles.push(written.filePath);
         evidence.push({ path: written.filePath, label: "Edited by agent" });
-        invalidateReadCaches();
+        invalidateReadCaches([written.filePath]);
         observation = effectiveChange
           ? `Replaced one snippet in ${written.filePath} (${written.bytes} bytes).`
           : `The replacement produced identical content in ${written.filePath}; no effective change was made.`;
@@ -7766,7 +7768,7 @@ ${lessons}` : "",
           const effectiveChange = nextContent !== (existing?.content ?? "");
           if (effectiveChange && !changedFiles.includes(written.filePath)) changedFiles.push(written.filePath);
           evidence.push({ path: written.filePath, label: "Appended by agent" });
-          invalidateReadCaches();
+          invalidateReadCaches([written.filePath]);
           observation = effectiveChange
             ? `Appended ${content.length} chars to ${written.filePath} (${written.bytes} bytes).`
             : `The append produced identical content in ${written.filePath}; no effective change was made.`;
@@ -7816,7 +7818,7 @@ ${lessons}` : "",
         const effectiveChange = nextContent !== file.content;
         if (effectiveChange && !changedFiles.includes(written.filePath)) changedFiles.push(written.filePath);
         evidence.push({ path: written.filePath, label: "Edited by agent (multiple)" });
-        invalidateReadCaches();
+        invalidateReadCaches([written.filePath]);
         observation = effectiveChange
           ? `Applied ${edits.length} localized edits to ${written.filePath} in one write (${written.bytes} bytes).`
           : `The edits produced identical content in ${written.filePath}; no effective change was made.`;
@@ -7882,7 +7884,7 @@ ${lessons}` : "",
         }
         if (formatted.formatted) changedFiles.push(formatted.filePath);
         evidence.push({ path: formatted.filePath, label: "Formatted by agent" });
-        invalidateReadCaches();
+        invalidateReadCaches([formatted.filePath]);
         observation = `${formatted.command}\n${formatted.formatted ? "File formatted." : "File was already formatted."}`;
         log("success", "File formatted", formatted.filePath);
         ok = true;
