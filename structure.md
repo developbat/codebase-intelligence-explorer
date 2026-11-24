@@ -143,6 +143,21 @@ request and stream state belong to the current project only.
 The intent is shown in the UI plan card. It is **not** the final action
 decision; it is an input.
 
+#### Project mismatch guard
+
+If the request mentions a UI/game/button and the active project has no
+HTML/JS/CSS interface, the intent is replaced with a project-switch
+clarification:
+
+- recent projects with a UI are offered as one-click options;
+- the current project can still be searched (“Search this project anyway”);
+- asking whether **this project** has a UI (for example “projede buton var mı?”)
+  is treated as a current-project audit and is not redirected.
+
+Choosing a project option in the UI calls `onOpenProjectWithPrompt`, which loads
+that project and reruns the original request. Candidate projects come from
+`listRecent()`, and the detection logic is shared in `shared/projectMatch.ts`.
+
 ### 4.3 Task queue
 
 `server/src/ai/loop.ts` creates or reuses a task queue:
@@ -370,7 +385,4 @@ Before committing:
 - Cross-language extraction fixtures can be expanded (Python/Go/RN/Laravel/CIE).
 - A post-intent action planner (`explain` / `locate` / `list` / `edit` /
   `verify`) can make tool selection even more explicit.
-- Project mismatch guard: “game/UI/button” requests in a non-UI API project
-  should suggest switching projects instead of answering with a long “nothing
-  found”.
 - Read-map/diff and tool/claim stages are still queued.

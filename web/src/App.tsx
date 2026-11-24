@@ -371,22 +371,32 @@ export default function App() {
     }
   }
 
-  async function loadRecent(project: RecentProject) {
-    if (busy === "analyze") return;
+  async function loadRecent(project: RecentProject): Promise<boolean> {
+    if (busy === "analyze") return false;
     const requestId = ++projectRequestRef.current;
     setBusy("load");
     setError(null);
     try {
       const result = await api.project(project.id);
-      if (requestId !== projectRequestRef.current) return;
+      if (requestId !== projectRequestRef.current) return false;
       applyAnalysis(result);
+      return true;
     } catch (requestError) {
       if (requestId === projectRequestRef.current) {
         setError(requestError instanceof Error ? requestError.message : t("Project could not be loaded"));
       }
+      return false;
     } finally {
       if (requestId === projectRequestRef.current) setBusy(null);
     }
+  }
+
+  async function openRecentWithPrompt(project: RecentProject, prompt: string) {
+    if (!prompt.trim()) return;
+    const loaded = await loadRecent(project);
+    if (!loaded) return;
+    setStudioInitialPrompt(prompt);
+    setStudioAutoRunPrompt(true);
   }
 
   async function rescan() {
@@ -1006,6 +1016,9 @@ export default function App() {
             }}
             onLoadRecent={loadRecent}
             onRemoveRecent={removeRecent}
+            onOpenProjectWithPrompt={(project, prompt) => {
+              void openRecentWithPrompt(project, prompt);
+            }}
             initialPrompt={studioInitialPrompt}
             autoRunInitialPrompt={studioAutoRunPrompt}
             onInitialPromptConsumed={() => {

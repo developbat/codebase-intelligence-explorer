@@ -1,13 +1,19 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { loadAnalysis } from "../store";
+import { listRecent, loadAnalysis } from "../store";
+import {
+  analysisHasUi,
+  projectSummaryHasUi,
+  requestIsCurrentProjectScope,
+  requestMentionsUi,
+} from "../../../shared/projectMatch";
 import { chat } from "./providers";
 import { recordUsage } from "./usage";
 import { getPublicSettings, resolveAgentRole, resolveProvider } from "./settings";
 import { pickAlternateAgentModel } from "./agents";
 import { healthKey, modelHealthByProviderModel } from "./modelStats";
 import { estimateUsageCost } from "./pricing";
-import type { AnalysisResult } from "../../../shared/types";
+import type { AnalysisResult, RecentProject } from "../../../shared/types";
 import type {
   AgentToolGroup,
   IntentAnalysis,
@@ -487,6 +493,74 @@ function preserveNegations(intent: IntentAnalysis, instruction: string): IntentA
   };
 }
 
+export function projectMismatchClarification(
+  intent: IntentAnalysis,
+  instruction: string,
+  analysis: AnalysisResult,
+  recent: RecentProject[],
+  language?: string,
+): IntentAnalysis | null {
+  if (intent.kind === "scaffold") return null;
+  if (intent.context === "none") return null;
+  if (!requestMentionsUi(instruction)) return null;
+  // “Does this project have a UI?” is a current-project audit, not a request
+  // for another project. Let the agent answer it against the active project.
+  if (requestIsCurrentProjectScope(instruction)) return null;
+  if (analysisHasUi(analysis)) return null;
+
+  const candidates = recent
+    .filter((project) => project.id !== analysis.id && projectSummaryHasUi(project))
+    .slice(0, 4);
+  const turkish = (intent.language || language || "").toLowerCase().startsWith("tr");
+  const question = turkish
+    ? `Aktif proje “${analysis.projectName}” bir HTML/JS arayüzü içermiyor. Bu istek başka bir projeye ait olabilir. Hangi projeyi kullanayım?`
+    : `The active project “${analysis.projectName}” has no HTML/JS interface. This request may belong to another project. Which project should I use?`;
+  const choices: IntentOption[] = candidates.map((project) => ({
+    id: `project:${project.id}`,
+    label: project.projectName,
+    instructionSuffix: "",
+    projectId: project.id,
+    projectName: project.projectName,
+  }));
+  const modelChoices = (intent.options ?? []).filter(
+    (option) =>
+      !/başka bir|baska bir|another|other project|different project|başka proje|baska proje|wrong project|yanlış proje|yanlis proje|proje yolu|project path/i.test(
+        `${option.label} ${option.instructionSuffix}`,
+      ),
+  );
+  choices.push(...modelChoices);
+  choices.push({
+    id: "search-anyway",
+    label: turkish ? "Yine de bu projede ara" : "Search this project anyway",
+    instructionSuffix: turkish
+      ? "Bu projede aramaya devam et; HTML/JS arayüzü yoksa kısaca söyle, buton uydurma."
+      : "Search the current project anyway; if it has no HTML/JS UI, say so briefly and do not invent buttons.",
+  });
+  return {
+    ...intent,
+    needsClarification: true,
+    question,
+    options: choices,
+  };
+}
+
+async function applyProjectMismatchGuard(
+  intent: IntentAnalysis,
+  instruction: string,
+  analysis: AnalysisResult,
+  options: IntentOptions,
+): Promise<IntentAnalysis> {
+  if (options.clarified === true) return intent;
+  const mismatch = projectMismatchClarification(
+    intent,
+    instruction,
+    analysis,
+    await listRecent(),
+    options.language,
+  );
+  return mismatch ?? intent;
+}
+
 export async function analyzeIntent(
   projectId: string,
   instruction: string,
@@ -637,6 +711,7 @@ export async function analyzeIntent(
 
   intent = suppressRedundantClarification(intent, instruction, analysis);
   intent = preserveNegations(intent, instruction);
+  intent = await applyProjectMismatchGuard(intent, instruction, analysis, options);
   if (intent.areas.length === 0) {
     const areas = likelyProjectAreas(analysis, instruction);
     if (areas.length > 0) intent = { ...intent, areas };

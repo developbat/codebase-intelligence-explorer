@@ -26,6 +26,9 @@ export interface IntentOption {
   label: string;
   /** Text appended to the original instruction when the user picks this option. */
   instructionSuffix: string;
+  /** When set, the UI should switch to this project and rerun the original request. */
+  projectId?: string;
+  projectName?: string;
 }
 
 export interface IntentAnalysis {

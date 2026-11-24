@@ -200,6 +200,7 @@ interface CodeStudioProps {
   onOpenSettings?: (tab: SettingsTab, addModel?: boolean) => void;
   onLoadRecent?: (project: RecentProject) => void;
   onRemoveRecent?: (id: string) => void;
+  onOpenProjectWithPrompt?: (project: RecentProject, prompt: string) => void;
   initialPrompt?: string;
   autoRunInitialPrompt?: boolean;
   onInitialPromptConsumed?: () => void;
@@ -606,6 +607,7 @@ export function CodeStudio({
   onOpenSettings,
   onLoadRecent,
   onRemoveRecent,
+  onOpenProjectWithPrompt,
   initialPrompt,
   autoRunInitialPrompt,
   onInitialPromptConsumed,
@@ -914,7 +916,7 @@ export function CodeStudio({
     autoRunPromptRef.current = null;
     void askProject(prompt);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [active, chatBusy]);
+  }, [active, chatBusy, initialPrompt, autoRunInitialPrompt]);
 
   useEffect(() => {
     setOpenTabs([]);
@@ -4190,6 +4192,22 @@ export function CodeStudio({
                     key={option.id}
                     onClick={() => {
                       const original = clarification.original;
+                      if (option.projectId) {
+                        const project = recent.find((item) => item.id === option.projectId);
+                        if (project && onOpenProjectWithPrompt) {
+                          setClarification(null);
+                          setChatInput("");
+                          onOpenProjectWithPrompt(project, original);
+                          return;
+                        }
+                        setClarification(null);
+                        setChatError(
+                          t(
+                            "That project is no longer in recent projects. Open it from the project switcher and ask again.",
+                          ),
+                        );
+                        return;
+                      }
                       setClarification(null);
                       setChatInput("");
                       void askProject(`${original}\n\n${option.instructionSuffix}`, true, {

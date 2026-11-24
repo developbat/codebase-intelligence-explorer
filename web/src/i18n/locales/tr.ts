@@ -1157,6 +1157,7 @@ export const tr: Dictionary = {
   "Writes ask for approval. Open Settings to pre-approve file writes.": "Yazma her seferinde onay ister. Dosya yazmayı önceden onaylamak için Ayarlar'ı açın.",
   "The active run belongs to this chat. Stop it before opening another conversation.": "Aktif çalışma bu sohbete ait. Başka bir sohbet açmadan önce durdurun.",
   "Stop the running agent to switch conversations.": "Sohbet değiştirmek için çalışan ajanı durdurun.",
+  "That project is no longer in recent projects. Open it from the project switcher and ask again.": "Bu proje artık son projelerde yok. Proje değiştiriciden açıp tekrar sorun.",
   "Save": "Kaydet",
   "Run": "Çalıştır",
   "Terminal": "Terminal",
