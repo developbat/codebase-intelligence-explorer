@@ -278,7 +278,7 @@ export function ChatStudio({
         <div className="chat-studio-messages">
           {messages.length === 0 ? (
             <div className="chat-studio-empty">
-              <Bot size={30} />
+              <img className="chat-studio-empty-logo" src="/cbe.png" alt="" />
               <h3>{t("What should we work on?")}</h3>
               <p>
                 {t(

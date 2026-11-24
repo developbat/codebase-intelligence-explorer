@@ -3152,7 +3152,6 @@ export function CodeStudio({
       <aside className="code-studio-sidebar">
         <div className="code-studio-side-head">
           <div>
-            <span className="studio-eyebrow">{t("Code Studio")}</span>
             <strong>{analysis.projectName}</strong>
           </div>
           <div className="studio-side-head-actions">
@@ -3508,7 +3507,6 @@ export function CodeStudio({
             <section className="studio-workflow">
         <div className="studio-workflow-head">
           <div className="studio-workflow-title">
-            <span>{t("Agent workspace")}</span>
             <strong>{analysis.projectName}</strong>
           </div>
           <div className="studio-workflow-actions">
@@ -3777,7 +3775,7 @@ export function CodeStudio({
           {chatMessages.length === 0 && !chatBusy ? (
             <div className={`studio-workflow-empty ${chatTabs.length > 1 ? "is-compact" : ""}`}>
               <div className="studio-workflow-empty-icon">
-                <Bot size={20} />
+                <img className="studio-workflow-empty-logo" src="/cbe.png" alt="" />
               </div>
               {chatTabs.length <= 1 ? (
                 <>
@@ -4643,20 +4641,6 @@ export function CodeStudio({
               <span className="studio-session-tokens">
                 {sessionTokens > 0 ? `${t("Session")} ${formatTokens(sessionTokens)} ${t("tokens")}` : ""}
               </span>
-              <button
-                className={`studio-loop-toggle ${liveBrowser ? "is-on" : ""}`}
-                onClick={() => {
-                  setLiveBrowser((value) => {
-                    const next = !value;
-                    setLiveArmed(false);
-                    setLiveFrameReady(false);
-                    return next;
-                  });
-                }}
-                title={t("Stream the test browser into the Live test panel")}
-              >
-                <Eye size={12} /> {t("Live browser")}
-              </button>
               <button
                 className={`studio-loop-toggle ${consoleOpen ? "is-on" : ""}`}
                 onClick={() => setConsoleOpen((value) => !value)}
@@ -5779,9 +5763,20 @@ export function CodeStudio({
                 <span>
                   <Monitor size={11} /> {t("Live test")}
                 </span>
-                <small>
-                  {liveBrowser ? t("Streaming from the test browser") : t("Live test is off")}
-                </small>
+                <button
+                  className={`studio-live-toggle ${liveBrowser ? "is-on" : ""}`}
+                  onClick={() => {
+                    setLiveBrowser((value) => {
+                      const next = !value;
+                      setLiveArmed(false);
+                      setLiveFrameReady(false);
+                      return next;
+                    });
+                  }}
+                  title={t("Only controls whether test frames are shown here. Tools run regardless.")}
+                >
+                  <Eye size={10} /> {t("Live view")}
+                </button>
               </div>
               <div className="studio-live-test-stage">
                 {liveBrowser && liveArmed ? (

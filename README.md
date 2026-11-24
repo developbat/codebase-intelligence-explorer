@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="web/public/cbe.png" alt="Codebase Intelligence Explorer logo" width="104" height="104" />
+  <img src="web/public/cbe.png" alt="B.A.D. Tool logo" width="104" height="104" />
 </p>
 
-<h1 align="center">Codebase Intelligence Explorer</h1>
+<h1 align="center">B.A.D. Tool</h1>
 
 <p align="center">
   <strong>Code intelligence for TypeScript/JavaScript, PHP, and Python — plus an agentic Code Studio with a real editor, terminal, AI edits, document generation and explicit save/backup workflow.</strong>

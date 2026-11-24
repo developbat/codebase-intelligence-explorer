@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Database, Loader2, RefreshCw, X } from "lucide-react";
+import { ListTree, Loader2, RefreshCw, X } from "lucide-react";
 import type { ProjectIndexStatus } from "../../../shared/types";
 import { api } from "../api";
 import { useI18n } from "../i18n";
@@ -82,7 +82,7 @@ export function IndexStatusBadge({ projectId }: { projectId?: string }) {
         aria-expanded={open}
         onClick={() => setOpen((value) => !value)}
       >
-        {building ? <Loader2 size={14} className="spin" /> : <Database size={14} />}
+        {building ? <Loader2 size={14} className="spin" /> : <ListTree size={14} />}
         <span>{building ? `${status.processed}/${status.total}` : status.documents}</span>
       </button>
       {open ? (

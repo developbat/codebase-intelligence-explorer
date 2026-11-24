@@ -819,8 +819,8 @@ export default function App() {
         <div className="brand">
           <img className="brand-logo" src={`/cbe.png?v=${logoVersion}`} alt="" width={31} height={31} />
           <div className="brand-text">
-            <span className="brand-title">Codebase Explorer</span>
-            <span className="brand-sub">{t("Intelligence + Code Studio")}</span>
+            <span className="brand-title">B.A.D. Tool</span>
+            <span className="brand-sub">{t("Project intelligence + tools")}</span>
           </div>
         </div>
 
@@ -871,8 +871,7 @@ export default function App() {
           {product === "studio" ? (
             <span className="breadcrumb-item">
               <Code2 size={12} className="breadcrumb-sep" />
-              <span className="is-current">{analysis?.projectName ?? t("Code Studio")}</span>
-              <span className="studio-top-pill">{t("Agent workspace")}</span>
+              <span className="is-current">{analysis?.projectName ?? t("Project")}</span>
             </span>
           ) : product === "chat" ? (
             <span className="breadcrumb-item">
@@ -1481,11 +1480,7 @@ export default function App() {
             product === "studio" ? (
               <>
                 <span className="status-dot" />
-                {t("Code Studio")} · {t("Agent workspace")}
-                <span className="status-sep" />
-                <span className="status-muted">
-                  {analysis.projectName}
-                </span>
+                <span className="status-muted">{analysis.projectName}</span>
               </>
             ) : (
               <>
