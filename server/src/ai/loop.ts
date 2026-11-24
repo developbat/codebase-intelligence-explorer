@@ -1590,6 +1590,7 @@ export async function runProjectLoop(
           intent: options.intent,
           workBriefText: current.title,
           history: options.history?.slice(-8),
+          liveBrowser: options.liveBrowser === true,
         },
         (event) => {
           if (event.type === "done") {

@@ -1317,6 +1317,7 @@ app.post("/api/projects/:id/browser-check", async (req, res) => {
       mobile: req.body?.mobile === true,
       screenshot: req.body?.screenshot === true,
       timeoutMs: Number(req.body?.timeoutMs) || undefined,
+      visible: req.body?.visible === true,
     });
     res.json(result);
   } catch (error) {
@@ -1720,6 +1721,7 @@ app.post("/api/projects/:id/ai/agent", async (req, res) => {
       tokenBudget: Number(req.body?.tokenBudget) || undefined,
       costBudgetUsd: Number(req.body?.costBudgetUsd) || undefined,
       interactive: false,
+      liveBrowser: req.body?.liveBrowser === true,
       history: Array.isArray(req.body?.history)
         ? req.body.history
             .filter(
@@ -1872,6 +1874,7 @@ app.post("/api/projects/:id/ai/agent/stream", async (req, res) => {
           : undefined,
         tokenBudget: Number(req.body?.tokenBudget) || undefined,
         costBudgetUsd: Number(req.body?.costBudgetUsd) || undefined,
+        liveBrowser: req.body?.liveBrowser === true,
         history,
       },
       write,
@@ -2176,6 +2179,7 @@ app.post("/api/projects/:id/ai/loop/stream", async (req, res) => {
         costBudgetUsd: Number(req.body?.costBudgetUsd) || undefined,
         intent,
         history,
+        liveBrowser: req.body?.liveBrowser === true,
       },
       write,
       controller.signal,

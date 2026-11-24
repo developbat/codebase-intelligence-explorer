@@ -52,6 +52,11 @@ test("remaining-work summaries are detected without flagging clean completions",
   assert.equal(reportsRemainingWork("Remaining work: wire the route"), true);
   assert.equal(reportsRemainingWork("Next step: run tests"), true);
   assert.equal(reportsRemainingWork("Kalan yok, her şey tamam."), false);
+  assert.equal(
+    reportsRemainingWork("Proje dosyalarında değişiklik yapılmadı. Test PASSED."),
+    false,
+  );
+  assert.equal(reportsRemainingWork("İş yapılmadı, route wiring eksik."), true);
   assert.equal(reportsRemainingWork("All changes are complete; typecheck passed."), false);
 });
 

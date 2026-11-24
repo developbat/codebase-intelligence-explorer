@@ -91,6 +91,8 @@ export interface ProjectTaskLoopOptions {
   retryFailed?: boolean;
   intent?: IntentAnalysis;
   history?: { role: "user" | "assistant"; content: string }[];
+  /** Show the local browser window while a verification check runs. */
+  liveBrowser?: boolean;
 }
 
 export interface ProjectTaskLoopResult {

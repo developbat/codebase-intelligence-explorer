@@ -428,7 +428,32 @@ scrolls instead of ending in a clipped note. New chat tabs show only the agent
 icon and one-line guidance; the full intro and quick actions stay on the first
 chat tab of a project.
 
-### 4.14 Persistence
+### 4.14 Verification flow and task visibility
+
+**Verification profile.** A goal whose action is `run` or `verify` (for example
+“oyunu oyna ve test et”) selects the compact `agent.test` prompt. It prefers an
+existing `.cie/agent/scenarios` scenario, caps the run at 12 model turns, skips
+the project map and full skill bodies, and reads at most two source files only
+after a check fails. An eval `ReferenceError` is treated as a wrong assumption;
+the agent must switch to DOM-visible checks or report the blocker instead of
+repeating the same step. Test-only summaries such as “proje dosyalarında
+değişiklik yapılmadı” are accepted by the finish guard.
+
+**Visible browser.** The composer exposes a persisted **Live browser** toggle.
+It passes `liveBrowser` through the task loop and agent stream; `browser_check`,
+`game_check` and `run_test_scenario` then launch Chrome headed with `slowMo` and
+short per-step pauses, call `bringToFront()`, and fall back to headless when the
+server has no display. The same option is exposed on the direct browser-check
+route.
+
+**Task queue UI.** The queue no longer draws a percentage bar. The summary and
+task rows show `done/total`, live step count, tokens and attempts. Each task has
+a collapsible **What the agent understood** block built from its intent,
+approach, likely areas, assumptions and acceptance criterion. The Plan card
+shows `plan.summary` (the agent's understanding), `plan.reason` and the ordered
+steps; the run strip shows the current activity.
+
+### 4.15 Persistence
 
 - Project analysis: application data directory (project id based).
 - Agent notes: `<project>/.cie/agent/`.

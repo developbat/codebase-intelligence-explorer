@@ -863,6 +863,7 @@ export const api = {
         tokenBudget?: number;
         costBudgetUsd?: number;
         history?: { role: "user" | "assistant"; content: string }[];
+        liveBrowser?: boolean;
       },
       onEvent: (event: AiAgentEvent) => void,
       signal?: AbortSignal,
@@ -1217,6 +1218,7 @@ export const api = {
         workspaceMode?: "ask" | "plan" | "build" | "research";
         history?: { role: "user" | "assistant"; content: string }[];
         clarified?: boolean;
+        liveBrowser?: boolean;
       },
       onEvent: (event: AiAgentEvent) => void,
       signal?: AbortSignal,

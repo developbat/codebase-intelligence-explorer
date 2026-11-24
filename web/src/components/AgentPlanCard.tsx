@@ -78,7 +78,17 @@ export function AgentPlanCard({
         </small>
       </summary>
       <div className="agent-plan-body">
-        <p>{summary}</p>
+        <div className="agent-plan-understanding">
+          <span>{t("What the agent understood")}</span>
+          <p>{plan.summary || summary}</p>
+        </div>
+        {plan.reason ? (
+          <div className="agent-plan-reason">
+            <span>{t("Why this plan")}</span>
+            <p>{plan.reason}</p>
+          </div>
+        ) : null}
+        <p className="agent-plan-hint">{summary}</p>
         <div className="agent-plan-meta">
           <span>
             <Files size={10} /> {plan.scope.length} {t("files")}

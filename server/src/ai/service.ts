@@ -2030,12 +2030,16 @@ export function looksLikePlanningText(summary: string): boolean {
 
 export function reportsRemainingWork(summary: string): boolean {
   const remaining =
-    /\b(not (?:done|implemented|completed)|remaining work|remains? (?:undone|to be done))\b|yapılmadı|tamamlanmadı|eksik kaldı|\bkalan\s*[:(]|\bnext step\b|sonraki adım/i.test(
+    /\b(not (?:done|implemented|completed)|remaining work|remains? (?:undone|to be done))\b|(?:[iİ]ş|görev|kısım|adım|özellik|madde)\s+(?:yapılmadı|tamamlanmadı)|eksik kaldı|\bkalan\s*[:(]|\bnext step\b|sonraki adım/i.test(
       summary,
     );
   const none =
     /\bkalan\s*(?:yok|değil)\b|nothing (?:remaining|left)|no remaining work/i.test(summary);
-  return remaining && !none;
+  const noSourceChange =
+    /(?:proje dosyalarında|kaynak dosyalarda|source files?|code files?).{0,50}(?:değişiklik yapılmadı|değiştirilmedi|unchanged|not changed)/i.test(
+      summary,
+    );
+  return remaining && !none && !noSourceChange;
 }
 
 
@@ -3906,6 +3910,8 @@ export async function runAgentTask(
     maxOutputTokens?: number;
     startingUsage?: AiTokenUsage;
     intent?: IntentAnalysis;
+    /** Show the local browser window while browser checks run. */
+    liveBrowser?: boolean;
   } = {},
   emit: (event: AiAgentEvent) => void = () => {},
   signal?: AbortSignal,
@@ -3929,7 +3935,7 @@ export async function runAgentTask(
       : false);
   // No fixed step budget: a task runs until it finishes or stops making
   // progress. Callers can still pass an explicit cap for short internal runs.
-  const maxSteps =
+  let maxSteps =
     options.maxSteps && Number.isFinite(options.maxSteps) && options.maxSteps > 0
       ? Math.max(2, options.maxSteps)
       : Number.POSITIVE_INFINITY;
@@ -4233,6 +4239,12 @@ export async function runAgentTask(
     };
   }
   activePlan = plan;
+  const testTask =
+    !plan.needsWrite &&
+    (actionPlan.action === "run" ||
+      actionPlan.action === "verify" ||
+      options.intent?.kind === "run");
+  if (testTask) maxSteps = Math.min(maxSteps, 12);
   const writeIntent =
     options.forceWrite === true || options.intent?.kind === "edit";
   const narrowEdit =
@@ -4256,7 +4268,7 @@ export async function runAgentTask(
       : `Work brief: change task (kind=${workBrief.kind}). First call extract_entities with kind="${workBrief.kind}" to identify the current targets; then apply the requested change with replace_many or apply_mapped_changes and verify it. Do not rewrite whole files or invent existing items. After apply_mapped_changes reports Verification with 0 remaining, call finish immediately; do not chase rgb/rgba equivalents, variable names or visual variants unless the user explicitly asked for them.`
     : "";
   const projectMap =
-    contextMode === "none"
+    contextMode === "none" || testTask
       ? ""
       : await ensureProjectMap(analysis).catch(() => "");
   if (projectMap) {
@@ -4265,7 +4277,9 @@ export async function runAgentTask(
   const continuation = continuationFindings(options.history, instruction);
   const continuationMode = Boolean(continuation);
   const latestProjectPlan =
-    contextMode !== "none" && (workspaceMode === "plan" || workspaceMode === "build")
+    contextMode !== "none" &&
+    !testTask &&
+    (workspaceMode === "plan" || workspaceMode === "build")
       ? await readLatestProjectPlan(
           analysis.rootPath,
           workspaceMode === "plan" ? 6_000 : 2_500,
@@ -4275,12 +4289,21 @@ export async function runAgentTask(
   if (options.forceWrite === true && !toolGroups.includes("edit")) {
     toolGroups.push("edit");
   }
+  if (testTask) {
+    // Verification plans must always be able to open the real page and run
+    // the saved scenario, even when intent classification is read-only.
+    for (const group of ["browser", "command"] as const) {
+      if (!toolGroups.includes(group)) toolGroups.push(group);
+    }
+    const allowed = new Set<AgentToolGroup>(["core", "browser", "command", "document"]);
+    toolGroups.splice(0, toolGroups.length, ...toolGroups.filter((group) => allowed.has(group)));
+  }
   const seed =
     contextMode === "none"
       ? ""
       : await agentSeedContext(analysis, instruction, options.activeFile);
   const seedLimit =
-    contextMode === "focused" ? 2_500 : fastTask ? 4_000 : 10_000;
+    testTask ? 1_500 : contextMode === "focused" ? 2_500 : fastTask ? 4_000 : 10_000;
   const seedText =
     seed.length > seedLimit
       ? `${seed.slice(0, seedLimit)}\n… seed context truncated to keep the prompt small …`
@@ -4295,7 +4318,8 @@ export async function runAgentTask(
       ),
     ),
   ].slice(0, 8);
-  const lessons = await readLessons(analysis.rootPath).catch(() => "");
+  const lessonsRaw = await readLessons(analysis.rootPath).catch(() => "");
+  const lessons = testTask && lessonsRaw.length > 1_500 ? lessonsRaw.slice(0, 1_500) : lessonsRaw;
   const projectContext =
     contextMode === "none"
       ? ""
@@ -4363,15 +4387,18 @@ ${lessons}` : "",
       ? "agent.plan"
       : workspaceMode === "research"
         ? "agent.research"
-        : narrowEdit
-          ? "agent.focused"
-          : focusedRead
-            ? "agent.inspect"
-            : basePromptId;
+        : testTask
+          ? "agent.test"
+          : narrowEdit
+            ? "agent.focused"
+            : focusedRead
+              ? "agent.inspect"
+              : basePromptId;
   const prompt = await getPrompt(promptId, projectId);
   const languageInstruction = aiLanguageInstruction(options.language ?? "en");
   const fastSuffix =
-    fastTask && !["agent.focused", "agent.inspect"].includes(prompt.id)
+    fastTask &&
+    !["agent.focused", "agent.inspect", "agent.test"].includes(prompt.id)
       ? "\n\nFast task profile: this is a small, focused change. Read at most 3 files (for a CSS-only change, read only the stylesheet), make the edit, run at most one verification, and finish. Complete every edit-map item before finishing. Do not read unrelated modules, repeat reads, or keep exploring after the edit."
       : "";
   const narrowEditSuffix =
@@ -4388,10 +4415,11 @@ ${lessons}` : "",
   const enabledSkills = skillLoad.skills;
   const mentionedSkill = skillLoad.mentions.length > 0;
   const includeSkills =
-    !options.intent ||
-    contextMode === "project" ||
-    toolGroups.includes("skills") ||
-    mentionedSkill;
+    !testTask &&
+    (!options.intent ||
+      contextMode === "project" ||
+      toolGroups.includes("skills") ||
+      mentionedSkill);
   const skillsPrompt = includeSkills ? renderSkillsForPrompt(enabledSkills) : "";
   const capabilityIndex = skillLoad.index || "";
   if (skillLoad.mentions.length > 0) {
@@ -4439,6 +4467,13 @@ ${lessons}` : "",
     "Prompt selected",
     `${prompt.id} v${prompt.version}${prompt.source !== "default" ? ` · ${prompt.source}` : ""}`,
   );
+  if (testTask) {
+    log(
+      "info",
+      "Verification profile",
+      `scenario-first · max 12 model turns · project map and full skills skipped`,
+    );
+  }
   if (lessons) {
     log("info", "Lessons loaded", `${lessons.length} chars from LESSONS.md`);
   }
@@ -7063,6 +7098,7 @@ ${lessons}` : "",
           url: typeof args.url === "string" ? args.url : undefined,
           steps: gameSteps as BrowserCheckStep[] | undefined,
           screenshot: args.screenshot !== false,
+          visible: options.liveBrowser === true || args.visible === true,
         });
         if (result.check.screenshotPath) {
           evidence.push({ path: result.check.screenshotPath, label: "Game check screenshot" });
@@ -7089,11 +7125,15 @@ ${lessons}` : "",
         if (!Array.isArray(scenario.steps) || scenario.steps.length === 0) {
           throw new Error("The test scenario has no steps.");
         }
+        if (options.liveBrowser === true || args.visible === true) {
+          log("info", "Live browser opened", `${relative} · ${scenario.steps.length} steps`);
+        }
         const result = await runBrowserCheck(analysis.id, analysis.rootPath, {
           path: scenario.path,
           mobile: scenario.mobile,
           timeoutMs: scenario.timeoutMs,
           steps: scenario.steps,
+          visible: options.liveBrowser === true || args.visible === true,
         });
         const failedSteps = result.steps.filter((step) => !step.ok);
         const scenarioSynthetic = isSyntheticCheckPath(scenario.path);
@@ -7120,6 +7160,10 @@ ${lessons}` : "",
         browserCheckCalls += 1;
         const browserPath = typeof args.path === "string" ? args.path : "index.html";
         const rawSteps = Array.isArray(args.steps) ? args.steps : [];
+        const liveBrowser = options.liveBrowser === true || args.visible === true;
+        if (liveBrowser) {
+          log("info", "Live browser opened", `${browserPath} · ${rawSteps.length} steps`);
+        }
         const browserKey = `${browserPath}::${JSON.stringify(rawSteps)}`;
         const syntheticCheck = isSyntheticCheckPath(browserPath);
         const result = await runBrowserCheck(analysis.id, analysis.rootPath, {
@@ -7128,6 +7172,7 @@ ${lessons}` : "",
           steps: rawSteps as BrowserCheckStep[],
           mobile: args.mobile === true,
           screenshot: args.screenshot === true,
+          visible: liveBrowser,
         });
         if (syntheticCheck) syntheticBrowserChecks += 1;
         else {
@@ -7160,8 +7205,12 @@ ${lessons}` : "",
           syntheticCheck
             ? "Note: this check ran a synthetic page under .cie/, not the project entry page. It does not prove the real app."
             : "",
-          !result.ok && browserFailureRepeat >= 3
-            ? "The same check has failed 3 times in a row. Change the steps or fix the underlying page; repeating it will not help."
+          !result.ok && browserFailureRepeat >= (testTask ? 2 : 3)
+            ? `The same check has failed ${browserFailureRepeat} times in a row. ${
+                testTask
+                  ? "Stop repeating it: switch to DOM-visible checks or report the exact blocker."
+                  : "Change the steps or fix the underlying page; repeating it will not help."
+              }`
             : "",
         ]
           .filter(Boolean)

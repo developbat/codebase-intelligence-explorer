@@ -37,6 +37,8 @@ export interface BrowserCheckOptions {
   screenshot?: boolean;
   timeoutMs?: number;
   measureFps?: boolean;
+  /** Open a visible local Chrome window while the check runs. */
+  visible?: boolean;
 }
 
 export interface BrowserCheckStepResult {

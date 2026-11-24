@@ -730,6 +730,12 @@ export function CodeStudio({
   const [testGenResult, setTestGenResult] = useState<AiTestGenerationResult | null>(null);
   const agentAbortRef = useRef<AbortController | null>(null);
   const agentStopRequestedRef = useRef(false);
+  const [liveBrowser, setLiveBrowser] = useState(
+    () => localStorage.getItem("cie:live-browser") !== "0",
+  );
+  useEffect(() => {
+    localStorage.setItem("cie:live-browser", liveBrowser ? "1" : "0");
+  }, [liveBrowser]);
   const agentAllowWrite = prefs.agentAllowWrite;
   const setAgentAllowWrite = (value: boolean) => updateStudioPrefs({ agentAllowWrite: value });
   const agentAllowCommands = prefs.agentAllowCommands;
@@ -2806,6 +2812,7 @@ export function CodeStudio({
             retryFailed: runOptions.retryFailed === true,
             clarified: runOptions.skipClarify === true,
             history: history.slice(-8),
+            liveBrowser,
           },
           handleEvent,
           controller.signal,
@@ -2825,6 +2832,7 @@ export function CodeStudio({
             language: locale,
             workspaceMode: modeForRun,
             clarified: runOptions.skipClarify === true,
+            liveBrowser,
           },
           handleEvent,
           controller.signal,
@@ -4103,6 +4111,7 @@ export function CodeStudio({
                 <TaskQueueCard
                   queue={taskQueue}
                   defaultOpen
+                  liveStepCount={chatLiveSteps.length}
                   onOpenFile={(path) => void openFile(path)}
                   onRetryFailed={() => {
                     if (chatBusy || !taskQueue) return;
@@ -4375,6 +4384,7 @@ export function CodeStudio({
               <TaskQueueCard
                 queue={taskQueue}
                 defaultOpen
+                liveStepCount={chatLiveSteps.length}
                 onOpenFile={(path) => void openFile(path)}
                 onRetryFailed={() => {
                   if (!taskQueue) return;
@@ -4599,6 +4609,13 @@ export function CodeStudio({
               <span className="studio-session-tokens">
                 {sessionTokens > 0 ? `${t("Session")} ${formatTokens(sessionTokens)} ${t("tokens")}` : ""}
               </span>
+              <button
+                className={`studio-loop-toggle ${liveBrowser ? "is-on" : ""}`}
+                onClick={() => setLiveBrowser((value) => !value)}
+                title={t("Show a local browser window while the agent tests the project")}
+              >
+                <Eye size={12} /> {t("Live browser")}
+              </button>
               <button
                 className={`studio-loop-toggle ${consoleOpen ? "is-on" : ""}`}
                 onClick={() => setConsoleOpen((value) => !value)}

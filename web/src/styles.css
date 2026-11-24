@@ -14574,6 +14574,52 @@ button.canvas-stat {
   font-size: 7px;
 }
 
+.agent-plan-understanding,
+.agent-plan-reason {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-bottom: 8px;
+  padding: 8px 9px;
+  border: 1px solid rgba(110, 168, 254, 0.2);
+  border-radius: 6px;
+  background: rgba(59, 130, 246, 0.055);
+}
+
+.agent-plan-understanding > span,
+.agent-plan-reason > span {
+  color: #7fa9d8;
+  font-size: 7px;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.agent-plan-understanding > p,
+.agent-plan-reason > p {
+  margin: 0;
+  color: #c7dcf4;
+  font-size: 9px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.agent-plan-reason {
+  border-color: rgba(167, 139, 250, 0.18);
+  background: rgba(124, 58, 237, 0.05);
+}
+
+.agent-plan-reason > span {
+  color: #b9a6ff;
+}
+
+.agent-plan-hint {
+  margin: 0 0 8px;
+  color: #829bb8;
+  font-size: 8.5px;
+  line-height: 1.45;
+}
+
 .agent-plan-body {
   display: flex;
   flex-direction: column;
@@ -16388,6 +16434,43 @@ button.canvas-stat {
   font-size: 7px;
 }
 
+.task-queue-understanding {
+  margin: 3px 0 2px;
+  padding: 4px 6px;
+  border: 1px solid rgba(110, 168, 254, 0.16);
+  border-radius: 5px;
+  background: rgba(59, 130, 246, 0.04);
+}
+
+.task-queue-understanding > summary {
+  color: #8fb3d9;
+  font-size: 7.5px;
+  cursor: pointer;
+}
+
+.task-queue-understanding > p {
+  margin: 4px 0 0;
+  max-height: 180px;
+  overflow-y: auto;
+  color: #9fb6d2;
+  font-size: 8px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+
+.task-queue-understanding > small {
+  display: block;
+  margin-top: 4px;
+  color: #7f9bbd;
+  font-size: 7.5px;
+  line-height: 1.4;
+}
+
+.task-queue-understanding > small b {
+  color: #a9c3e2;
+  font-weight: 600;
+}
+
 .task-queue-item-main p {
   margin: 1px 0 0;
   max-height: 260px;
@@ -16733,23 +16816,6 @@ button.canvas-stat {
   .catalog-model-row > span:nth-child(5) {
     display: none;
   }
-}
-
-.task-queue-progress {
-  flex: 0 1 120px;
-  height: 4px;
-  margin-left: auto;
-  overflow: hidden;
-  border-radius: 999px;
-  background: rgba(148, 163, 184, 0.14);
-}
-
-.task-queue-progress > i {
-  display: block;
-  height: 100%;
-  border-radius: 999px;
-  background: linear-gradient(90deg, #5eead4, #6ea8fe);
-  transition: width 0.35s ease;
 }
 
 .task-queue-item.is-current {

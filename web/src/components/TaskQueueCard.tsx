@@ -25,6 +25,7 @@ interface TaskQueueCardProps {
   onUpdateTask?: (taskId: string, patch: Partial<ProjectTask>) => void | Promise<void>;
   onDeleteTask?: (taskId: string) => void | Promise<void>;
   onMoveTask?: (taskId: string, direction: "up" | "down") => void | Promise<void>;
+  liveStepCount?: number;
 }
 
 function tokenLabel(tokens?: number): string {
@@ -47,6 +48,7 @@ export function TaskQueueCard({
   onUpdateTask,
   onDeleteTask,
   onMoveTask,
+  liveStepCount = 0,
 }: TaskQueueCardProps) {
   const { t } = useI18n();
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -83,7 +85,6 @@ export function TaskQueueCard({
     queue.tasks.find((task) => task.status === "in_progress") ??
     queue.tasks.find((task) => task.status === "failed" || task.status === "blocked") ??
     queue.tasks.find((task) => task.status === "pending");
-  const percent = queue.tasks.length > 0 ? Math.round((done / queue.tasks.length) * 100) : 0;
   const totalTokens = queue.tasks.reduce((sum, task) => sum + (task.tokenUsage?.totalTokens ?? 0), 0);
   const totalCost = queue.tasks.reduce((sum, task) => sum + (task.costUsd ?? 0), 0);
   return (
@@ -99,10 +100,8 @@ export function TaskQueueCard({
             {failed > 0 ? ` · ${failed} ${t("failed")}` : ""} · {t(queue.status)}
             {totalTokens > 0 ? ` · ${tokenLabel(totalTokens)} ${t("tokens")}` : ""}
             {totalCost > 0 ? ` · ${formatUsd(totalCost)}` : ""}
+            {liveStepCount > 0 ? ` · ${liveStepCount} ${t("steps")}` : ""}
           </small>
-        </span>
-        <span className="task-queue-progress" aria-hidden="true">
-          <i style={{ width: `${percent}%` }} />
         </span>
         <span className="task-queue-goal">
           {current ? `${t(current.status)} · ${current.title}` : queue.goal}
@@ -182,6 +181,18 @@ export function TaskQueueCard({
                     <code>{task.id}</code>
                     <strong>{task.title}</strong>
                   </div>
+                  <details
+                    className="task-queue-understanding"
+                    open={current?.id === task.id && task.status === "in_progress"}
+                  >
+                    <summary>{t("What the agent understood")}</summary>
+                    <p>{task.detail || task.title}</p>
+                    {task.acceptance ? (
+                      <small>
+                        <b>{t("Acceptance")}:</b> {task.acceptance}
+                      </small>
+                    ) : null}
+                  </details>
                   <small>
                     {t(task.status)} · {t(task.effort)} · {t(task.role)}
                     {task.provider ? ` · ${task.provider}/${task.model ?? ""}` : ""}

@@ -275,15 +275,27 @@ export async function runBrowserCheck(
   const resourceErrors: string[] = [];
   const stepResults: BrowserCheckStepResult[] = [];
   let page: Page | null = null;
+  let showingWindow = options.visible === true && process.env.CIE_BROWSER_HEADLESS !== "1";
   try {
-    browser = await chromium.launch({
-      headless: true,
-      executablePath,
-      timeout: timeoutMs,
-      args: ["--no-sandbox", "--disable-dev-shm-usage"],
-    });
+    const launch = (headless: boolean) =>
+      chromium.launch({
+        headless,
+        executablePath,
+        timeout: timeoutMs,
+        slowMo: headless ? 0 : 120,
+        args: ["--no-sandbox", "--disable-dev-shm-usage"],
+      });
+    try {
+      browser = await launch(!showingWindow);
+    } catch (error) {
+      if (!showingWindow) throw error;
+      // A server without a display can still verify headlessly.
+      showingWindow = false;
+      browser = await launch(true);
+    }
     const context = await browser.newContext({ viewport });
     page = await context.newPage();
+    if (showingWindow) await page.bringToFront().catch(() => undefined);
     page.setDefaultTimeout(Math.min(10_000, timeoutMs));
     page.on("console", (message) => {
       if (message.type() === "error" && consoleErrors.length < 40) consoleErrors.push(message.text());
@@ -315,6 +327,7 @@ export async function runBrowserCheck(
           detail,
           durationMs: Date.now() - started,
         });
+        if (showingWindow) await page.waitForTimeout(220);
       } catch (error) {
         let detail = error instanceof Error ? error.message : "Step failed.";
         if (isSelectorStep(step)) {

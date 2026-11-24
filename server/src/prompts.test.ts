@@ -23,6 +23,7 @@ test("prompt registry supports defaults, project overrides, render and reset", a
     for (const required of [
       "agent.ask",
       "agent.auto",
+      "agent.test",
       "agent.coding",
       "agent.final",
       "agent.final_coding",
