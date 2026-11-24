@@ -346,7 +346,22 @@ CSV/Markdown generation is shared in `shared/extraction.ts`, so exports match
 the API extraction data. The chat serializer also persists `extraction`,
 `readMap` and `changeReport` with the conversation.
 
-### 4.11 Persistence
+### 4.11 Content inventory (assets and Markdown)
+
+The right panel **Assets** tab and the `audit_content` tool share
+`server/src/contentInventory.ts`:
+
+- disk asset inventory (images, fonts, audio, video),
+- references from HTML/CSS/JS/TS/Vue/Svelte/PHP/Markdown,
+- **broken references** (local file missing),
+- **unreferenced assets**,
+- Markdown heading hierarchy warnings (starts below h1, level jumps, multiple
+  h1).
+
+Dynamic JavaScript references are reported as a note rather than a hard
+failure. Clicking an item opens the source file/line.
+
+### 4.12 Persistence
 
 - Project analysis: application data directory (project id based).
 - Agent notes: `<project>/.cie/agent/`.

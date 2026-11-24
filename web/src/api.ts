@@ -28,6 +28,7 @@ import type {
   TestRunResult,
   TestStreamEvent,
 } from "../../shared/types";
+import type { ContentInventory } from "../../shared/contentInventory";
 import type {
   AiAgentEvent,
   AiAgentResult,
@@ -672,6 +673,9 @@ export const api = {
     request<{ report: ChangeReport; analysis: AnalysisResult }>(`/api/projects/${id}/changes`, {
       method: "POST",
     }),
+
+  contentInventory: (id: string) =>
+    request<ContentInventory>(`/api/projects/${id}/content-inventory`),
 
   search: (projectId: string, query: string, limit = 20) =>
     request<CodeSearchResponse>(`/api/projects/${projectId}/search`, {

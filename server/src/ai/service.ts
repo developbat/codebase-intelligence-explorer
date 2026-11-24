@@ -120,6 +120,7 @@ import { appendLesson, readLessons } from "../tasks";
 import { ensureProjectMap } from "../projectMap";
 import { buildChangeReport } from "../changes";
 import { auditClaims } from "./claims";
+import { auditContentInventory, renderContentInventory } from "../contentInventory";
 import {
   actionPlanInstruction,
   resolveActionPlan,
@@ -1845,6 +1846,7 @@ const READ_ONLY_ACTIONS = new Set([
   "count_matches",
   "list_colors",
   "extract_entities",
+  "audit_content",
   "json_query",
   "find_symbols",
   "sqlite_query",
@@ -3188,6 +3190,7 @@ export function agentToolCatalog(
     '{"action":"extract_entities","args":{"kind":"color","scope":["styles.css"]}}',
     '{"action":"extract_entities","args":{"kind":"asset"}}',
     '{"action":"extract_entities","args":{"kind":"document"}}',
+    '{"action":"audit_content","args":{}}',
     '{"action":"apply_mapped_changes","args":{"kind":"color","scope":["styles.css"],"mapping":{"#22d3ee":"#ff5c8a"}}}',
     '{"action":"apply_mapped_changes","args":{"kind":"text","mapping":{"PLAY AGAIN":"RESTART"}}}',
     '{"action":"apply_mapped_changes","args":{"kind":"color","dryRun":true,"mapping":{"#fff":"#000","#000":"#fff"}}}',
@@ -4407,6 +4410,7 @@ ${lessons}` : "",
     "\n- A failed tool call is not a blocker: fix its arguments (path/content) and retry in the same run. Read .cie/agent/runs/ to see the exact failed action." +
     "\n- Do not claim a feature from a config or variable that is never read at runtime. Wire it into the update/draw path or remove it." +
     "\n- For any complete list/audit (colors, inputs, buttons, links, functions, classes, components, env, routes, imports, selectors, assets, documents, markdown, todos, files), call extract_entities with the matching kind instead of manually reading/counting. Finish immediately with every item in the user's language; do not summarize or omit entries." +
+    "\n- For asset references, broken local links or Markdown heading hierarchy, call audit_content and report the actual findings." +
     "\n- For a color/background/button color change, call extract_entities(kind=color) first, then apply the change with apply_mapped_changes or replace_many; never rewrite whole files without a mapping." +
     "\n- For non-color value changes (button labels, import paths, env keys), use apply_mapped_changes(kind=text) or replace_many; verify with a text extraction or search that the old value is gone." +
     "\n- Mappings are applied simultaneously, so color swaps like {\"#fff\":\"#000\",\"#000\":\"#fff\"} are safe. Use dryRun:true to preview a multi-file mapping before writing. If a mapped change was wrong, call undo_change with the file path to restore its latest backup." +
@@ -4947,6 +4951,7 @@ ${lessons}` : "",
       "count_matches",
       "list_colors",
       "extract_entities",
+      "audit_content",
       "apply_mapped_changes",
       "undo_change",
       "json_query",
@@ -5036,6 +5041,7 @@ ${lessons}` : "",
         count_matches: "Counting matches…",
         list_colors: "Listing CSS colors…",
         extract_entities: "Extracting project entities…",
+        audit_content: "Auditing assets and documents…",
         apply_mapped_changes: "Applying mapped changes…",
         undo_change: "Restoring the last backup…",
         json_query: "Inspecting JSON…",
@@ -6550,6 +6556,21 @@ ${lessons}` : "",
         observation = `Restored ${restored.filePath} from its latest backup (${restored.backupPath}).`;
         evidence.push({ path: restored.filePath, label: "Restored backup" });
         log("success", "Backup restored", restored.filePath);
+        ok = true;
+      } else if (action === "audit_content") {
+        const inventory = await auditContentInventory(analysis);
+        observation = renderContentInventory(inventory);
+        for (const item of inventory.broken.slice(0, 5)) {
+          evidence.push({ path: item.file, label: "Broken reference", startLine: item.line });
+        }
+        for (const item of inventory.unreferenced.slice(0, 5)) {
+          evidence.push({ path: item.path, label: "Unreferenced asset" });
+        }
+        log(
+          "info",
+          "Content inventory audited",
+          `${inventory.summary.broken} broken · ${inventory.summary.unreferenced} unreferenced · ${inventory.summary.headingWarnings} heading warnings`,
+        );
         ok = true;
       } else if (action === "json_query") {
         const filePath = normalizeAgentPath(analysis.rootPath, pathFromArgs(args));

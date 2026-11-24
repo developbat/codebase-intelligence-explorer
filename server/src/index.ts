@@ -57,6 +57,7 @@ import type { IntentAnalysis } from "../../shared/intent";
 import type { AiWorkspaceMode } from "../../shared/ai";
 import { getProjectUsage } from "./ai/usage";
 import { buildChangeReport } from "./changes";
+import { auditContentInventory } from "./contentInventory";
 import { formatProjectFile } from "./formatter";
 import { checkFileSyntax } from "./syntax";
 import {
@@ -2415,6 +2416,19 @@ app.post("/api/projects/:id/changes", async (req, res) => {
     res.json({ report, analysis });
   } catch (error) {
     handleError(res, error);
+  }
+});
+
+app.get("/api/projects/:id/content-inventory", async (req, res) => {
+  try {
+    if (!isValidProjectId(req.params.id)) {
+      res.status(400).json({ error: "Invalid project id." });
+      return;
+    }
+    const analysis = await loadAnalysis(req.params.id);
+    res.json(await auditContentInventory(analysis));
+  } catch (error) {
+    handleError(res, error, 400);
   }
 });
 

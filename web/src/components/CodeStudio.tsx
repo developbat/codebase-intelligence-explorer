@@ -143,6 +143,7 @@ import { ProjectSwitcher } from "./ProjectSwitcher";
 import { MarkdownText } from "./MarkdownText";
 import { GitDiffView } from "./GitDiffView";
 import { ExtractionTableView } from "./ExtractionTable";
+import { ContentInventoryPanel } from "./ContentInventoryPanel";
 import type { ExtractionTable } from "../../../shared/extraction";
 import { formatTokens } from "./UsageDialog";
 import { formatUsd } from "../../../shared/pricing";
@@ -5412,6 +5413,12 @@ export function CodeStudio({
             <GitCompareArrows size={11} /> {t("Changes")}
             {agentChangeReport ? <b>{agentChangeReport.summary.changedFiles}</b> : null}
           </button>
+          <button
+            className={rightTab === "assets" ? "is-active" : ""}
+            onClick={() => setRightTab("assets")}
+          >
+            <Library size={11} /> {t("Assets")}
+          </button>
           {openTabs.map((filePath) => (
             <div key={filePath} className={`studio-right-tab ${rightTab === filePath ? "is-active" : ""}`}>
               <button
@@ -5433,7 +5440,7 @@ export function CodeStudio({
               </button>
             </div>
           ))}
-          {rightTab !== "preview" && rightTab !== "run" && rightTab !== "changes" && activeFile ? (
+          {rightTab !== "preview" && rightTab !== "run" && rightTab !== "changes" && rightTab !== "assets" && activeFile ? (
             <>
               <button
                 className="studio-right-icon"
@@ -5459,7 +5466,7 @@ export function CodeStudio({
               </button>
             </>
           ) : null}
-          {rightTab !== "preview" && rightTab !== "run" && rightTab !== "changes" ? (
+          {rightTab !== "preview" && rightTab !== "run" && rightTab !== "changes" && rightTab !== "assets" ? (
             <button
               className="studio-right-save"
               onClick={() => void saveFile()}
@@ -5654,6 +5661,11 @@ export function CodeStudio({
                 </>
               )}
             </div>
+          ) : rightTab === "assets" ? (
+            <ContentInventoryPanel
+              analysisId={analysis.id}
+              onOpenFile={(filePath, line) => void openFileAt(filePath, line)}
+            />
           ) : rightTab === "preview" ? (
             <div className="studio-right-preview">
               <div className="studio-preview-head">

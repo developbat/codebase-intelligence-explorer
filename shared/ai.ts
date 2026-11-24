@@ -606,6 +606,7 @@ export type AiAgentAction =
   | "count_matches"
   | "list_colors"
   | "extract_entities"
+  | "audit_content"
   | "apply_mapped_changes"
   | "undo_change"
   | "json_query"
