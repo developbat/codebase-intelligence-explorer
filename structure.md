@@ -330,9 +330,16 @@ npm test               # unit/integration tests
 npm run eval:ask       # read-only code understanding/list checks
 npm run eval:stages    # intent + planning stages
 npm run eval:change    # temp-copy change workflow
+npm run eval:extract   # deterministic extraction golden matrix
 npx tsc -p tsconfig.json --noEmit
 npm run build
 ```
+
+`eval:extract` runs the golden matrix in
+`fixtures/agent-eval/extraction.json` against real project analyses (no model
+tokens): exact/minimum totals, uniqueness, truncation and required
+file/line/name/path/color items across neon-escape, CBE, sample, CIE, Laravel,
+Python, Go and React Native.
 
 Evaluation output is written to `fixtures/agent-eval/reports/` (gitignored).
 Do not use a synthetic `.cie/agent` harness as proof for a real app; use the real

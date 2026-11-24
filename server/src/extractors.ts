@@ -513,7 +513,7 @@ async function extractPatterned(
           /\$?(?:router|app|routes?)\s*->\s*(get|post|put|patch|delete)\(\s*["']([^"']*)["']/i,
           /(?:Route|Router)::(get|post|put|patch|delete)\(\s*["']([^"']*)["']/i,
           /@(?:app|router|bp)\.(get|post|put|patch|delete)\(\s*["']([^"']*)["']/i,
-          /\.(get|post|put|patch|delete)\(\s*["']([^"']+)["']/i,
+          /\.(get|post|put|patch|delete)\(\s*["'](\/[^"']*)["']/i,
           /(?:HandleFunc|Handle)\(\s*["']([^"']+)["']/i,
         ];
         for (const pattern of patterns) {

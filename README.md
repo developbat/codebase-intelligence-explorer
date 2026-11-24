@@ -609,9 +609,17 @@ Every AI request carries the selected UI locale. The server appends an explicit 
 
 ```bash
 npm test
+npm run eval:ask
+npm run eval:stages
+npm run eval:change
+npm run eval:extract
 ```
 
-Current coverage (8 tests):
+The extraction golden matrix checks exact/minimum totals, uniqueness and
+required items across neon-escape, CBE, sample, CIE, Laravel, Python, Go and
+React Native without calling a model.
+
+Current coverage:
 
 1. Fixture call graph and evidence.
 2. CommonJS `require()` / `exports.x`.

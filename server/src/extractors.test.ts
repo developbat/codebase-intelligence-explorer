@@ -37,6 +37,8 @@ async function fixture(): Promise<{ root: string; analysis: AnalysisResult }> {
       'app.get("/orders", handler);',
       'import { x } from "./x";',
       "// TODO: add validation",
+      'const remote = http.get("https://example.com/api");',
+      'const value = map.get("project");',
       'const fireButton = document.createElement("button");',
       'fireButton.id = "fire-button";',
       'fireButton.textContent = "🔥";',
@@ -165,7 +167,9 @@ test("extracts UI, code, env, route, asset and markdown entities", async () => {
     const env = await extractEntities(analysis, { kind: "env", scope: "src/config.ts" });
     assert.ok(env.items.some((item) => item.values.name === "API_KEY"));
     const route = await extractEntities(analysis, { kind: "route", scope: "src/config.ts" });
+    assert.equal(route.total, 1);
     assert.ok(route.items.some((item) => item.values.path === "/orders" && item.values.method === "GET"));
+    assert.ok(route.items.every((item) => item.values.path.startsWith("/")));
     const imported = await extractEntities(analysis, { kind: "import", scope: "src/config.ts" });
     assert.ok(imported.items.some((item) => item.values.value === "./x"));
     const pyRoutes = await extractEntities(analysis, { kind: "route", scope: "app/main.py" });

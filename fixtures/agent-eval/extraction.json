@@ -1,0 +1,636 @@
+{
+  "cases": [
+    {
+      "id": "neon-buttons",
+      "projectId": "4541796f07101515",
+      "kind": "button",
+      "exactTotal": 6,
+      "expectUnique": true,
+      "items": [
+        {
+          "file": "index.html",
+          "name": "sound-toggle"
+        },
+        {
+          "file": "index.html",
+          "name": "play-button"
+        },
+        {
+          "file": "index.html",
+          "name": "restart-button"
+        },
+        {
+          "file": "index.html",
+          "name": "move-left"
+        },
+        {
+          "file": "index.html",
+          "name": "move-right"
+        },
+        {
+          "file": "app.js",
+          "name": "fire-button",
+          "textIncludes": "🔥"
+        }
+      ]
+    },
+    {
+      "id": "neon-colors",
+      "projectId": "4541796f07101515",
+      "kind": "color",
+      "exactTotal": 75,
+      "exactUnique": 67,
+      "items": [
+        {
+          "file": "styles.css",
+          "color": "#22d3ee"
+        },
+        {
+          "file": "styles.css",
+          "color": "#f43f5e"
+        }
+      ]
+    },
+    {
+      "id": "neon-functions",
+      "projectId": "4541796f07101515",
+      "kind": "function",
+      "exactTotal": 85,
+      "expectUnique": true,
+      "items": [
+        {
+          "file": "app.js",
+          "name": "startGame"
+        }
+      ]
+    },
+    {
+      "id": "neon-selectors",
+      "projectId": "4541796f07101515",
+      "kind": "selector",
+      "minTotal": 70,
+      "expectUnique": true,
+      "items": [
+        {
+          "file": "styles.css",
+          "selector": ":root"
+        },
+        {
+          "file": "styles.css",
+          "selector": ".hud"
+        }
+      ]
+    },
+    {
+      "id": "neon-documents",
+      "projectId": "4541796f07101515",
+      "kind": "document",
+      "exactTotal": 1,
+      "items": [
+        {
+          "file": "README.md"
+        }
+      ]
+    },
+    {
+      "id": "cbe-inputs",
+      "projectId": "2f97a1dcd90d1acf",
+      "kind": "input",
+      "exactTotal": 7,
+      "expectUnique": true,
+      "items": [
+        {
+          "file": "index.html",
+          "name": "reminder-input"
+        },
+        {
+          "file": "index.html",
+          "name": "task-input"
+        },
+        {
+          "file": "index.html",
+          "name": "task-detail-input"
+        },
+        {
+          "file": "js/script.js",
+          "name": "Görevi tamamlandı olarak işaretle"
+        }
+      ]
+    },
+    {
+      "id": "cbe-buttons",
+      "projectId": "2f97a1dcd90d1acf",
+      "kind": "button",
+      "minTotal": 10,
+      "expectUnique": true,
+      "items": [
+        {
+          "file": "index.html",
+          "name": "add-task"
+        },
+        {
+          "file": "index.html",
+          "name": "reminder-add"
+        },
+        {
+          "file": "js/script.js",
+          "name": "Görevi sil"
+        }
+      ]
+    },
+    {
+      "id": "cbe-functions",
+      "projectId": "2f97a1dcd90d1acf",
+      "kind": "function",
+      "exactTotal": 27,
+      "expectUnique": true,
+      "items": [
+        {
+          "file": "js/reminders.js",
+          "name": "render"
+        }
+      ]
+    },
+    {
+      "id": "cbe-documents",
+      "projectId": "2f97a1dcd90d1acf",
+      "kind": "document",
+      "minTotal": 2,
+      "items": [
+        {
+          "file": "README.md"
+        }
+      ]
+    },
+    {
+      "id": "sample-functions",
+      "projectId": "7651e1e027cf6d46",
+      "kind": "function",
+      "exactTotal": 39,
+      "expectUnique": true,
+      "items": [
+        {
+          "file": "src/services/order.service.ts",
+          "name": "createOrder"
+        },
+        {
+          "file": "src/services/order.service.ts",
+          "name": "cancelOrder"
+        }
+      ]
+    },
+    {
+      "id": "sample-classes",
+      "projectId": "7651e1e027cf6d46",
+      "kind": "class",
+      "exactTotal": 13,
+      "expectUnique": true,
+      "items": [
+        {
+          "file": "src/services/order.service.ts",
+          "name": "OrderService"
+        }
+      ]
+    },
+    {
+      "id": "sample-imports",
+      "projectId": "7651e1e027cf6d46",
+      "kind": "import",
+      "exactTotal": 26,
+      "expectUnique": true,
+      "items": [
+        {
+          "value": "../services/order.service"
+        }
+      ]
+    },
+    {
+      "id": "cie-inputs",
+      "projectId": "0751de9f2296c3d1",
+      "kind": "input",
+      "minTotal": 80,
+      "expectUnique": true,
+      "items": [
+        {
+          "file": "web/src/App.tsx",
+          "name": "lang-select"
+        }
+      ]
+    },
+    {
+      "id": "cie-buttons",
+      "projectId": "0751de9f2296c3d1",
+      "kind": "button",
+      "minTotal": 400,
+      "expectUnique": true
+    },
+    {
+      "id": "cie-functions",
+      "projectId": "0751de9f2296c3d1",
+      "kind": "function",
+      "minTotal": 1200,
+      "expectUnique": true,
+      "items": [
+        {
+          "file": "server/src/ai/loop.ts",
+          "name": "runProjectLoop"
+        },
+        {
+          "file": "server/src/ai/service.ts",
+          "name": "runAgentTask"
+        },
+        {
+          "file": "server/src/analyzer.ts",
+          "name": "analyzeProject"
+        }
+      ]
+    },
+    {
+      "id": "cie-classes",
+      "projectId": "0751de9f2296c3d1",
+      "kind": "class",
+      "minTotal": 300,
+      "expectUnique": true,
+      "items": [
+        {
+          "file": "server/src/ai/loop.ts",
+          "name": "RetryRecovery"
+        }
+      ]
+    },
+    {
+      "id": "cie-components",
+      "projectId": "0751de9f2296c3d1",
+      "kind": "component",
+      "minTotal": 60,
+      "expectUnique": true,
+      "items": [
+        {
+          "name": "AgentPlanCard"
+        }
+      ]
+    },
+    {
+      "id": "cie-routes",
+      "projectId": "0751de9f2296c3d1",
+      "kind": "route",
+      "minTotal": 140,
+      "expectUnique": true,
+      "items": [
+        {
+          "method": "GET",
+          "path": "/api/health"
+        },
+        {
+          "method": "POST",
+          "path": "/api/ai/local/start"
+        }
+      ]
+    },
+    {
+      "id": "cie-env",
+      "projectId": "0751de9f2296c3d1",
+      "kind": "env",
+      "minTotal": 60,
+      "minUnique": 9,
+      "items": [
+        {
+          "name": "CIE_DATA_DIR"
+        },
+        {
+          "name": "CIE_CHROME_PATH"
+        },
+        {
+          "name": "PORT"
+        }
+      ]
+    },
+    {
+      "id": "cie-imports",
+      "projectId": "0751de9f2296c3d1",
+      "kind": "import",
+      "minTotal": 1000,
+      "expectUnique": true,
+      "items": [
+        {
+          "value": "node:fs/promises"
+        },
+        {
+          "value": "./ai/service"
+        }
+      ]
+    },
+    {
+      "id": "cie-assets",
+      "projectId": "0751de9f2296c3d1",
+      "kind": "asset",
+      "minTotal": 1,
+      "items": [
+        {
+          "file": "docs/cbe.png"
+        }
+      ]
+    },
+    {
+      "id": "cie-documents",
+      "projectId": "0751de9f2296c3d1",
+      "kind": "document",
+      "minTotal": 12,
+      "items": [
+        {
+          "file": "docs/AGENT-FIRST.md"
+        }
+      ]
+    },
+    {
+      "id": "cie-selectors",
+      "projectId": "0751de9f2296c3d1",
+      "kind": "selector",
+      "minTotal": 2000,
+      "expectUnique": true,
+      "truncated": true
+    },
+    {
+      "id": "laravel-routes",
+      "projectId": "5b42c28a16dd210a",
+      "kind": "route",
+      "exactTotal": 142,
+      "expectUnique": true,
+      "items": [
+        {
+          "file": "routes/web.php",
+          "method": "GET",
+          "path": "/about"
+        },
+        {
+          "file": "routes/web.php",
+          "method": "POST",
+          "path": "/contact"
+        }
+      ]
+    },
+    {
+      "id": "laravel-env",
+      "projectId": "5b42c28a16dd210a",
+      "kind": "env",
+      "exactTotal": 61,
+      "minUnique": 38,
+      "items": [
+        {
+          "name": "APP_URL"
+        },
+        {
+          "name": "APP_LOCALE"
+        }
+      ]
+    },
+    {
+      "id": "laravel-functions",
+      "projectId": "5b42c28a16dd210a",
+      "kind": "function",
+      "exactTotal": 645,
+      "expectUnique": true
+    },
+    {
+      "id": "laravel-classes",
+      "projectId": "5b42c28a16dd210a",
+      "kind": "class",
+      "exactTotal": 77,
+      "expectUnique": true,
+      "items": [
+        {
+          "name": "AdminGate"
+        }
+      ]
+    },
+    {
+      "id": "laravel-imports",
+      "projectId": "5b42c28a16dd210a",
+      "kind": "import",
+      "exactTotal": 405,
+      "expectUnique": true,
+      "items": [
+        {
+          "value": "Mgm\\Core\\Auth"
+        }
+      ]
+    },
+    {
+      "id": "python-routes",
+      "projectId": "375385130b822e59",
+      "kind": "route",
+      "exactTotal": 8,
+      "expectUnique": true,
+      "items": [
+        {
+          "method": "PREFIX",
+          "path": "/v1/todos"
+        },
+        {
+          "file": "app/resources/todo/todo_resource.py",
+          "method": "GET",
+          "path": "/{id}"
+        }
+      ]
+    },
+    {
+      "id": "python-functions",
+      "projectId": "375385130b822e59",
+      "kind": "function",
+      "exactTotal": 106,
+      "expectUnique": true,
+      "items": [
+        {
+          "file": "app/application.py",
+          "name": "create_app"
+        }
+      ]
+    },
+    {
+      "id": "python-classes",
+      "projectId": "375385130b822e59",
+      "kind": "class",
+      "exactTotal": 60,
+      "expectUnique": true,
+      "items": [
+        {
+          "name": "AddTodoDataUseCase"
+        }
+      ]
+    },
+    {
+      "id": "python-imports",
+      "projectId": "375385130b822e59",
+      "kind": "import",
+      "exactTotal": 194,
+      "expectUnique": true,
+      "items": [
+        {
+          "value": "fastapi"
+        }
+      ]
+    },
+    {
+      "id": "python-todos",
+      "projectId": "375385130b822e59",
+      "kind": "todo",
+      "exactTotal": 67,
+      "expectUnique": true
+    },
+    {
+      "id": "python-documents",
+      "projectId": "375385130b822e59",
+      "kind": "document",
+      "exactTotal": 1,
+      "items": [
+        {
+          "file": "README.md"
+        }
+      ]
+    },
+    {
+      "id": "python-assets",
+      "projectId": "375385130b822e59",
+      "kind": "asset",
+      "exactTotal": 3,
+      "items": [
+        {
+          "file": "docs/assets/jaeger.png"
+        }
+      ]
+    },
+    {
+      "id": "go-functions",
+      "projectId": "8e52dcf5f8efe1f5",
+      "kind": "function",
+      "exactTotal": 102,
+      "expectUnique": true,
+      "items": [
+        {
+          "name": "TestEmptyName"
+        }
+      ]
+    },
+    {
+      "id": "go-classes",
+      "projectId": "8e52dcf5f8efe1f5",
+      "kind": "class",
+      "exactTotal": 32,
+      "expectUnique": true,
+      "items": [
+        {
+          "name": "PurchaseService"
+        }
+      ]
+    },
+    {
+      "id": "go-routes",
+      "projectId": "8e52dcf5f8efe1f5",
+      "kind": "route",
+      "exactTotal": 0,
+      "items": []
+    },
+    {
+      "id": "go-imports",
+      "projectId": "8e52dcf5f8efe1f5",
+      "kind": "import",
+      "exactTotal": 15,
+      "expectUnique": true,
+      "items": [
+        {
+          "value": "testing"
+        }
+      ]
+    },
+    {
+      "id": "go-documents",
+      "projectId": "8e52dcf5f8efe1f5",
+      "kind": "document",
+      "minTotal": 20,
+      "items": [
+        {
+          "file": "exercises/01-simple-test-case/instructions.md"
+        }
+      ]
+    },
+    {
+      "id": "rn-inputs",
+      "projectId": "71fbb9c7782b339b",
+      "kind": "input",
+      "minTotal": 17,
+      "expectUnique": true
+    },
+    {
+      "id": "rn-buttons",
+      "projectId": "71fbb9c7782b339b",
+      "kind": "button",
+      "minTotal": 140,
+      "expectUnique": true
+    },
+    {
+      "id": "rn-functions",
+      "projectId": "71fbb9c7782b339b",
+      "kind": "function",
+      "minTotal": 250,
+      "expectUnique": true,
+      "items": [
+        {
+          "file": "App.tsx",
+          "name": "AppNavigation"
+        }
+      ]
+    },
+    {
+      "id": "rn-components",
+      "projectId": "71fbb9c7782b339b",
+      "kind": "component",
+      "minTotal": 60,
+      "expectUnique": true,
+      "items": [
+        {
+          "file": "App.tsx",
+          "name": "AppNavigation"
+        },
+        {
+          "name": "AdCountdownFab"
+        }
+      ]
+    },
+    {
+      "id": "rn-routes",
+      "projectId": "71fbb9c7782b339b",
+      "kind": "route",
+      "exactTotal": 0,
+      "items": []
+    },
+    {
+      "id": "rn-imports",
+      "projectId": "71fbb9c7782b339b",
+      "kind": "import",
+      "minTotal": 400,
+      "expectUnique": true,
+      "items": [
+        {
+          "value": "react"
+        }
+      ]
+    },
+    {
+      "id": "rn-assets",
+      "projectId": "71fbb9c7782b339b",
+      "kind": "asset",
+      "minTotal": 50
+    },
+    {
+      "id": "rn-documents",
+      "projectId": "71fbb9c7782b339b",
+      "kind": "document",
+      "exactTotal": 6,
+      "items": [
+        {
+          "file": "docs/GOOGLE_PLAY_PRIVACY.md"
+        }
+      ]
+    }
+  ]
+}

@@ -15,7 +15,8 @@
     "test": "tsx --test --test-concurrency=1 server/src/*.test.ts",
     "eval:stages": "tsx server/src/evalStages.ts",
     "eval:ask": "tsx server/src/evalAsk.ts",
-    "eval:change": "tsx server/src/evalChange.ts"
+    "eval:change": "tsx server/src/evalChange.ts",
+    "eval:extract": "tsx server/src/evalExtraction.ts"
   },
   "dependencies": {
     "@codemirror/autocomplete": "^6.20.4",
