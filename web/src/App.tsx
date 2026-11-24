@@ -136,6 +136,8 @@ export default function App() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [studioInitialPrompt, setStudioInitialPrompt] = useState("");
   const [studioAutoRunPrompt, setStudioAutoRunPrompt] = useState(false);
+  const [chatInitialPrompt, setChatInitialPrompt] = useState("");
+  const [chatAutoRunPrompt, setChatAutoRunPrompt] = useState(false);
   const prefs = useStudioPrefs();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsTab, setSettingsTab] = useState<SettingsTab>(
@@ -346,6 +348,7 @@ export default function App() {
     template: ProjectTemplateId;
     brief: string;
     autoRun: boolean;
+    workspace: "studio" | "chat";
   }) {
     if (busy) return;
     setBusy("analyze");
@@ -357,13 +360,19 @@ export default function App() {
       localStorage.setItem(LAST_PATH_KEY, created.rootPath);
       setLastPath(created.rootPath);
       setDialogOpen(false);
-      setProduct("studio");
-      setStudioInitialPrompt(
-        input.brief
-          ? `Build this project: ${input.brief}\n\nThe project was just created from the ${created.template} template. Inspect the existing files first, then implement the request with tools. Run the detected typecheck/build command before finishing.`
-          : "",
-      );
-      setStudioAutoRunPrompt(input.autoRun && Boolean(input.brief));
+      if (input.workspace === "chat") {
+        setProduct("chat");
+        setChatInitialPrompt(input.brief);
+        setChatAutoRunPrompt(Boolean(input.brief));
+      } else {
+        setProduct("studio");
+        setStudioInitialPrompt(
+          input.brief
+            ? `Build this project: ${input.brief}\n\nThe project was just created from the ${created.template} template. Inspect the existing files first, then implement the request with tools. Run the detected typecheck/build command before finishing.`
+            : "",
+        );
+        setStudioAutoRunPrompt(input.autoRun && Boolean(input.brief));
+      }
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : t("Project could not be created"));
     } finally {
@@ -1049,6 +1058,12 @@ export default function App() {
             onOpenReports={() => {
               setSettingsTab("reports");
               setSettingsOpen(true);
+            }}
+            initialPrompt={chatInitialPrompt}
+            autoRunInitialPrompt={chatAutoRunPrompt}
+            onInitialPromptConsumed={() => {
+              setChatInitialPrompt("");
+              setChatAutoRunPrompt(false);
             }}
           />
         </Suspense>

@@ -10773,26 +10773,26 @@ button.canvas-stat {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 96px;
-  height: 96px;
+  width: 192px;
+  height: 192px;
   margin-bottom: 4px;
   border: 1px solid rgba(110, 168, 254, 0.24);
-  border-radius: 22px;
+  border-radius: 38px;
   background: radial-gradient(circle at 30% 20%, rgba(59, 130, 246, 0.22), rgba(9, 14, 22, 0.9));
   color: #9fc4f5;
   box-shadow: 0 0 30px -12px rgba(59, 130, 246, 0.7);
 }
 
 .studio-workflow-empty-logo {
-  width: 84px;
-  height: 84px;
+  width: 168px;
+  height: 168px;
   object-fit: contain;
   filter: drop-shadow(0 0 12px rgba(59, 130, 246, 0.55));
 }
 
 .chat-studio-empty-logo {
-  width: 58px;
-  height: 58px;
+  width: 116px;
+  height: 116px;
   object-fit: contain;
   filter: drop-shadow(0 0 16px rgba(59, 130, 246, 0.55));
 }
@@ -15477,6 +15477,69 @@ button.canvas-stat {
   display: flex;
   flex-direction: column;
   gap: 13px;
+}
+
+.create-usecase-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.create-usecase-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 5px;
+  min-height: 96px;
+  padding: 11px 12px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: rgba(148, 163, 184, 0.025);
+  color: #8aa6c8;
+  text-align: left;
+}
+
+.create-usecase-card svg {
+  color: #8fb3d9;
+}
+
+.create-usecase-card strong {
+  color: #c5dcff;
+  font-size: 11px;
+}
+
+.create-usecase-card span {
+  color: #718baa;
+  font-size: 8.5px;
+  line-height: 1.45;
+}
+
+.create-usecase-card:hover,
+.create-usecase-card.is-selected {
+  border-color: rgba(110, 168, 254, 0.4);
+  background: rgba(59, 130, 246, 0.08);
+}
+
+.create-usecase-card.is-selected svg {
+  color: #9fc4f5;
+}
+
+.create-daily-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  padding: 9px 10px;
+  border: 1px solid rgba(52, 211, 153, 0.22);
+  border-radius: 7px;
+  background: rgba(16, 185, 129, 0.05);
+  color: #a7f3d0;
+  font-size: 8.5px;
+  line-height: 1.45;
+}
+
+.create-daily-note svg {
+  flex: none;
+  margin-top: 1px;
 }
 
 .create-field {

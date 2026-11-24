@@ -11,6 +11,7 @@ import {
   GitCommitHorizontal,
   Loader2,
   Lock,
+  MessageSquare,
   Network,
   Play,
   ShieldCheck,
@@ -188,7 +189,17 @@ interface OpenProjectDialogProps {
     template: ProjectTemplateId;
     brief: string;
     autoRun: boolean;
+    workspace: "studio" | "chat";
   }) => void;
+}
+
+function autoProjectName(useCase: "coding" | "daily"): string {
+  const stamp = new Date()
+    .toISOString()
+    .replace(/[-:TZ.]/g, "")
+    .slice(0, 12);
+  const suffix = Math.random().toString(36).slice(2, 5);
+  return `${useCase === "daily" ? "bad-note" : "bad-project"}-${stamp}-${suffix}`;
 }
 
 function parentOf(folderPath: string): string {
@@ -212,11 +223,11 @@ export function OpenProjectDialog({
   const [path, setPath] = useState(lastPath);
   const [browserOpen, setBrowserOpen] = useState(false);
   const [browserTarget, setBrowserTarget] = useState<"path" | "parent">("path");
-  const [parentPath, setParentPath] = useState(() => parentOf(lastPath));
+  const [parentPath, setParentPath] = useState(() => parentOf(lastPath) || "~");
   const [name, setName] = useState("");
   const [template, setTemplate] = useState<ProjectTemplateId>("static");
   const [brief, setBrief] = useState("");
-  const [autoRun, setAutoRun] = useState(false);
+  const [useCase, setUseCase] = useState<"coding" | "daily">("coding");
   const [templates, setTemplates] = useState<ProjectTemplate[]>([]);
   const [templatesLoading, setTemplatesLoading] = useState(false);
   const [templatesError, setTemplatesError] = useState<string | null>(null);
@@ -224,7 +235,7 @@ export function OpenProjectDialog({
   useEffect(() => {
     if (open) {
       setPath(lastPath);
-      setParentPath((current) => current || parentOf(lastPath));
+      setParentPath((current) => current || parentOf(lastPath) || "~");
     }
   }, [open, lastPath]);
 
@@ -270,7 +281,7 @@ export function OpenProjectDialog({
   if (!open) return null;
 
   const selectedTemplate = templates.find((item) => item.id === template) ?? null;
-  const canCreate = Boolean(parentPath.trim() && name.trim() && !busy);
+  const canCreate = Boolean(parentPath.trim() && !busy);
 
   return (
     <div className="modal-backdrop" onMouseDown={onClose}>
@@ -355,18 +366,41 @@ export function OpenProjectDialog({
             onSubmit={(event) => {
               event.preventDefault();
               if (!canCreate) return;
+              const daily = useCase === "daily";
               onCreate({
                 parentPath: parentPath.trim(),
-                name: name.trim(),
-                template,
+                name: name.trim() || autoProjectName(useCase),
+                template: daily ? "blank" : template,
                 brief: brief.trim(),
-                autoRun: autoRun && Boolean(brief.trim()),
+                autoRun: Boolean(brief.trim()),
+                workspace: daily ? "chat" : "studio",
               });
             }}
           >
             <p className="modal-text">
-              {t("Choose a parent folder and a stack. A small, runnable skeleton is created and opened in Code Studio.")}
+              {t("Pick how you want to start. Coding projects get a runnable skeleton in Code Studio; everyday use creates a blank project and opens Chat Studio automatically.")}
             </p>
+
+            <div className="create-usecase-grid">
+              <button
+                type="button"
+                className={`create-usecase-card ${useCase === "coding" ? "is-selected" : ""}`}
+                onClick={() => setUseCase("coding")}
+              >
+                <Code2 size={18} />
+                <strong>{t("Coding project")}</strong>
+                <span>{t("Templates, Code Studio, agent tools and verification.")}</span>
+              </button>
+              <button
+                type="button"
+                className={`create-usecase-card ${useCase === "daily" ? "is-selected" : ""}`}
+                onClick={() => setUseCase("daily")}
+              >
+                <MessageSquare size={18} />
+                <strong>{t("Everyday use")}</strong>
+                <span>{t("Automatic project name and Chat Studio for research, writing and planning.")}</span>
+              </button>
+            </div>
 
             <label className="create-field">
               <span>{t("Parent folder")}</span>
@@ -401,11 +435,40 @@ export function OpenProjectDialog({
                 placeholder="my-app"
                 spellCheck={false}
               />
-              <small>{t("Letters, numbers, dots, dashes and underscores only.")}</small>
+              <small>{t("Letters, numbers, dots, dashes and underscores only. Leave blank for an automatic name.")}</small>
             </label>
 
+            <label className="create-field">
+              <span>{useCase === "daily" ? t("What do you want to do?") : t("What do you want to build?")}</span>
+              <textarea
+                value={brief}
+                onChange={(event) => setBrief(event.target.value)}
+                rows={3}
+                placeholder={
+                  useCase === "daily"
+                    ? t("Example: summarize this report, draft a reply, or plan my week.")
+                    : t("Example: a task board with projects, tasks, filters and localStorage.")
+                }
+              />
+              <small>
+                {brief.trim()
+                  ? t("This prompt will run automatically after the project opens.")
+                  : t("Optional. You can write it later in the studio.")}
+              </small>
+            </label>
+
+            {useCase === "daily" ? (
+              <div className="create-daily-note">
+                <MessageSquare size={13} />
+                <span>
+                  {t("A blank project is created with an automatic name and Chat Studio opens with this prompt.")}
+                </span>
+              </div>
+            ) : null}
+
+            {useCase === "coding" ? (
             <div className="create-field">
-              <span>{t("Starter template")}</span>
+              <span>{t("Project skeleton")}</span>
               {templatesLoading ? (
                 <div className="template-loading">
                   <Loader2 size={13} className="spin" /> {t("Loading templates…")}
@@ -440,28 +503,7 @@ export function OpenProjectDialog({
               ) : null}
             </div>
 
-            <label className="create-field">
-              <span>{t("Starter brief for the agent (optional)")}</span>
-              <textarea
-                value={brief}
-                onChange={(event) => setBrief(event.target.value)}
-                rows={3}
-                placeholder={t("Example: a task board with projects, tasks, filters and localStorage.")}
-              />
-              <small>{t(
-                "It is placed in the Code Studio composer; it is sent when you press Send or immediately if auto-start is enabled.",
-              )}</small>
-            </label>
-
-            <label className="checkbox-row create-autorun-row">
-              <input
-                type="checkbox"
-                checked={autoRun}
-                disabled={!brief.trim()}
-                onChange={(event) => setAutoRun(event.target.checked)}
-              />
-              {t("Start the task loop automatically after creation")}
-            </label>
+            ) : null}
 
             {error ? <div className="form-error">{error}</div> : null}
             <div className="modal-actions">
@@ -471,7 +513,11 @@ export function OpenProjectDialog({
               </button>
               <button type="submit" className="primary-button" disabled={!canCreate}>
                 {busy ? <Loader2 size={15} className="spin" /> : <FolderPlus size={14} />}
-                {busy ? t("Creating…") : t("Create and open Studio")}
+                {busy
+                  ? t("Creating…")
+                  : useCase === "daily"
+                    ? t("Create and open Chat")
+                    : t("Create and open Studio")}
               </button>
             </div>
           </form>

@@ -45,6 +45,9 @@ interface ChatStudioProps {
   onOpenCodeStudio?: () => void;
   onOpenSettings?: () => void;
   onOpenReports?: () => void;
+  initialPrompt?: string;
+  autoRunInitialPrompt?: boolean;
+  onInitialPromptConsumed?: () => void;
 }
 
 function formatTokens(value?: number): string {
@@ -67,6 +70,9 @@ export function ChatStudio({
   onOpenCodeStudio,
   onOpenSettings,
   onOpenReports,
+  initialPrompt,
+  autoRunInitialPrompt = false,
+  onInitialPromptConsumed,
 }: ChatStudioProps) {
   const { t, locale } = useI18n();
   const {
@@ -153,19 +159,25 @@ export function ChatStudio({
     }
   }
 
-  async function send() {
-    const text = input.trim();
-    if ((!text && !attachment) || busy || !model) return;
-    const prompt = attachment
-      ? `${text}${text ? "\n\n" : ""}Attached file: ${attachment.name}\n\n${attachment.content}`
+  async function sendMessage(
+    textOverride?: string,
+    attachmentOverride?: { name: string; content: string } | null,
+  ) {
+    const text = (textOverride ?? input).trim();
+    const currentAttachment =
+      attachmentOverride === undefined ? attachment : attachmentOverride;
+    if ((!text && !currentAttachment) || busy || !model) return;
+    const prompt = currentAttachment
+      ? `${text}${text ? "\n\n" : ""}Attached file: ${currentAttachment.name}\n\n${currentAttachment.content}`
       : text;
-    const session = active ?? create();
     const userEntry = makeEntry("user", "text", prompt, {
       provider: model.provider,
       model: model.model,
-      attachment: attachment?.name,
+      attachment: currentAttachment?.name,
     });
-    const withUser = append(session, userEntry);
+    const withUser = active
+      ? append(active, userEntry)
+      : create("New chat", userEntry);
     const history = [...withUser.entries].slice(-16).map((entry) => ({
       role: entry.role,
       content: entry.content,
@@ -211,6 +223,26 @@ export function ChatStudio({
       abortRef.current = null;
     }
   }
+
+  async function send() {
+    await sendMessage();
+  }
+
+  const initialPromptRef = useRef("");
+  useEffect(() => {
+    if (!initialPrompt || initialPromptRef.current === initialPrompt) return;
+    if (!model) {
+      setInput(initialPrompt);
+      return;
+    }
+    initialPromptRef.current = initialPrompt;
+    setInput(initialPrompt);
+    if (autoRunInitialPrompt && !busy) {
+      void sendMessage(initialPrompt, null);
+    }
+    onInitialPromptConsumed?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialPrompt, autoRunInitialPrompt, model, busy]);
 
   function stop() {
     abortRef.current?.abort();

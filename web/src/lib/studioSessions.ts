@@ -155,8 +155,21 @@ export function useStudioSessions(projectId: string, kind: StudioKind) {
     });
   }
 
-  function create(title = "New chat"): StudioSession {
-    const session = makeStudioSession(scopedProject, kind, title);
+  function create(title = "New chat", entry?: StudioEntry): StudioSession {
+    const base = makeStudioSession(scopedProject, kind, title);
+    const session: StudioSession = entry
+      ? {
+          ...base,
+          title:
+            !title || title === "New chat"
+              ? entry.content
+                ? sessionTitle(entry.content)
+                : base.title
+              : title,
+          entries: [entry],
+          updatedAt: new Date().toISOString(),
+        }
+      : base;
     persistWith((current) => [session, ...current]);
     setActiveId(session.id);
     return session;
