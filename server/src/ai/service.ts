@@ -53,6 +53,7 @@ import {
   findProjectTool,
   listProjectTools,
   recordProjectToolRun,
+  validateProjectToolInput,
 } from "../projectTools";
 import {
   listResearchNotes,
@@ -7035,12 +7036,19 @@ ${lessons}` : "",
         if (!name) throw new Error("A project tool name is required.");
         const tool = await findProjectTool(analysis.rootPath, name);
         if (!tool) throw new Error(`Project tool "${name}" was not found.`);
+        const toolInput =
+          args.input && typeof args.input === "object" && !Array.isArray(args.input)
+            ? (args.input as Record<string, unknown>)
+            : {};
+        const inputError = validateProjectToolInput(tool, toolInput);
+        if (inputError) throw new Error(inputError);
+        const inputJson = Object.keys(toolInput).length > 0 ? JSON.stringify(toolInput) : "";
         const allowed = await requirePermission(
           "command",
           "run_project_tool",
           tool.command,
           `Run saved project tool "${tool.name}".`,
-          { preview: tool.command },
+          { preview: [tool.command, inputJson].filter(Boolean).join(" · ").slice(0, 1_000) },
         );
         if (!allowed) {
           observation = `Permission denied for project tool "${tool.name}".`;
@@ -7048,11 +7056,14 @@ ${lessons}` : "",
         } else {
           log("info", "Running project tool", `${tool.name} · ${tool.command}`);
           const result = await runProjectCommand(analysis.rootPath, tool.command, undefined, {
-            timeoutMs: 120_000,
+            timeoutMs: tool.timeoutMs ?? 120_000,
             signal,
+            env: inputJson ? { CIE_TOOL_INPUT: inputJson } : undefined,
           });
           const output = `${result.stdout}${result.stderr ? `\n${result.stderr}` : ""}`.trim();
-          observation = `Project tool "${tool.name}" · exit ${result.exitCode ?? "—"}\n${output || "(no output)"}`;
+          observation = `Project tool "${tool.name}" · exit ${result.exitCode ?? "—"}${
+            inputJson ? ` · input ${inputJson.slice(0, 300)}` : ""
+          }\n${output || "(no output)"}`;
           ok = result.exitCode === 0;
           await recordProjectToolRun(analysis.rootPath, tool.name, ok).catch(() => undefined);
           log(
@@ -7278,6 +7289,12 @@ ${lessons}` : "",
         const tool = await createProjectTool(analysis.rootPath, {
           name,
           description: typeof args.description === "string" ? args.description : undefined,
+          whenToUse: typeof args.whenToUse === "string" ? args.whenToUse : undefined,
+          inputSchema:
+            args.inputSchema && typeof args.inputSchema === "object"
+              ? (args.inputSchema as Parameters<typeof createProjectTool>[1]["inputSchema"])
+              : undefined,
+          timeoutMs: Number(args.timeoutMs) || undefined,
           language,
           code,
         });

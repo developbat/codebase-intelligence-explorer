@@ -1,6 +1,10 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import type { ProjectTool, ProjectToolList } from "../../shared/projectTools";
+import type {
+  ProjectTool,
+  ProjectToolInputSchema,
+  ProjectToolList,
+} from "../../shared/projectTools";
 
 const MAX_TOOLS = 80;
 const TOOLS_DIR = ".cie/agent/tools";
@@ -209,11 +213,46 @@ export async function recordProjectToolRun(
 }
 
 
+export function validateProjectToolInput(
+  tool: ProjectTool,
+  input: unknown,
+): string | null {
+  const record =
+    input && typeof input === "object" && !Array.isArray(input)
+      ? (input as Record<string, unknown>)
+      : {};
+  const schema = tool.inputSchema;
+  if (!schema) return null;
+  for (const key of schema.required ?? []) {
+    const value = record[key];
+    if (value === undefined || value === null || value === "") {
+      return `Project tool "${tool.name}" requires input.${key}.`;
+    }
+  }
+  for (const [key, property] of Object.entries(schema.properties ?? {})) {
+    const value = record[key];
+    if (value === undefined || value === null) continue;
+    if (property.enum && !property.enum.includes(value as string | number | boolean)) {
+      return `Project tool "${tool.name}" input.${key} must be one of: ${property.enum.join(", ")}.`;
+    }
+    if (property.type) {
+      const actual = Array.isArray(value) ? "array" : typeof value;
+      if (actual !== property.type) {
+        return `Project tool "${tool.name}" input.${key} must be ${property.type}, got ${actual}.`;
+      }
+    }
+  }
+  return null;
+}
+
 export async function createProjectTool(
   rootPath: string,
   input: {
     name: string;
     description?: string;
+    whenToUse?: string;
+    inputSchema?: ProjectToolInputSchema;
+    timeoutMs?: number;
     language?: "js" | "ts" | "py" | "sh";
     code: string;
   },
@@ -236,11 +275,23 @@ export async function createProjectTool(
   await fs.writeFile(absolute, `${code}\n`, { encoding: "utf8", mode: 0o600 });
   const registry = await readRegistry(rootPath);
   const now = new Date().toISOString();
+  const inputSchema =
+    input.inputSchema && typeof input.inputSchema === "object"
+      ? JSON.parse(JSON.stringify(input.inputSchema)) as ProjectToolInputSchema
+      : undefined;
+  if (inputSchema && JSON.stringify(inputSchema).length > 20_000) {
+    throw new Error("Tool input schema is larger than the 20 KB limit.");
+  }
   const tool: ProjectTool = {
     name,
     description:
       input.description?.trim().slice(0, 500) ||
       `Agent-created reusable ${language} tool. Run it with run_project_tool instead of rewriting the same logic.`,
+    whenToUse: input.whenToUse?.trim().slice(0, 500) || undefined,
+    inputSchema,
+    timeoutMs: input.timeoutMs
+      ? Math.max(1_000, Math.min(600_000, Math.round(input.timeoutMs)))
+      : undefined,
     command,
     tags: ["generated", language],
     source: "manual",

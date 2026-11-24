@@ -513,12 +513,12 @@ const TOOL_SPECS: AgentToolSpec[] = [
   {
     action: "run_project_tool",
     groups: ["command"],
-    example: '{"action":"run_project_tool","args":{"name":"ui-check"}}',
-    description: "Run a saved project tool/script.",
-    whenToUse: "Use a saved .cie/agent/tools script instead of recreating it.",
+    example: '{"action":"run_project_tool","args":{"name":"ui-check","input":{"url":"http://localhost:3000"}}}',
+    description: "Run a saved project tool/script with optional JSON input.",
+    whenToUse: "Use a saved .cie/agent/tools script instead of recreating it; pass input when the manifest declares a schema.",
     permission: "command",
-    note: "runs a saved project tool/script",
-    args: { required: [["name"]], types: { name: "string" } },
+    note: "runs a saved project tool/script; input is exposed as CIE_TOOL_INPUT",
+    args: { required: [["name"]], types: { name: "string", input: "object" } },
   },
   {
     action: "delegate_research",
@@ -557,12 +557,12 @@ const TOOL_SPECS: AgentToolSpec[] = [
   {
     action: "create_project_tool",
     groups: ["tools"],
-    example: '{"action":"create_project_tool","args":{"name":"check-links","language":"js","description":"Validate links","code":"// reusable script"}}',
-    description: "Create a reusable project tool script.",
-    whenToUse: "Use when a check will be run more than once.",
+    example: '{"action":"create_project_tool","args":{"name":"check-links","language":"js","description":"Validate links","whenToUse":"Use before shipping a static page.","inputSchema":{"type":"object","required":["url"],"properties":{"url":{"type":"string"}}},"timeoutMs":60000,"code":"// read JSON from process.env.CIE_TOOL_INPUT"}}',
+    description: "Create a reusable project tool script with an optional input manifest and timeout.",
+    whenToUse: "Use when a check will be run more than once or needs typed input.",
     permission: "write",
-    note: "saves under .cie/agent/tools",
-    args: { required: [["name"], ["code"]], types: { name: "string", code: "string" } },
+    note: "saves under .cie/agent/tools; supports inputSchema, whenToUse and timeoutMs",
+    args: { required: [["name"], ["code"]], types: { name: "string", code: "string", inputSchema: "object" } },
   },
   {
     action: "create_skill",
@@ -861,6 +861,8 @@ export interface ProjectToolHint {
   name: string;
   command: string;
   description?: string;
+  whenToUse?: string;
+  inputSchema?: { required?: string[]; properties?: Record<string, unknown> };
 }
 
 export function renderAgentToolCatalog(
@@ -898,7 +900,16 @@ export function renderAgentToolCatalog(
     if (commandAllowed) {
       lines.push("Saved project tools (run with run_project_tool):");
       for (const tool of projectTools.slice(0, 20)) {
-        const label = (tool.description || tool.command).replace(/\s+/g, " ").slice(0, 140);
+        const labelParts = [tool.description || tool.command, tool.whenToUse]
+          .filter(Boolean)
+          .map((value) => String(value).replace(/\s+/g, " ").slice(0, 140));
+        const required = tool.inputSchema?.required?.filter(Boolean) ?? [];
+        const label = [
+          ...labelParts,
+          required.length > 0 ? `input required: ${required.join(", ")}` : "",
+        ]
+          .filter(Boolean)
+          .join(" · ");
         lines.push(
           `- {"action":"run_project_tool","args":{"name":"${tool.name}"}}  // ${label}`,
         );

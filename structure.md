@@ -446,6 +446,13 @@ alias form and a JSON Schema subset (`type`, `required`, `properties`, `anyOf`,
 `items`, `enum`). Project tools under `.cie/agent/tools` are appended as
 `run_project_tool` examples when command access is allowed.
 
+Project tool manifests can add `whenToUse`, `inputSchema` and `timeoutMs` in
+`.cie/agent/tools.json`. `run_project_tool` validates `input`/`CIE_TOOL_INPUT`
+against the schema, pins the working directory to the project root, applies the
+declared timeout and still goes through the command permission handshake.
+Handler execution is therefore bounded by schema, cwd, timeout and approval;
+full OS-level network/FS sandboxing remains a later hardening step.
+
 Handler modules live in `server/src/ai/tools/` (`types.ts`, `builtins.ts`,
 `registry.ts`). `runRegisteredTool` is called before the legacy switch.
 `create_document`, `create_zip`, `create_graphic`, `graphic_check`,

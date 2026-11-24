@@ -276,6 +276,7 @@ export async function runProjectCommand(
   options: {
     signal?: AbortSignal;
     timeoutMs?: number;
+    env?: Record<string, string>;
     onStdout?: (chunk: string) => void;
     onStderr?: (chunk: string) => void;
   } = {},
@@ -303,7 +304,7 @@ export async function runProjectCommand(
       cwd: realCwd,
       shell: true,
       windowsHide: true,
-      env: { ...process.env, CI: process.env.CI ?? "1" },
+      env: { ...process.env, CI: process.env.CI ?? "1", ...(options.env ?? {}) },
     });
 
     const append = (

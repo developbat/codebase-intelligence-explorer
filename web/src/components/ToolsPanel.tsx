@@ -118,7 +118,17 @@ export function ToolsPanel({ projectId }: { projectId?: string }) {
                   <Wrench size={11} /> {tool.name}
                 </strong>
                 <p>{tool.description}</p>
+                {tool.whenToUse ? <p className="tool-when">{tool.whenToUse}</p> : null}
                 <code>{tool.command}</code>
+                {tool.inputSchema?.required?.length || tool.timeoutMs ? (
+                  <small className="tool-manifest">
+                    {tool.inputSchema?.required?.length
+                      ? `${t("Input")}: ${tool.inputSchema.required.join(", ")}`
+                      : ""}
+                    {tool.inputSchema?.required?.length && tool.timeoutMs ? " · " : ""}
+                    {tool.timeoutMs ? `${t("Timeout")}: ${Math.round(tool.timeoutMs / 1000)}s` : ""}
+                  </small>
+                ) : null}
                 <small>
                   {tool.tags.join(" · ")}
                   {tool.lastRunAt ? ` · ${t("Last run")}: ${new Date(tool.lastRunAt).toLocaleString()}` : ""}
