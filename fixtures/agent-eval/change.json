@@ -5,13 +5,49 @@
     {
       "id": "neon-cyan-mapping",
       "projectId": "4541796f07101515",
-      "files": ["index.html", "styles.css", "app.js", "comedy.js", "README.md"],
+      "files": [
+        "index.html",
+        "styles.css",
+        "app.js",
+        "comedy.js",
+        "README.md"
+      ],
       "language": "tr",
       "instruction": "Tüm #22d3ee renk kullanımlarını #ff5c8a ile değiştir. Başka hiçbir rengi değiştirme.",
-      "expectChanged": ["styles.css"],
-      "absent": ["#22d3ee"],
-      "present": ["#ff5c8a"],
-      "unchanged": ["#f43f5e", "#050810"]
+      "expectChanged": [
+        "styles.css"
+      ],
+      "absent": [
+        "#22d3ee"
+      ],
+      "present": [
+        "#ff5c8a"
+      ],
+      "unchanged": [
+        "#f43f5e",
+        "#050810"
+      ]
+    },
+    {
+      "id": "neon-button-label",
+      "projectId": "4541796f07101515",
+      "files": [
+        "index.html"
+      ],
+      "language": "tr",
+      "instruction": "index.html içindeki 'PLAY AGAIN' buton metnini 'RESTART' olarak değiştir. Başka metni değiştirme.",
+      "expectChanged": [
+        "index.html"
+      ],
+      "absent": [
+        "PLAY AGAIN"
+      ],
+      "present": [
+        "RESTART"
+      ],
+      "unchanged": [
+        "PLAY"
+      ]
     }
   ]
 }

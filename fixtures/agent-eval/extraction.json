@@ -38,8 +38,8 @@
       "id": "neon-colors",
       "projectId": "4541796f07101515",
       "kind": "color",
-      "exactTotal": 75,
-      "exactUnique": 67,
+      "exactTotal": 133,
+      "exactUnique": 105,
       "items": [
         {
           "file": "styles.css",
@@ -48,6 +48,10 @@
         {
           "file": "styles.css",
           "color": "#f43f5e"
+        },
+        {
+          "file": "app.js",
+          "color": "#070d1f"
         }
       ]
     },
@@ -629,6 +633,46 @@
       "items": [
         {
           "file": "docs/GOOGLE_PLAY_PRIVACY.md"
+        }
+      ]
+    },
+    {
+      "id": "cie-colors",
+      "projectId": "0751de9f2296c3d1",
+      "kind": "color",
+      "minTotal": 2000,
+      "minUnique": 600,
+      "truncated": true,
+      "items": [
+        {
+          "file": "server/src/ai/service.ts",
+          "color": "#22d3ee"
+        }
+      ]
+    },
+    {
+      "id": "laravel-colors",
+      "projectId": "5b42c28a16dd210a",
+      "kind": "color",
+      "minTotal": 800,
+      "minUnique": 250,
+      "items": [
+        {
+          "file": "app/Services/MailTemplates.php",
+          "color": "#ffffff"
+        }
+      ]
+    },
+    {
+      "id": "rn-colors",
+      "projectId": "71fbb9c7782b339b",
+      "kind": "color",
+      "minTotal": 100,
+      "minUnique": 70,
+      "items": [
+        {
+          "file": "App.tsx",
+          "color": "#000000"
         }
       ]
     }

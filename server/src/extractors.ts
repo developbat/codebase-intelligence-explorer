@@ -276,20 +276,54 @@ async function extractColor(
   scope: string | string[] | undefined,
   limit: number,
 ): Promise<EntityResult> {
-  const files = scopedFiles(analysis, scope, new Set(["css", "scss", "sass", "less"]));
+  const files = scopedFiles(
+    analysis,
+    scope,
+    new Set([
+      "css",
+      "scss",
+      "sass",
+      "less",
+      "html",
+      "htm",
+      "xml",
+      "svg",
+      "js",
+      "mjs",
+      "cjs",
+      "jsx",
+      "ts",
+      "tsx",
+      "vue",
+      "svelte",
+      "php",
+      "py",
+      "json",
+      "yml",
+      "yaml",
+      "toml",
+      "kt",
+      "java",
+      "swift",
+      "dart",
+    ]),
+  );
   const items: EntityItem[] = [];
   let truncated = false;
   for (const file of files) {
     // eslint-disable-next-line no-await-in-loop
     const content = await readText(analysis, file);
     if (!content) continue;
+    const stylesheet = /\.(?:css|scss|sass|less)$/i.test(file);
     const lines = content.split("\n");
     let selector = "";
     for (let index = 0; index < lines.length; index += 1) {
       const line = lines[index];
-      if (line.includes("{")) selector = line.split("{")[0].trim();
-      const property = line.split(":")[0].trim();
-      for (const match of line.matchAll(/#[0-9a-fA-F]{3,8}\b|rgba?\([^)]*\)|hsla?\([^)]*\)/g)) {
+      if (stylesheet && line.includes("{")) selector = line.split("{")[0].trim();
+      const property = stylesheet ? line.split(":")[0].trim() : "inline";
+      for (const match of line.matchAll(
+        /#[0-9a-fA-F]{3,8}\b|(?:rgba?|hsla?|hwb|lab|lch|oklab|oklch|color)\([^)]*\)/g,
+      )) {
         if (items.length >= limit) {
           truncated = true;
           break;

@@ -322,7 +322,9 @@ The 6 buttons are `sound-toggle`, `play-button`, `restart-button`, `move-left`,
    is still the expected proof.
 
 `apply_mapped_changes` supports `kind=color` and `kind=text`. Text mapping is
-useful for labels and repeated tokens.
+used for button labels, import paths, environment keys and repeated tokens; it
+targets every file containing the exact old value and verifies that the old
+value is gone afterwards.
 
 ### 6.1 Change report and run output (right panel)
 
@@ -438,8 +440,8 @@ Before committing:
 
 ## 11. Known limits / next queue
 
-- Color inventory is stylesheet-focused; JS canvas/inline HTML colors can be a
-  later extension.
+- Color inventory now covers stylesheets, inline HTML, JS/TS canvas colors,
+  JSON/YAML/TOML themes and common mobile/PHP color literals.
 - Mapped changes do not yet support cyclic swaps (`#fff ↔ #000`) safely.
 - Cross-language extraction fixtures can be expanded (Python/Go/RN/Laravel/CIE).
 - A post-intent action planner (`explain` / `locate` / `list` / `edit` /

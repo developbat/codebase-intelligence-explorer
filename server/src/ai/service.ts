@@ -3152,6 +3152,7 @@ export function agentToolCatalog(
     '{"action":"extract_entities","args":{"kind":"asset"}}',
     '{"action":"extract_entities","args":{"kind":"document"}}',
     '{"action":"apply_mapped_changes","args":{"kind":"color","scope":["styles.css"],"mapping":{"#22d3ee":"#ff5c8a"}}}',
+    '{"action":"apply_mapped_changes","args":{"kind":"text","mapping":{"PLAY AGAIN":"RESTART"}}}',
     '{"action":"json_query","args":{"path":"package.json","pointer":"scripts"}}',
     '{"action":"find_symbols","args":{"query":"UserService","kind":"class","limit":20}}',
     '{"action":"sqlite_query","args":{"path":"data/app.db","query":"SELECT name FROM sqlite_schema"}}',
@@ -4340,6 +4341,7 @@ ${lessons}` : "",
     "\n- Do not claim a feature from a config or variable that is never read at runtime. Wire it into the update/draw path or remove it." +
     "\n- For any complete list/audit (colors, inputs, buttons, links, functions, classes, components, env, routes, imports, selectors, assets, documents, markdown, todos, files), call extract_entities with the matching kind instead of manually reading/counting. Finish immediately with every item in the user's language; do not summarize or omit entries." +
     "\n- For a color/background/button color change, call extract_entities(kind=color) first, then apply the change with apply_mapped_changes or replace_many; never rewrite whole files without a mapping." +
+    "\n- For non-color value changes (button labels, import paths, env keys), use apply_mapped_changes(kind=text) or replace_many; verify with a text extraction or search that the old value is gone." +
     "\n- For each new item or effect, prove the effect itself with a runtime step (state before/after, expectText/expectStable, canvas/state probe); an event counter alone is not proof." +
     "\n- If PROJECT_MAP reports code files missing from the index, call rescan_project before trusting symbol search." +
     "\n- Test-only artifacts (debug hooks, stable markers, scenario files) must never change the visible game UI. Keep them hidden or under .cie/." +

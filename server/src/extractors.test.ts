@@ -174,6 +174,8 @@ test("extracts UI, code, env, route, asset and markdown entities", async () => {
     assert.ok(imported.items.some((item) => item.values.value === "./x"));
     const pyRoutes = await extractEntities(analysis, { kind: "route", scope: "app/main.py" });
     assert.ok(pyRoutes.items.some((item) => item.values.method === "PREFIX" && item.values.path === "/v1/todos"));
+    const text = await extractEntities(analysis, { kind: "text", query: "Ekle" });
+    assert.ok(text.items.some((item) => item.values.text.includes("Ekle")));
     const selector = await extractEntities(analysis, { kind: "selector", scope: "styles.css" });
     assert.ok(selector.items.some((item) => item.values.selector === ":root"));
     assert.ok(selector.items.some((item) => item.values.selector === ".btn"));
