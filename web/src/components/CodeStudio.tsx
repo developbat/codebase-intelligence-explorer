@@ -133,7 +133,7 @@ import type {
   TestDiscovery,
   TestRunResult,
 } from "../../../shared/types";
-import { providerInfo, type AiAgentEvent, type AiAgentLogEntry, type AiAgentPermissionRequest, type AiAgentPlan, type AiAgentResult, type AiAgentStep, type AiPermissionDecision, type AiProviderId, type AiSettingsPublic, type AiTestGenerationResult, type AiTokenUsage, type AiWorkspaceMode } from "../../../shared/ai";
+import { providerInfo, type AiAgentEvent, type AiAgentLogEntry, type AiAgentPermissionRequest, type AiAgentPlan, type AiAgentResult, type AiAgentStep, type AiReadMapEntry, type AiPermissionDecision, type AiProviderId, type AiSettingsPublic, type AiTestGenerationResult, type AiTokenUsage, type AiWorkspaceMode } from "../../../shared/ai";
 import { api } from "../api";
 import { activeProvider } from "../lib/ai";
 import { buildTree, collectFolderPaths, type TreeNode } from "../lib/tree";
@@ -755,6 +755,8 @@ export function CodeStudio({
     model?: string;
     taskQueue?: ProjectTaskQueue;
     intent?: IntentAnalysis;
+    changeReport?: ChangeReport;
+    readMap?: AiReadMapEntry[];
   };
   type StudioChatTab = { id: string; title: string; createdAt: string; updatedAt: string };
   const [chatMessages, setChatMessages] = useState<StudioChatMessage[]>([]);
@@ -2836,6 +2838,8 @@ export function CodeStudio({
           model: result.model,
           taskQueue: result.taskQueue,
           intent: lastIntentRef.current ?? undefined,
+          changeReport: result.changeReport,
+          readMap: result.readMap,
         },
       ]);
       if (result.changedFiles.length > 0) {
@@ -3964,6 +3968,37 @@ export function CodeStudio({
                             </summary>
                             <pre>{step.observation}</pre>
                           </details>
+                        ))}
+                      </div>
+                    ) : null}
+                    {workflowMessage.readMap && workflowMessage.readMap.length > 0 ? (
+                      <div className="studio-read-map">
+                        <div className="studio-read-map-head">
+                          <FileCode2 size={10} /> {t("Read map")}
+                          <span>{workflowMessage.readMap.length}</span>
+                        </div>
+                        {workflowMessage.readMap.slice(0, 12).map((entry) => (
+                          <button
+                            key={entry.path}
+                            onClick={() => void openFile(entry.path)}
+                            title={entry.path}
+                          >
+                            <span>{entry.path}</span>
+                            <small>
+                              {entry.tools.join(" · ")}
+                              {entry.ranges.length > 0
+                                ? ` · ${entry.ranges
+                                    .slice(0, 2)
+                                    .map((range) =>
+                                      range.wholeFile
+                                        ? "all"
+                                        : `${range.start}-${range.end}`,
+                                    )
+                                    .join(", ")}`
+                                : ""}
+                              {entry.symbols.length > 0 ? ` · ${entry.symbols.slice(0, 3).join(", ")}` : ""}
+                            </small>
+                          </button>
                         ))}
                       </div>
                     ) : null}

@@ -10652,6 +10652,64 @@ button.canvas-stat {
   word-break: break-word;
 }
 
+.studio-read-map {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 6px 8px;
+  border-top: 1px solid rgba(148, 163, 184, 0.09);
+}
+
+.studio-read-map-head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: #93b0d1;
+  font-size: 8px;
+  font-weight: 600;
+}
+
+.studio-read-map-head span {
+  margin-left: auto;
+  color: #718baa;
+  font-family: var(--mono);
+}
+
+.studio-read-map > button {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  width: 100%;
+  padding: 3px 5px;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: #a9c3e2;
+  text-align: left;
+}
+
+.studio-read-map > button:hover {
+  background: rgba(59, 130, 246, 0.08);
+  color: #e3f0ff;
+}
+
+.studio-read-map > button span {
+  overflow: hidden;
+  font-family: var(--mono);
+  font-size: 8px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.studio-read-map > button small {
+  overflow: hidden;
+  color: #718baa;
+  font-family: var(--mono);
+  font-size: 7px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .studio-workflow-evidence {
   display: flex;
   flex-wrap: wrap;

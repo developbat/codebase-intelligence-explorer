@@ -687,6 +687,19 @@ export interface AiAgentStep {
   trace?: AiAgentLogEntry[];
 }
 
+export interface AiReadRange {
+  start: number;
+  end: number;
+  wholeFile: boolean;
+}
+
+export interface AiReadMapEntry {
+  path: string;
+  ranges: AiReadRange[];
+  symbols: string[];
+  tools: string[];
+}
+
 export interface AiAgentResult {
   instruction: string;
   summary: string;
@@ -708,6 +721,8 @@ export interface AiAgentResult {
   taskQueue?: ProjectTaskQueue;
   /** Diff/impact report for the files changed by this run. */
   changeReport?: ChangeReport;
+  /** Files/ranges/symbols actually read by tools in this run. */
+  readMap?: AiReadMapEntry[];
 }
 
 export type AiPermissionKind = "write" | "command";

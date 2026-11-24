@@ -268,7 +268,31 @@ For project verification:
 - Verification summaries use the generic **Verification** label, not
   “Typecheck”, because the command may be a test or build command.
 
-### 4.9 Persistence
+### 4.9 Read map and claim audit
+
+Every content read is recorded in a run-level **read map**:
+
+- `read_file`: file + line range
+- `read_symbol`: file + symbol range/name
+- `find_in_file`, `search_code`, `count_matches`: file/line hits
+- `diagnostics`, `lsp_hover`, `lsp_completion`, `list_items`, `git_blame`
+
+The map survives write-cache invalidation and is returned as `AiAgentResult.readMap`.
+The chat **Details** section shows a clickable **Read map** with tool, range and
+symbol evidence.
+
+At finish, `auditClaims()` checks the summary against tool evidence:
+
+- “fixed/applied/changed” requires at least one changed file (unless read-only);
+- “verified/tested/passed” requires a successful verification command, test
+  command, browser assertion, completed extraction or verified mapped change;
+- “read FILE” requires that file in the read map;
+- “browser verified” requires a real browser check with assertions.
+
+An unsupported claim rejects the finish with an actionable observation. A second
+attempt gets an explicit **Evidence warning** instead of looping forever.
+
+### 4.10 Persistence
 
 - Project analysis: application data directory (project id based).
 - Agent notes: `<project>/.cie/agent/`.

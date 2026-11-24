@@ -117,6 +117,7 @@ import { listSkills, loadSkillsForPrompt, renderSkillsForPrompt, runSkillScript,
 import { appendLesson, readLessons } from "../tasks";
 import { ensureProjectMap } from "../projectMap";
 import { buildChangeReport } from "../changes";
+import { auditClaims } from "./claims";
 import {
   applyMappingsToContent,
   extractEntities,
@@ -4438,6 +4439,41 @@ ${lessons}` : "",
     string,
     { start: number; end: number; wholeFile: boolean; step: number; observation?: string }[]
   >();
+  const readMap = new Map<
+    string,
+    { path: string; ranges: { start: number; end: number; wholeFile: boolean }[]; symbols: Set<string>; tools: Set<string> }
+  >();
+  const recordRead = (
+    filePath: string,
+    start: number | undefined,
+    end: number | undefined,
+    wholeFile: boolean,
+    tool: string,
+    symbol?: string,
+  ): void => {
+    const entry = readMap.get(filePath) ?? {
+      path: filePath,
+      ranges: [],
+      symbols: new Set<string>(),
+      tools: new Set<string>(),
+    };
+    if (start !== undefined && end !== undefined) {
+      const range = { start, end, wholeFile };
+      if (
+        !entry.ranges.some(
+          (existing) =>
+            existing.start === range.start &&
+            existing.end === range.end &&
+            existing.wholeFile === range.wholeFile,
+        )
+      ) {
+        entry.ranges.push(range);
+      }
+    }
+    entry.tools.add(tool);
+    if (symbol) entry.symbols.add(symbol);
+    readMap.set(filePath, entry);
+  };
   const readOnlyCache = new Map<string, { step: number; ok: boolean }>();
   const findCounts = new Map<string, number>();
   const invalidateReadCaches = () => {
@@ -4464,6 +4500,7 @@ ${lessons}` : "",
   let realCheckAssertions = 0;
   let verifyNudges = 0;
   let claimNudges = 0;
+  let claimAuditNudges = 0;
   let lastBrowserKey = "";
   let browserFailureRepeat = 0;
   let remainingWorkRejected = false;
@@ -5585,6 +5622,62 @@ ${lessons}` : "",
         }
       }
 
+      if (rawSummary.trim()) {
+        const commandEvidence = steps
+          .filter((step) => step.action === "run_command")
+          .map((step) => ({
+            command: String(step.args.command ?? ""),
+            ok: step.ok,
+          }));
+        const audit = auditClaims(rawSummary, {
+          changedFiles,
+          readFiles: [...readMap.keys()],
+          commands: commandEvidence,
+          verification: {
+            ran: lastVerification?.ran === true,
+            ok: lastVerification?.ok === true,
+            command: lastVerification?.command,
+          },
+          browserChecks: [
+            {
+              ok: realBrowserChecks > 0 || realScenarioRuns > 0,
+              assertions: realCheckAssertions,
+            },
+          ],
+          extractionComplete: Boolean(completeExtraction && completeExtraction.total > 0),
+          mappedChangeVerified,
+          readOnly: readOnlyMode,
+        });
+        if (audit.issues.length > 0) {
+          const observation = `Finish rejected: the summary claims more than the tools proved.\n- ${audit.issues.join(
+            "\n- ",
+          )}\nRun the missing read/test/browser check or correct the summary. Do not claim verification without evidence.`;
+          if (claimAuditNudges < 1) {
+            claimAuditNudges += 1;
+            log(
+              "warn",
+              "Finish rejected: unsupported claim",
+              audit.issues.join(" · ").slice(0, 200),
+            );
+            recordStep({
+              index,
+              action: "invalid",
+              args: {},
+              observation,
+              ok: false,
+              durationMs: Date.now() - started,
+              tokenUsage: stepUsage,
+            });
+            transcript.push({
+              role: "user",
+              content: `Observation (step ${index}) [claim-audit]: ${observation}`,
+            });
+            continue;
+          }
+          rawSummary = `${rawSummary}\n\n**Evidence warning:** ${audit.issues.join(" ")}`.trim();
+        }
+      }
+
       if (askMode && completeExtraction && completeExtraction.total > 0) {
         const answerText = rawSummary.toLowerCase();
         const missing = completeExtraction.items.filter((item) => {
@@ -5688,6 +5781,7 @@ ${lessons}` : "",
             : `No matches for "${query}".`;
         for (const result of found.results) {
           evidence.push({ path: result.path, label: "Search result", startLine: result.line });
+          recordRead(result.path, result.line, result.line, false, "search_code");
         }
         log(
           "info",
@@ -5704,6 +5798,7 @@ ${lessons}` : "",
         const blame = await getGitBlame(analysis.rootPath, filePath, startLine, endLine);
         observation = `Git blame: ${filePath}:${startLine}-${endLine}\n${clampObservation(blame, 2_800)}`;
         evidence.push({ path: filePath, label: "Git blame", startLine, endLine });
+        recordRead(filePath, startLine, endLine, false, "git_blame");
         log("info", "Git blame read", `${filePath}:${startLine}-${endLine}`);
         ok = true;
       } else if (action === "sqlite_query") {
@@ -5831,6 +5926,14 @@ ${lessons}` : "",
             observation,
           });
           readCoverage.set(symbol.filePath, ranges);
+          recordRead(
+            symbol.filePath,
+            startLine,
+            endLine,
+            startLine === 1 && endLine >= lines.length,
+            "read_symbol",
+            symbol.qualifiedName,
+          );
           log(
             "info",
             "Symbol read",
@@ -5928,6 +6031,13 @@ ${lessons}` : "",
             step: index,
           });
           readCoverage.set(filePath, ranges);
+          recordRead(
+            file.filePath,
+            startLine,
+            Math.min(endLine, lines.length),
+            wholeFile,
+            "read_file",
+          );
           log("info", `${lines.length} lines read`, `${file.filePath} (${startLine}-${Math.min(endLine, lines.length)})`);
           ok = true;
         }
@@ -5962,6 +6072,7 @@ ${lessons}` : "",
           ok = result.supported ? result.ok : true;
         }
         evidence.push({ path: filePath, label: "Diagnostics" });
+        recordRead(filePath, undefined, undefined, false, "diagnostics");
         log(ok ? "info" : "warn", ok ? "Diagnostics checked" : "Diagnostics failed", filePath);
       } else if (action === "lsp_hover") {
         const filePath = normalizeAgentPath(analysis.rootPath, pathFromArgs(args));
@@ -5975,6 +6086,7 @@ ${lessons}` : "",
         );
         observation = hover?.contents?.trim() || `No LSP hover information at ${filePath}:${args.line ?? 1}.`;
         evidence.push({ path: filePath, label: "LSP hover" });
+        recordRead(filePath, undefined, undefined, false, "lsp_hover");
         log(hover ? "info" : "warn", hover ? "LSP hover read" : "LSP hover empty", filePath);
         ok = true;
       } else if (action === "lsp_completion") {
@@ -5994,6 +6106,7 @@ ${lessons}` : "",
               .join("\n")}`
           : `No LSP completions at ${filePath}:${args.line ?? 1}.`;
         evidence.push({ path: filePath, label: "LSP completion" });
+        recordRead(filePath, undefined, undefined, false, "lsp_completion");
         log(items.length > 0 ? "info" : "warn", "LSP completions read", `${items.length} items`);
         ok = true;
       } else if (action === "find_in_file") {
@@ -6035,6 +6148,7 @@ ${lessons}` : "",
               ? `Matches for "${query}" in ${file.filePath} (${lines.length} lines):\n${hits.join("\n---\n")}`
               : `No matches for "${query}" in ${file.filePath}.`;
           evidence.push({ path: file.filePath, label: "Search in file" });
+          recordRead(file.filePath, undefined, undefined, false, "find_in_file");
           log("info", `${hits.length} matches in file`, query);
           ok = true;
         }
@@ -6052,6 +6166,7 @@ ${lessons}` : "",
                 .join("\n")}`
             : `No list items were extracted from ${filePath}. Try read_file or find_in_file.`;
         evidence.push({ path: filePath, label: "List items" });
+        recordRead(filePath, undefined, undefined, false, "list_items");
         log("info", `${items.length} items extracted`, filePath);
         ok = true;
       } else if (action === "count_matches") {
@@ -6097,7 +6212,10 @@ ${lessons}` : "",
           (top.length > 0
             ? top.map((entry) => `${entry.path}: ${entry.count}`).join("\n")
             : "(no matches). Try a different query, find_in_file, or inspect the file.");
-        for (const entry of top.slice(0, 10)) evidence.push({ path: entry.path, label: "Counted matches" });
+        for (const entry of top.slice(0, 10)) {
+          evidence.push({ path: entry.path, label: "Counted matches" });
+          recordRead(entry.path, undefined, undefined, false, "count_matches");
+        }
         log("info", `${scanned} files scanned · ${total} matches`, query);
         ok = true;
       } else if (action === "list_colors") {
@@ -8142,5 +8260,13 @@ ${lessons}` : "",
     costUsd,
     logs,
     changeReport,
+    readMap: [...readMap.values()]
+      .slice(0, 300)
+      .map((entry) => ({
+        path: entry.path,
+        ranges: entry.ranges,
+        symbols: [...entry.symbols],
+        tools: [...entry.tools],
+      })),
   };
 }
