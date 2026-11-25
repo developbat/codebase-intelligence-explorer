@@ -9752,7 +9752,7 @@ button.canvas-stat {
 
 @media (max-width: 900px) {
   .code-studio {
-    grid-template-columns: 210px minmax(0, 1fr);
+    grid-template-columns: var(--studio-left, 210px) minmax(0, 1fr);
   }
 
   .code-studio-right,
@@ -9773,7 +9773,7 @@ button.canvas-stat {
 /* Resizable Code Studio columns */
 .code-studio {
   position: relative;
-  grid-template-columns: var(--studio-left, 252px) minmax(200px, 1fr) var(--studio-right, 318px);
+  grid-template-columns: var(--studio-left, 252px) minmax(280px, 1fr) var(--studio-right, 318px);
 }
 
 .code-studio-main {
@@ -12277,13 +12277,13 @@ button.canvas-stat {
 
 @media (max-width: 1180px) {
   .code-studio {
-    grid-template-columns: 220px minmax(240px, 1fr) 340px;
+    grid-template-columns: var(--studio-left, 220px) minmax(240px, 1fr) var(--studio-right, 340px);
   }
 }
 
 @media (max-width: 900px) {
   .code-studio {
-    grid-template-columns: 210px minmax(220px, 1fr);
+    grid-template-columns: var(--studio-left, 210px) minmax(220px, 1fr);
   }
 
   .studio-right-panel,

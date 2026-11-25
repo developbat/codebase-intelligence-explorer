@@ -101,8 +101,6 @@ import {
   Maximize2,
   MessageSquare,
   Minimize2,
-  PanelLeftClose,
-  PanelLeftOpen,
   Paperclip,
   Pencil,
   Play,
@@ -141,7 +139,6 @@ import { api } from "../api";
 import { activeProvider } from "../lib/ai";
 import { buildTree, collectFolderPaths, type TreeNode } from "../lib/tree";
 import { useI18n } from "../i18n";
-import { ProjectSwitcher } from "./ProjectSwitcher";
 import { MarkdownText } from "./MarkdownText";
 import { GitDiffView } from "./GitDiffView";
 import { GitSummary } from "./GitSummary";
@@ -618,8 +615,6 @@ export function CodeStudio({
   onAnalysisLoaded,
   onOpenProject,
   onOpenSettings,
-  onLoadRecent,
-  onRemoveRecent,
   onOpenProjectWithPrompt,
   initialPrompt,
   autoRunInitialPrompt,
@@ -808,12 +803,15 @@ export function CodeStudio({
   const [sidebarTab, setSidebarTab] = useState<"files" | "chat" | "tools" | "project">("chat");
   const [leftWidth, setLeftWidth] = useState(() => {
     const stored = Number(localStorage.getItem("cie:studio-left-width"));
-    return Number.isFinite(stored) && stored >= 140 ? stored : 252;
+    const width = typeof window === "undefined" ? 1280 : window.innerWidth;
+    const max = Math.max(180, Math.min(560, width - 220 - 280));
+    return Math.max(180, Math.min(Number.isFinite(stored) ? stored : 252, max));
   });
   const [rightWidth, setRightWidth] = useState(() => {
     const stored = Number(localStorage.getItem("cie:studio-right-width"));
-    if (!Number.isFinite(stored) || stored < 200) return 420;
-    return stored === 318 ? 420 : stored;
+    const width = typeof window === "undefined" ? 1280 : window.innerWidth;
+    const max = Math.max(220, Math.min(900, width - 180 - 280));
+    return Math.max(220, Math.min(Number.isFinite(stored) ? stored : 420, max));
   });
   const [chatExpanded, setChatExpanded] = useState(false);
   const [previewFullscreen, setPreviewFullscreen] = useState(false);
@@ -1068,18 +1066,6 @@ export function CodeStudio({
         : studioMode === "research"
           ? t("Research the web, a document, or this project…")
           : t("Ask, edit, run, or build something in this project…");
-  const modePillLabel =
-    studioMode === "build"
-      ? t("Write mode")
-      : studioMode === "ask"
-        ? t("Ask · read-only")
-        : studioMode === "plan"
-          ? t("Plan · read-only")
-          : t("Research · read-only");
-  const modePillTitle =
-    studioMode === "build"
-      ? t("Switch to Ask (read-only)")
-      : t("Switch to Build (writes allowed)");
   const readOnlyBlocked = Boolean(
     chatError &&
       /READ_ONLY_WRITE_BLOCKED|current workspace mode is read-only|read-only mode only inspects/i.test(
@@ -3225,9 +3211,9 @@ export function CodeStudio({
     const startX = event.clientX;
     const startLeft = leftWidth;
     const startRight = rightWidth;
-    const minLeft = 140;
-    const minCenter = 200;
-    const minRight = 180;
+    const minLeft = 180;
+    const minCenter = 320;
+    const minRight = 220;
     const handle = event.currentTarget;
     const pointerId = event.pointerId;
     const previousUserSelect = document.body.style.userSelect;
@@ -3289,45 +3275,13 @@ export function CodeStudio({
       ref={studioRef}
       className={`code-studio ${chatExpanded ? "chat-expanded" : ""} ${
         previewFullscreen ? "preview-fullscreen" : ""
-      } ${
-        leftWidth <= 155 ? "sidebar-collapsed" : ""
       } ${resizing ? "is-resizing" : ""}`}
       style={{ "--studio-left": `${leftWidth}px`, "--studio-right": `${rightWidth}px` } as CSSProperties}
     >
       <aside className="code-studio-sidebar">
         <div className="code-studio-side-head">
-          <div>
-            <strong>{analysis.projectName}</strong>
-          </div>
-          <div className="studio-side-head-actions">
-            <button
-              type="button"
-              className={`studio-write-pill ${studioMode === "build" ? "is-build" : "is-read"}`}
-              onClick={() => setStudioMode(studioMode === "build" ? "ask" : "build")}
-              title={modePillTitle}
-              aria-label={modePillTitle}
-            >
-              {modePillLabel}
-            </button>
-            <button
-              className="icon-button subtle"
-              onClick={() => setLeftWidth(leftWidth <= 155 ? 252 : 150)}
-              title={leftWidth <= 155 ? t("Open project tree") : t("Collapse project tree")}
-            >
-              {leftWidth <= 155 ? <PanelLeftOpen size={12} /> : <PanelLeftClose size={12} />}
-            </button>
-          </div>
+          <strong>{analysis.projectName}</strong>
         </div>
-        {onLoadRecent && onRemoveRecent ? (
-          <div className="studio-project-switch">
-            <ProjectSwitcher
-              analysis={analysis}
-              recent={recent}
-              onLoadRecent={onLoadRecent}
-              onRemoveRecent={onRemoveRecent}
-            />
-          </div>
-        ) : null}
         {onOpenProject ? (
           <button className="studio-open-project" onClick={onOpenProject}>
             <FolderOpen size={12} /> {t("Open or create project")}
@@ -3655,15 +3609,6 @@ export function CodeStudio({
             <strong>{analysis.projectName}</strong>
           </div>
           <div className="studio-workflow-actions">
-            {leftWidth <= 155 ? (
-              <button
-                className="studio-sidebar-open"
-                onClick={() => setLeftWidth(252)}
-                title={t("Open project tree")}
-              >
-                <PanelLeftOpen size={11} /> {t("Files")}
-              </button>
-            ) : null}
             <button onClick={() => openSettings("reports")} title={t("Open the task report")}>
               <ListChecks size={12} /> {t("Reports")}
             </button>
