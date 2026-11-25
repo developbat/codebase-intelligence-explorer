@@ -67,15 +67,32 @@ function scenarioSteps(raw: unknown): BrowserCheckStep[] {
 }
 
 function hasAssertion(steps: BrowserCheckStep[]): boolean {
-  return steps.some((step) =>
-    [
-      "expectText",
-      "expectValue",
-      "expectCount",
-      "expectStable",
-      "waitForText",
-    ].includes(step.action),
+  return steps.some(
+    (step) =>
+      [
+        "expectText",
+        "expectValue",
+        "expectCount",
+        "expectStable",
+        "waitForText",
+      ].includes(step.action) ||
+      // A JS/pixel assertion can carry its expectation on an eval step.
+      (step.action === "eval" &&
+        Boolean(step.expectText ?? step.contains ?? step.expected)),
   );
+}
+
+/**
+ * A task may mention an unrelated scenario only to say it must keep passing.
+ * An explicit `run_test_scenario <name>` instruction is authoritative.
+ */
+function explicitScenarioNames(text: string): string[] {
+  const names = new Set<string>();
+  const pattern = /run_test_scenario\s+["'`]?([a-z0-9][a-z0-9_-]*)/gi;
+  for (const match of text.matchAll(pattern)) {
+    names.add(match[1].toLowerCase());
+  }
+  return [...names];
 }
 
 function hasInteraction(steps: BrowserCheckStep[]): boolean {
@@ -102,6 +119,7 @@ export async function findTaskScenario(
   if (entries.length === 0) return null;
 
   const taskText = `${task.title}\n${task.detail}\n${task.acceptance ?? ""}`.toLowerCase();
+  const explicitNames = explicitScenarioNames(taskText);
   const taskTokens = tokens(taskText);
   const matches: TaskScenarioMatch[] = [];
 
@@ -118,6 +136,9 @@ export async function findTaskScenario(
     if (steps.length === 0 || !hasAssertion(steps) || !hasInteraction(steps)) continue;
 
     const name = file.replace(/\.json$/i, "");
+    if (explicitNames.length > 0 && !explicitNames.includes(name.toLowerCase())) {
+      continue;
+    }
     const nameTokens = tokens(name);
     const jsonText = JSON.stringify(parsed).toLowerCase();
     let score = 0;

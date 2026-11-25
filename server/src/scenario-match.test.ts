@@ -119,3 +119,48 @@ test("recognizes verification-only tasks but not behavior edits", () => {
     false,
   );
 });
+
+test("prefers an explicitly requested scenario over unrelated passing mentions", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "cie-scenario-explicit-"));
+  try {
+    const dir = path.join(root, ".cie", "agent", "scenarios");
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(
+      path.join(dir, "best-score.json"),
+      JSON.stringify({
+        path: "index.html",
+        steps: [
+          { action: "pressKeys", keys: ["3", "0", "*", "1", "Enter"] },
+          { action: "expectText", selector: "#best", text: "1" },
+        ],
+      }),
+    );
+    await fs.writeFile(
+      path.join(dir, "digit-dark-blue.json"),
+      JSON.stringify({
+        path: "index.html",
+        steps: [
+          { action: "waitForSelector", selector: "#game" },
+          {
+            action: "eval",
+            value: "(() => true)()",
+            expectText: '"digitDarkBlue":true',
+          },
+        ],
+      }),
+    );
+    const match = await findTaskScenario(
+      root,
+      task({
+        title: "Make digit keys dark blue",
+        detail:
+          "Change the digit palette. Verify with run_test_scenario digit-dark-blue. Do not change best-score behavior.",
+        acceptance: "digit-dark-blue passes; best-score keeps passing.",
+      }),
+    );
+    assert.ok(match);
+    assert.equal(match.name, "digit-dark-blue");
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
