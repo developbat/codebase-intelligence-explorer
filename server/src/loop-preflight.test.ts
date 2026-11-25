@@ -9,6 +9,8 @@ import {
   buildFeatureQueries,
   featurePreflightHints,
   isInteractiveUiCheck,
+  softTaskTokenBudget,
+  summarizeToolIssues,
 } from "./ai/loop";
 
 function step(overrides: Partial<AiAgentStep>): AiAgentStep {
@@ -115,4 +117,36 @@ test("isInteractiveUiCheck requires both an interaction and an assertion", () =>
     ),
     false,
   );
+});
+
+
+test("soft task budgets leave room for a focused retry", () => {
+  assert.equal(softTaskTokenBudget("simple"), 100_000);
+  assert.equal(softTaskTokenBudget("standard"), 200_000);
+  assert.equal(softTaskTokenBudget("hard"), 400_000);
+});
+
+test("summarizeToolIssues groups failed tools for the task card", () => {
+  const issues = summarizeToolIssues([
+    step({
+      action: "browser_check",
+      ok: false,
+      observation: "Browser check found problems: expectVisible timeout",
+    }),
+    step({
+      action: "invalid",
+      ok: false,
+      observation: "Provider-native tool call rejected; reply with JSON",
+    }),
+    step({
+      action: "run_command",
+      ok: false,
+      observation: "Command finished: exit 1",
+    }),
+    step({ action: "finish", ok: true, observation: "done" }),
+  ]);
+  assert.equal(issues.length, 3);
+  assert.ok(issues.some((issue) => /browser_check ×1/.test(issue)));
+  assert.ok(issues.some((issue) => /protocol ×1/.test(issue)));
+  assert.ok(issues.some((issue) => /run_command ×1/.test(issue)));
 });

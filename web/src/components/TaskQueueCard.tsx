@@ -217,6 +217,20 @@ export function TaskQueueCard({
                       : ""}
                   </small>
                   {task.notes ? <p className="task-queue-note">{task.notes}</p> : null}
+                  {task.toolIssues && task.toolIssues.length > 0 ? (
+                    <details className="task-queue-tool-issues">
+                      <summary>
+                        <AlertTriangle size={9} />
+                        {t("Tool issues")}
+                        <span>{task.toolIssues.length}</span>
+                      </summary>
+                      <ul>
+                        {task.toolIssues.map((issue, issueIndex) => (
+                          <li key={issueIndex}>{issue}</li>
+                        ))}
+                      </ul>
+                    </details>
+                  ) : null}
                   {task.review ? (
                     <div className={`task-queue-review is-${task.review.verdict}`}>
                       <strong>

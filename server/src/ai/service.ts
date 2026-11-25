@@ -3770,6 +3770,8 @@ export async function runAgentTask(
     /** Original user goal when `instruction` is wrapped task-loop boilerplate. */
     workBriefText?: string;
     tokenBudget?: number;
+    /** Safety cap independent of the user budget mode; the task loop narrows/retries. */
+    softTokenBudget?: number;
     costBudgetUsd?: number;
     budgetMode?: "off" | "warn" | "stop";
     maxOutputTokens?: number;
@@ -4569,15 +4571,24 @@ ${lessons}` : "",
       summary = "Stopped by the user.";
       break;
     }
+    const cumulativeUsage: AiTokenUsage = {
+      inputTokens: tokenTotal.inputTokens + startingUsage.inputTokens,
+      outputTokens: tokenTotal.outputTokens + startingUsage.outputTokens,
+      totalTokens: tokenTotal.totalTokens + startingUsage.totalTokens,
+    };
+    if (
+      options.softTokenBudget &&
+      cumulativeUsage.totalTokens >= options.softTokenBudget
+    ) {
+      stoppedReason = "budget";
+      summary = `Soft task budget reached: ${cumulativeUsage.totalTokens.toLocaleString()} of ${options.softTokenBudget.toLocaleString()} tokens. The task loop will continue with a focused retry.`;
+      log("warn", "Soft task budget reached", summary.slice(0, 180));
+      break;
+    }
     if (
       budgetMode !== "off" &&
       (options.tokenBudget || options.costBudgetUsd !== undefined)
     ) {
-      const cumulativeUsage: AiTokenUsage = {
-        inputTokens: tokenTotal.inputTokens + startingUsage.inputTokens,
-        outputTokens: tokenTotal.outputTokens + startingUsage.outputTokens,
-        totalTokens: tokenTotal.totalTokens + startingUsage.totalTokens,
-      };
       const costSoFar = await estimateUsageCost(config.id, config.model, cumulativeUsage).catch(
         () => undefined,
       );

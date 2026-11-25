@@ -1182,6 +1182,14 @@ export function taskStepBudget(effort: ProjectTaskEffort): number {
   return 14;
 }
 
+/**
+ * Soft safety cap: a task may go a little over its normal budget to finish, but
+ * not 2x. When hit, the loop continues with a focused retry instead of blocking.
+ */
+export function softTaskTokenBudget(effort: ProjectTaskEffort): number {
+  return Math.round(taskBudgetForEffort(effort).tokens * 1.25);
+}
+
 interface RetryRecovery {
   note: string;
   quarantined: string[];
@@ -1386,6 +1394,43 @@ export function isInteractiveUiCheck(step: AiAgentStep): boolean {
       step.observation ?? "",
     )
   );
+}
+
+/**
+ * Compact, user-facing summary of failed tool/protocol calls in one task.
+ * Keeps the task card useful without making users read the full live log.
+ */
+export function summarizeToolIssues(steps: AiAgentStep[]): string[] {
+  const groups = new Map<string, { count: number; sample: string }>();
+  for (const step of steps) {
+    if (step.ok || step.action === "finish") continue;
+    let label: string = step.action;
+    if (step.action === "invalid") {
+      const text = step.observation ?? "";
+      label = /provider-native|DSML|invalid tool protocol/i.test(text)
+        ? "protocol"
+        : /truncated|output limit/i.test(text)
+          ? "truncated reply"
+          : /real-page verification|no verification/i.test(text)
+            ? "verification"
+            : "invalid reply";
+    } else if (
+      step.action === "run_project_tool" &&
+      /was not found/i.test(step.observation ?? "")
+    ) {
+      label = "missing project tool";
+    }
+    const sample = (step.observation ?? "").replace(/\s+/g, " ").trim().slice(0, 140);
+    const current = groups.get(label);
+    if (current) current.count += 1;
+    else groups.set(label, { count: 1, sample });
+  }
+  return [...groups.entries()]
+    .slice(0, 5)
+    .map(
+      ([label, value]) =>
+        `${label} ×${value.count}${value.sample ? `: ${value.sample}` : ""}`,
+    );
 }
 
 export function isInspectionAnswer(summary: string): boolean {
@@ -1942,6 +1987,7 @@ export async function runProjectLoop(
           forceWrite,
           maxSteps: taskStepBudget(current.effort),
           tokenBudget,
+          softTokenBudget: softTaskTokenBudget(current.effort),
           costBudgetUsd,
           budgetMode: settings?.taskBudgetMode ?? "off",
           maxOutputTokens: settings?.agentMaxOutputTokens ?? 16_000,
@@ -2230,11 +2276,13 @@ export async function runProjectLoop(
       result.stoppedReason !== "budget"
         ? "Stopped at the step limit; the answer above is the best evidence collected."
         : undefined;
+    const toolIssues = summarizeToolIssues(result.steps);
     queue = markTask(queue, task.id, {
       status,
       completedAt: nowIso(),
       resultSummary: result.summary,
       notes: answerNote,
+      toolIssues: toolIssues.length > 0 ? toolIssues : undefined,
       changedFiles: result.changedFiles,
       commands: result.ranCommands,
       tokenUsage: addUsage(
@@ -2286,17 +2334,21 @@ export async function runProjectLoop(
       .map((step) => step.observation ?? "")
       .join("\n")}`;
     const envFailure = isEnvironmentFailure(result.steps, failureText);
+    const softBudgetHit =
+      result.stoppedReason === "budget" && /soft task budget/i.test(result.summary);
     if (
       status !== "done" &&
       result.stoppedReason !== "aborted" &&
-      (readBudgetStalled || noEditTokenBurn || envFailure)
+      (readBudgetStalled || noEditTokenBurn || envFailure || softBudgetHit)
     ) {
       const reason =
-        envFailure && !readBudgetStalled && !noEditTokenBurn
-          ? "hit a broken Python runtime"
-          : readBudgetStalled
-            ? "kept reading instead of editing"
-            : "produced no file change";
+        softBudgetHit && !readBudgetStalled && !noEditTokenBurn
+          ? "reached the soft token budget"
+          : envFailure && !readBudgetStalled && !noEditTokenBurn
+            ? "hit a broken Python runtime"
+            : readBudgetStalled
+              ? "kept reading instead of editing"
+              : "produced no file change";
       const latestTask = queue.tasks.find((item) => item.id === task.id) ?? task;
       const repairAttempts = latestTask.repairAttempts ?? 0;
 
@@ -2309,7 +2361,7 @@ export async function runProjectLoop(
       ) {
         autoRepairs += 1;
         const repaired =
-          envFailure && !readBudgetStalled && !noEditTokenBurn
+          softBudgetHit && !readBudgetStalled && !noEditTokenBurn
             ? {
                 ...latestTask,
                 status: "pending" as const,
@@ -2320,24 +2372,41 @@ export async function runProjectLoop(
                 verification: undefined,
                 notes: [
                   latestTask.notes,
-                  environmentRepairNote(failureText),
-                  "The runtime is repaired. Re-run the verification through the project .venv first; if the existing implementation passes, finish without rewriting it. Fix only real code failures.",
+                  "Soft token budget reached. Continue from the current files, finish the smallest missing behavior and verify it. Do not restart, re-read old ranges or rewrite completed work.",
                 ]
                   .filter(Boolean)
                   .join("\n"),
               }
-            : narrowTaskForEditFirst(
-                {
+            : envFailure && !readBudgetStalled && !noEditTokenBurn
+              ? {
                   ...latestTask,
-                  notes: [latestTask.notes, envFailure ? environmentRepairNote(failureText) : ""]
+                  status: "pending" as const,
+                  attempts: 0,
+                  repairAttempts: repairAttempts + 1,
+                  tokenUsage: undefined,
+                  resultSummary: undefined,
+                  verification: undefined,
+                  notes: [
+                    latestTask.notes,
+                    environmentRepairNote(failureText),
+                    "The runtime is repaired. Re-run the verification through the project .venv first; if the existing implementation passes, finish without rewriting it. Fix only real code failures.",
+                  ]
                     .filter(Boolean)
                     .join("\n"),
-                },
-                reason,
-              );
+                }
+              : narrowTaskForEditFirst(
+                  {
+                    ...latestTask,
+                    notes: [latestTask.notes, envFailure ? environmentRepairNote(failureText) : ""]
+                      .filter(Boolean)
+                      .join("\n"),
+                  },
+                  reason,
+                );
         queue = markTask(queue, task.id, {
           ...repaired,
           status: "pending",
+          completedAt: undefined,
           modelOverride: { provider: main.id, model: main.model },
           provider: main.id,
           model: main.model,
@@ -2353,11 +2422,11 @@ export async function runProjectLoop(
         await appendTaskContext(
           analysis.rootPath,
           `Auto-repair · ${task.id}`,
-          `The task ${reason} after ${taskSpentTokens.toLocaleString()} tokens. It was narrowed into an edit-first retry (#${repaired.repairAttempts}) instead of stopping the whole goal.${envFailure ? " The failure was environmental; the Python venv is used for the retry." : ""}`,
+          `The task ${reason} after ${taskSpentTokens.toLocaleString()} tokens. It was ${softBudgetHit ? "continued with a focused retry" : "narrowed into an edit-first retry"} (#${repaired.repairAttempts}) instead of stopping the whole goal.${envFailure ? " The failure was environmental; the Python venv is used for the retry." : ""}`,
         );
         await appendLesson(
           analysis.rootPath,
-          `${task.id} ${reason} after ${taskSpentTokens.toLocaleString()} tokens. Auto-repair ${repaired.repairAttempts}/${RECOVERY_POLICY.maxRepairsPerTask}: edit first, read at most ${RECOVERY_POLICY.maxFilesForNarrowRetry} files, preserve completed work.`,
+          `${task.id} ${reason} after ${taskSpentTokens.toLocaleString()} tokens. Auto-repair ${repaired.repairAttempts}/${RECOVERY_POLICY.maxRepairsPerTask}: preserve completed work, finish the smallest missing behavior, then verify.`,
         ).catch(() => {});
         queue = await saveQueue(analysis.rootPath, queue);
         emit({
@@ -2367,7 +2436,7 @@ export async function runProjectLoop(
             at: nowIso(),
             level: "warn",
             label: "Auto-repair started",
-            detail: `${task.id}: ${reason}. Retrying with an edit-first budget (${repaired.repairAttempts}/${RECOVERY_POLICY.maxRepairsPerTask}).`,
+            detail: `${task.id}: ${reason}. Retrying with a focused budget (${repaired.repairAttempts}/${RECOVERY_POLICY.maxRepairsPerTask}).`,
           },
         });
         emit({ type: "task", queue, task: queue.tasks.find((item) => item.id === task.id) });

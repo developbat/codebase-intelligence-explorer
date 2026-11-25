@@ -28,6 +28,8 @@ export interface ProjectTask {
   /** Focused repair passes after a failed verification/incomplete task. */
   repairAttempts?: number;
   notes?: string;
+  /** Compact summary of failed tool/protocol calls from this task. */
+  toolIssues?: string[];
   resultSummary?: string;
   changedFiles: string[];
   commands: string[];

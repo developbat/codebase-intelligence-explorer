@@ -164,6 +164,16 @@ export function ReportsPanel({ projectId }: { projectId: string }) {
                     <span>{task.attempts} {t("attempts")}</span>
                   </div>
                   {task.notes ? <p className="reports-note">{task.notes}</p> : null}
+                  {task.toolIssues && task.toolIssues.length > 0 ? (
+                    <div className="reports-tool-issues">
+                      <strong>{t("Tool issues")}</strong>
+                      <ul>
+                        {task.toolIssues.map((issue, issueIndex) => (
+                          <li key={issueIndex}>{issue}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : null}
                   {task.verification?.command ? (
                     <p className={`reports-verify ${task.verification.ok ? "is-ok" : "is-fail"}`}>
                       {t("Verification")}: {task.verification.command} ·{" "}

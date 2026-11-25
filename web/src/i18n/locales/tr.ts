@@ -2139,5 +2139,6 @@ export const tr: Dictionary = {
   "Could not load Git status.": "Git durumu yüklenemedi.",
   "Git status is unavailable.": "Git durumu kullanılamıyor.",
   "No tasks yet. Send a request in Chat to start a task queue.":
-    "Henüz görev yok. Görev kuyruğu başlatmak için Sohbet'ten istek gönder."
+    "Henüz görev yok. Görev kuyruğu başlatmak için Sohbet'ten istek gönder.",
+  "Tool issues": "Araç sorunları"
 };
