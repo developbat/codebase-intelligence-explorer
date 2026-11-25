@@ -3893,6 +3893,8 @@ export async function runAgentTask(
     liveBrowser?: boolean;
     /** A mechanical one-line/small edit; skip global wiring/pending heuristics. */
     microEdit?: boolean;
+    /** A focused single-file task; use a tighter read budget but keep normal steps. */
+    tightReads?: boolean;
     /** A saved deterministic scenario that must pass before finish is accepted. */
     requiredScenario?: {
       name: string;
@@ -4669,6 +4671,7 @@ ${lessons}` : "",
   };
   let modelTurns = 0;
   const microEditMode = options.microEdit === true;
+  const tightReadsMode = microEditMode || options.tightReads === true;
   let writeNudges = 0;
   let readRejections = 0;
   let evidenceNudges = 0;
@@ -4746,6 +4749,7 @@ ${lessons}` : "",
   let toolRepairs = 0;
   let scenarioRejections = 0;
   let requiredScenarioPassed = false;
+  let scenarioCalls = 0;
   let acceptanceAudits = 0;
   let transientRetries = 0;
   let budgetWarned = false;
@@ -6400,7 +6404,7 @@ ${lessons}` : "",
         const covered = readRangeCovered(ranges, requestedStart, wholeFile, requestedEnd);
         if (covered && coveredEntry) {
           const cachedContent =
-            !microEditMode && coveredEntry.observation
+            !tightReadsMode && coveredEntry.observation
               ? clampObservation(coveredEntry.observation, 3_000)
               : "";
           observation =
@@ -7041,6 +7045,12 @@ ${lessons}` : "",
         if (ok) verificationPassed = true;
         log(result.check.ok ? "success" : "error", "Game check complete", `${result.engine} · ${result.check.metrics.fps ?? "—"} fps`);
       } else if (action === "run_test_scenario") {
+        if (options.requiredScenario && scenarioCalls >= 1) {
+          throw new Error(
+            `The required scenario ${options.requiredScenario.name} is checked automatically at finish. Do not call it again; make the edit and finish.`,
+          );
+        }
+        scenarioCalls += 1;
         const rawName = String(args.name ?? args.path ?? "").trim();
         if (!rawName) throw new Error("A test scenario name is required.");
         const relative = rawName.endsWith(".json")
@@ -7730,7 +7740,11 @@ ${lessons}` : "",
     } else if (!READ_ONLY_ACTIONS.has(step.action)) {
       readOnlyStepsSinceChange = 0;
     }
-    if (readOnlyMode && readOnlyStepsSinceChange >= (microEditMode ? 4 : 8) && !inspectionNudged) {
+    if (
+      readOnlyMode &&
+      readOnlyStepsSinceChange >= (microEditMode ? 4 : tightReadsMode ? 6 : 8) &&
+      !inspectionNudged
+    ) {
       inspectionNudged = true;
       transcript.push({
         role: "system",
@@ -7745,7 +7759,7 @@ ${lessons}` : "",
       plan.needsWrite &&
       changedFiles.length === 0 &&
       !verificationPassed &&
-      readOnlyStepsSinceChange >= (microEditMode ? 3 : 8) &&
+      readOnlyStepsSinceChange >= (microEditMode ? 3 : tightReadsMode ? 5 : 8) &&
       !readDecisionNudged
     ) {
       readDecisionNudged = true;
@@ -7763,7 +7777,7 @@ ${lessons}` : "",
       !readOnlyMode &&
       verificationPassed &&
       changedFiles.length === 0 &&
-      readOnlyStepsSinceChange >= (microEditMode ? 3 : 8) &&
+      readOnlyStepsSinceChange >= (microEditMode ? 3 : tightReadsMode ? 5 : 8) &&
       !verificationNudged
     ) {
       verificationNudged = true;

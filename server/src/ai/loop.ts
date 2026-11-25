@@ -23,7 +23,11 @@ import { ensureDevServerForRequest } from "../processes";
 import { checkFileSyntax } from "../syntax";
 import { runBrowserCheck } from "../browserCheck";
 import { requestIsRunPreview } from "../../../shared/projectMatch";
-import { findTaskScenario, isScenarioVerificationTask } from "./scenarioMatch";
+import {
+  findTaskScenario,
+  isScenarioVerificationTask,
+  type TaskScenarioMatch,
+} from "./scenarioMatch";
 import {
   appendAgentRunEvent,
   appendLesson,
@@ -2036,6 +2040,7 @@ export async function runProjectLoop(
     costBudgetUsd: number;
     forceWrite: boolean;
     inspection: boolean;
+    scenario: TaskScenarioMatch | null;
     runKey: string;
     targets: string[];
     promise: Promise<AiAgentResult | null>;
@@ -2060,6 +2065,10 @@ export async function runProjectLoop(
         ? scenarioMatch
         : null;
     const microEdit = isMicroEditTask(task);
+    const tightReads =
+      !microEdit &&
+      task.detail.length < 3_500 &&
+      taskTargetFiles(analysis, task).length <= 1;
     const defaultBudget = taskBudgetForEffort(budgetEffort);
     const tokenBudget = options.tokenBudget ?? defaultBudget.tokens;
     const costBudgetUsd = options.costBudgetUsd ?? defaultBudget.costUsd;
@@ -2224,6 +2233,7 @@ export async function runProjectLoop(
         history: options.history?.slice(-8),
         liveBrowser: options.liveBrowser === true,
         microEdit,
+        tightReads,
         requiredScenario: requiredScenario
           ? {
               name: requiredScenario.name,
@@ -2262,6 +2272,7 @@ export async function runProjectLoop(
       costBudgetUsd,
       forceWrite,
       inspection: inspectionRun,
+      scenario: requiredScenario,
       runKey,
       targets,
       promise,
@@ -2464,6 +2475,7 @@ export async function runProjectLoop(
       tokenBudget,
       costBudgetUsd,
       forceWrite,
+      scenario: requiredScenario,
       runKey,
     } = completed.prepared;
     const result = completed.result;
@@ -2477,6 +2489,46 @@ export async function runProjectLoop(
       queue = await saveQueue(analysis.rootPath, queue);
       emit({ type: "task", queue, task: queue.tasks.find((item) => item.id === task.id) });
       continue;
+    }
+
+    let scenarioRescue: { ok: boolean; name: string; summary: string } | null = null;
+    if (requiredScenario && result.stoppedReason === "budget") {
+      const check = await runBrowserCheck(analysis.id, analysis.rootPath, {
+        path: requiredScenario.path,
+        url: requiredScenario.url,
+        steps: requiredScenario.steps,
+        timeoutMs: requiredScenario.timeoutMs,
+        signal,
+      }).catch((error: unknown) => ({
+        ok: false,
+        summary: error instanceof Error ? error.message : "Scenario failed.",
+        steps: [] as { index: number; action: string; ok: boolean; detail: string }[],
+      }));
+      scenarioRescue = {
+        ok: check.ok,
+        name: requiredScenario.name,
+        summary: check.summary,
+      };
+      result.steps.push({
+        index: result.steps.length + 1,
+        action: "browser_check",
+        args: {
+          scenario: requiredScenario.name,
+          path: requiredScenario.path,
+          url: requiredScenario.url,
+          steps: requiredScenario.steps,
+        },
+        observation: check.ok
+          ? `Saved scenario ${requiredScenario.name} passed after the budget stop. ${check.summary}`
+          : `Saved scenario ${requiredScenario.name} failed after the budget stop. ${check.summary}`,
+        ok: check.ok,
+        durationMs: 0,
+      });
+      if (check.ok) {
+        result.stoppedReason = "finished";
+        result.error = undefined;
+        result.summary = `${result.summary}\n\nSaved scenario ${requiredScenario.name} passed; the task is verified.`;
+      }
     }
 
     executed.push(result);
@@ -2585,6 +2637,7 @@ export async function runProjectLoop(
             missingUiVerification
           ? "failed"
           : "done";
+    if (scenarioRescue?.ok) status = "done";
     const unavailableModel = /error 410\b|end of life|no longer available|model_not_found|model .* not found|does not exist/i.test(
       result.summary,
     );
@@ -2748,9 +2801,17 @@ export async function runProjectLoop(
       (task.lifetimeTokens ?? 0) +
       (result.tokenUsage?.totalTokens ?? 0) +
       (reviewUsage?.totalTokens ?? 0);
-    const scenarioVerified = result.logs?.some(
-      (entry) => entry.label === "Required scenario passed",
-    );
+    const scenarioVerified =
+      Boolean(scenarioRescue?.ok) ||
+      result.logs?.some((entry) => entry.label === "Required scenario passed");
+    const scenarioVerification =
+      scenarioRescue?.ok
+        ? {
+            command: `scenario:${scenarioRescue.name}`,
+            ok: true,
+            output: scenarioRescue.summary,
+          }
+        : undefined;
     if (
       review?.verdict === "issues" &&
       status === "done" &&
@@ -2776,7 +2837,10 @@ export async function runProjectLoop(
       lifetimeTokens,
       costUsd:
         reviewCost === undefined ? totalCost : Number(((totalCost ?? 0) + reviewCost).toFixed(6)),
-      verification: taskVerification ?? (verification ? { command: verification } : undefined),
+      verification:
+        scenarioVerification ??
+        taskVerification ??
+        (verification ? { command: verification } : undefined),
       review,
     });
     queue = await saveQueue(analysis.rootPath, queue);
