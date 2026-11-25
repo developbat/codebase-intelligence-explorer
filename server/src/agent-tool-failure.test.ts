@@ -257,3 +257,42 @@ test("a 500-line source file can be read fully in one call", async () => {
     },
   );
 });
+
+
+test("an unproven no-change claim is rejected by the acceptance audit", async () => {
+  await withAgentProject(
+    { "src/app.ts": "export const value = 1;\n", "tsconfig.json": "{}" },
+    [
+      JSON.stringify({
+        action: "finish",
+        args: { summary: "The behavior is already implemented: pressKey ignores other operators." },
+      }),
+      JSON.stringify({
+        ok: false,
+        missing: ["× button is highlighted", "+, - and / appear disabled"],
+      }),
+      JSON.stringify({
+        action: "finish",
+        args: { summary: "The × button highlights through draw() and the other operator keys use the disabled palette." },
+      }),
+    ],
+    async (projectId) => {
+      const result = await runAgentTask(
+        projectId,
+        "Make only the round operator key active. Acceptance: the × button is highlighted, while +, - and / appear disabled.",
+        {
+          ...baseOptions,
+          forceWrite: true,
+          acceptance: "The × button is highlighted, while +, - and / appear disabled.",
+        },
+        () => undefined,
+      );
+      assert.equal(result.stoppedReason, "finished", result.summary);
+      assert.ok(
+        result.steps.some(
+          (step) => step.action === "invalid" && /acceptance criteria are not proven/i.test(step.observation),
+        ),
+      );
+    },
+  );
+});

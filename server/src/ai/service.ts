@@ -2372,6 +2372,61 @@ export function parseMultipleJsonActions(text: string): ParsedToolAction[] {
   return actions;
 }
 
+async function auditNoChangeAcceptance(
+  projectId: string,
+  config: Awaited<ReturnType<typeof resolveProvider>>,
+  instruction: string,
+  summary: string,
+  steps: AiAgentStep[],
+): Promise<{ ok: boolean; missing: string[] } | null> {
+  const evidence = steps
+    .slice(-24)
+    .map(
+      (step) =>
+        `#${step.index} ${step.action} ${step.ok ? "ok" : "fail"}${step.args ? ` args=${JSON.stringify(step.args).slice(0, 500)}` : ""}\n${(step.observation ?? "").slice(0, 700)}`,
+    )
+    .join("\n\n");
+  const messages: ChatMessage[] = [
+    {
+      role: "system",
+      content:
+        "You are a strict acceptance reviewer for a coding agent. Return only JSON: {\"ok\":boolean,\"missing\":string[]}. A no-change claim is valid only when the evidence explicitly proves every acceptance clause. Input gating does not prove a visual highlight. A merged/single bar requires proof that duplicate target/score displays were actually removed. Cite concrete file:line or runtime evidence, not intent.",
+    },
+    {
+      role: "user",
+      content: [
+        "Task and acceptance:",
+        instruction.slice(0, 6_000),
+        "",
+        "Agent summary:",
+        summary.slice(0, 4_000),
+        "",
+        "Tool evidence:",
+        evidence || "(none)",
+        "",
+        "If any acceptance clause is unproven, return ok=false and list the missing clauses. Be strict but do not ask for unrelated refactors.",
+      ].join("\n"),
+    },
+  ];
+  try {
+    const completion = await chat(config, messages, {
+      maxTokens: 700,
+      temperature: 0,
+      timeoutMs: 60_000,
+    });
+    const match = completion.match(/\{[\s\S]*\}/);
+    if (!match) return null;
+    const parsed = JSON.parse(match[0]) as { ok?: unknown; missing?: unknown };
+    if (typeof parsed.ok !== "boolean") return null;
+    const missing = Array.isArray(parsed.missing)
+      ? parsed.missing.filter((item): item is string => typeof item === "string").slice(0, 8)
+      : [];
+    return { ok: parsed.ok, missing };
+  } catch {
+    return null;
+  }
+}
+
 export function parseAgentReply(text: string): Record<string, unknown> {
   if (/DSML/i.test(text)) {
     const actions = parseDsmlActions(text);
@@ -3778,6 +3833,8 @@ export async function runAgentTask(
     interactive?: boolean;
     forceFast?: boolean;
     forceWrite?: boolean;
+    /** The task's explicit acceptance criteria, if the loop has them. */
+    acceptance?: string;
     /** The loop already decided this is a read-only inspection task. */
     inspection?: boolean;
     /** Original user goal when `instruction` is wrapped task-loop boilerplate. */
@@ -4604,6 +4661,7 @@ ${lessons}` : "",
     return latest;
   };
   let toolFailureNudges = 0;
+  let acceptanceAudits = 0;
   let transientRetries = 0;
   let budgetWarned = false;
   let budgetWarning: string | undefined;
@@ -5646,6 +5704,48 @@ ${lessons}` : "",
         });
         transcript.push({ role: "user", content: `Observation (step ${index}) [tool-error]: ${observation}` });
         continue;
+      }
+
+      const acceptanceText = options.acceptance?.trim() ?? "";
+      const noChangeClaim =
+        changedFiles.length === 0 &&
+        /(?:already|no changes?|nothing to change|no edit|zaten|gerek yok|mevcut|uygulanmış|eklenmiş|yapılmış)/i.test(
+          rawSummary,
+        );
+      if (
+        !readOnlyMode &&
+        plan.needsWrite &&
+        acceptanceText &&
+        noChangeClaim &&
+        acceptanceAudits < 1 &&
+        modelTurns < maxSteps
+      ) {
+        acceptanceAudits += 1;
+        const audit = await auditNoChangeAcceptance(
+          projectId,
+          config,
+          `${instruction}\n\nAcceptance: ${acceptanceText}`,
+          rawSummary,
+          steps,
+        );
+        if (audit && !audit.ok) {
+          const observation = `Finish rejected: the acceptance criteria are not proven.\n- ${audit.missing.length > 0 ? audit.missing.join("\n- ") : "The evidence does not demonstrate the requested end state."}\nDo not claim a visual/layout change from a similar input guard. Implement the missing change or cite exact file:line and runtime evidence for every acceptance item, then finish.`;
+          log("warn", "Finish rejected: acceptance not proven", audit.missing.join("; ").slice(0, 200));
+          recordStep({
+            index,
+            action: "invalid",
+            args: {},
+            observation,
+            ok: false,
+            durationMs: Date.now() - started,
+            tokenUsage: stepUsage,
+          });
+          transcript.push({
+            role: "user",
+            content: `Observation (step ${index}) [acceptance]: ${observation}`,
+          });
+          continue;
+        }
       }
 
       const projectHasHtml = analysis.files.some((file) => /\.html?$/i.test(file.path));

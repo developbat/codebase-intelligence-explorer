@@ -357,7 +357,7 @@ export function parseIntentResponse(
         .slice(0, 5)
     : [];
 
-  return applyRunPreviewIntent(
+  const baseIntent = applyRunPreviewIntent(
     {
       kind,
       understanding,
@@ -378,6 +378,10 @@ export function parseIntentResponse(
     },
     instruction,
   );
+  return forceExplicitEditIntent(
+    suppressRedundantClarification(baseIntent, instruction, analysis),
+    instruction,
+  );
 }
 
 async function resolveIntentModel(options: IntentOptions) {
@@ -390,9 +394,14 @@ async function resolveIntentModel(options: IntentOptions) {
         const fallback = await resolveProvider(fastRole?.provider, fastRole?.model).catch(() => null);
         return fallback ?? resolveAgentRole("main", { provider: options.provider, model: options.model });
       })
-    : await resolveProvider(fastRole?.provider, fastRole?.model).catch(() =>
-        resolveAgentRole("main", { provider: options.provider, model: options.model }),
-      );
+    : await resolveAgentRole("main", {
+        provider: options.provider,
+        model: options.model,
+      }).catch(async () => {
+        // Only fall back to the fast/free role when the main model is unusable.
+        return (await resolveProvider(fastRole?.provider, fastRole?.model).catch(() => null)) ??
+          resolveProvider(options.provider, options.model);
+      });
   const health = await modelHealthByProviderModel().catch(() => new Map());
   if (health.get(healthKey(config.id, config.model))?.unavailable === true) {
     const alternate = await pickAlternateAgentModel({
@@ -414,17 +423,81 @@ async function resolveIntentModel(options: IntentOptions) {
  * the change is, which files are likely involved, and whether a question is
  * needed. It deliberately carries only compact project facts.
  */
+function forceExplicitEditIntent(
+  intent: IntentAnalysis,
+  instruction: string,
+): IntentAnalysis {
+  if (intent.kind === "scaffold" || intent.kind === "question") return intent;
+  // "bozma"/"dokunma" is a preservation constraint, not a negation of the edit.
+  if (/(?:kaldırma|silme|değiştirme|ekleme)\b/i.test(instruction)) return intent;
+  const explicitEdit =
+    /(?:^|[\s,.;:])(?:kaldır|sil|gizle|ekle|değiştir|güncelle|taşı|birleştir|düzenle|yenile|remove|delete|hide|add|change|update|move|merge|rename|fix|repair)\b/i.test(
+      instruction,
+    );
+  if (!explicitEdit) return intent;
+  if (intent.kind === "edit" && !intent.needsClarification) return intent;
+  return {
+    ...intent,
+    kind: "edit",
+    // Keep a genuine clarification (distinct options); redundant ones were
+    // already removed by suppressRedundantClarification.
+    assumptions: [
+      ...intent.assumptions,
+      "The request contains explicit change verbs; treat it as an edit instead of an analysis question.",
+    ].slice(0, 8),
+  };
+}
+
 function suppressRedundantClarification(
   intent: IntentAnalysis,
   instruction: string,
   analysis: AnalysisResult,
 ): IntentAnalysis {
   if (!intent.needsClarification) return intent;
+  // If the offered options only differ in layout/cosmetic wording, the choice
+  // is not worth blocking the task. Proceed with the first concrete option.
+  const suffixes = (intent.options ?? [])
+    .map((option) => option.instructionSuffix.trim().toLowerCase())
+    .filter(Boolean);
+  if (suffixes.length >= 2) {
+    const prefix = suffixes[0].slice(0, Math.min(36, suffixes[0].length));
+    if (
+      prefix.length >= 16 &&
+      suffixes.every((suffix) => suffix.startsWith(prefix))
+    ) {
+      return {
+        ...intent,
+        needsClarification: false,
+        question: "",
+        options: [],
+        assumptions: [
+          ...intent.assumptions,
+          `Clarification options only varied in layout; proceeding with: ${intent.options?.[0]?.label ?? "the first option"}.`,
+        ].slice(0, 8),
+      };
+    }
+  }
+  const explicitRemoval =
+    /(?:kaldır|sil|gizle|remove|hide|delete)/i.test(instruction) &&
+    /(?:hedef|puan|hud|bar|işlem|gösterge|target|score|display)/i.test(instruction);
+  const explicitKeep = /(?:kalsın|kalsin|koru|bozma|keep|preserve)/i.test(instruction);
+  if (explicitRemoval && explicitKeep) {
+    return {
+      ...intent,
+      needsClarification: false,
+      question: "",
+      options: [],
+      assumptions: [
+        ...intent.assumptions,
+        "The request already states what to remove and what to keep; proceed with the stated UI change.",
+      ].slice(0, 8),
+    };
+  }
   const question = `${intent.question} ${(intent.options ?? [])
     .map((option) => option.label)
     .join(" ")}`.toLowerCase();
   const shooting = /(?:shoot|shooting|fire|ateş)/i.test(question) && /(?:shoot|shooting|fire|ateş)/i.test(instruction);
-  const hasShooting = analysis.symbols.some((symbol) =>
+  const hasShooting = (analysis.symbols ?? []).some((symbol) =>
     /(?:spawnBullet|updateBullets|bindFireControls|setFiring)/i.test(symbol.name),
   );
   if (shooting && hasShooting) {
@@ -751,6 +824,7 @@ export async function analyzeIntent(
   }
 
   intent = suppressRedundantClarification(intent, instruction, analysis);
+  intent = forceExplicitEditIntent(intent, instruction);
   intent = preserveNegations(intent, instruction);
   intent = await applyProjectMismatchGuard(intent, instruction, analysis, options);
   if (intent.areas.length === 0) {

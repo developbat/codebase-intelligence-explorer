@@ -188,7 +188,7 @@ export function splitLargeGoal(goal: string, verification?: string): ProjectTask
   // one instruction, not a list of independent features. Splitting them
   // produces fragments like "zaten var olan itemleri yeniden ekleme" as tasks.
   if (
-    /(?:yeniden ekleme|ekleme\b|bozma|kanıtla|doğrula|raporla|göster|listele|kullanılmıyorsa|zaten var|mevcut .{0,30}koru|sadece .{0,30}bakma)/i.test(
+    /(?:yeniden ekleme|ekleme\b|bozma|kanıtla|doğrula|raporla|(?<![a-zçğıöşü])göster(?![a-zçğıöşü])|listele|kullanılmıyorsa|zaten var|mevcut .{0,30}koru|sadece .{0,30}bakma)/i.test(
       goal,
     )
   ) {
@@ -197,7 +197,7 @@ export function splitLargeGoal(goal: string, verification?: string): ProjectTask
   const sentences = goal
     .split(/(?:[.!?;]+|\n+)\s*/)
     .map((sentence) => sentence.trim())
-    .filter((sentence) => sentence.length >= 12 && sentence.split(/\s+/).length >= 4);
+    .filter((sentence) => sentence.length >= 12 && sentence.split(/\s+/).length >= 3);
   if (sentences.length < 3) return null;
   const at = nowIso();
   const tasks: ProjectTask[] = sentences.slice(0, 6).map((sentence, index) => ({
@@ -1788,7 +1788,12 @@ export async function runProjectLoop(
     }
   }
   const intent = options.intent;
-  const intentSingle = workspaceMode !== "build" || intent?.mode === "single";
+  const multiPartGoal =
+    (intent?.kind === "edit" || intent?.kind === "scaffold" || intent?.kind === "run") &&
+    (goal.length > 180 ||
+      (goal.match(/[.!?;]+/g) ?? []).length >= 2 ||
+      /(?:^|\s)(?:ayrıca|hem|tek bir|sadece|bir de)\s/i.test(goal));
+  const intentSingle = workspaceMode !== "build" || (intent?.mode === "single" && !multiPartGoal);
   if (
     !queue ||
     options.replan ||
@@ -1972,6 +1977,7 @@ export async function runProjectLoop(
     if (!queue) throw new Error("No task queue is available.");
     const runKey = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
     const budgetEffort = taskBudgetEffort(task);
+    const forceWrite = workspaceMode === "build" && taskLooksLikeWrite(task);
     const defaultBudget = taskBudgetForEffort(budgetEffort);
     const tokenBudget = options.tokenBudget ?? defaultBudget.tokens;
     const costBudgetUsd = options.costBudgetUsd ?? defaultBudget.costUsd;
@@ -1980,6 +1986,8 @@ export async function runProjectLoop(
       startedAt: nowIso(),
       attempts: task.attempts + 1,
       effort: budgetEffort,
+      // A write task must not inherit the planner's fast/free worker role.
+      role: forceWrite ? "main" : task.role,
       tokenBudget,
       costBudgetUsd,
     });
@@ -1998,7 +2006,12 @@ export async function runProjectLoop(
           provider: options.provider,
           model: options.model,
         }).catch(() => main);
-    if (!current.modelOverride && budgetEffort === "simple" && current.role !== "fast") {
+    if (
+      !current.modelOverride &&
+      budgetEffort === "simple" &&
+      current.role !== "fast" &&
+      !forceWrite
+    ) {
       taskConfig = await resolveAgentRole("fast", {
         provider: options.provider,
         model: options.model,
@@ -2017,7 +2030,6 @@ export async function runProjectLoop(
         options.model = alternate.model;
       }
     }
-    const forceWrite = workspaceMode === "build" && taskLooksLikeWrite(task);
     // Small local models are useful for reading, searching and summarizing, but
     // their JSON edit protocol is not reliable enough to let an auto-assigned
     // fast/reviewer worker rewrite project files. Keep edits on the main model.
@@ -2093,6 +2105,7 @@ export async function runProjectLoop(
         maxOutputTokens: settings?.agentMaxOutputTokens ?? 16_000,
         startingUsage: current.tokenUsage,
         intent: options.intent,
+        acceptance: current.acceptance,
         workBriefText: cleanTaskDetail(current.detail) || current.title,
         history: options.history?.slice(-8),
         liveBrowser: options.liveBrowser === true,
@@ -2525,8 +2538,10 @@ export async function runProjectLoop(
       resultSummary: result.summary,
       notes: answerNote,
       toolIssues: toolIssues.length > 0 ? toolIssues : undefined,
-      changedFiles: result.changedFiles,
-      commands: result.ranCommands,
+      // Keep edits from earlier attempts in this task's history. A later
+      // no-change retry must not erase evidence that the file was written.
+      changedFiles: [...new Set([...(current.changedFiles ?? []), ...result.changedFiles])],
+      commands: [...new Set([...(current.commands ?? []), ...result.ranCommands])],
       tokenUsage: addUsage(
         addUsage(task.tokenUsage ?? emptyUsage(), result.tokenUsage),
         reviewUsage,
@@ -2870,8 +2885,12 @@ export async function runProjectLoop(
           modelOverride: { provider: taskConfig.id, model: taskConfig.model },
           resultSummary: undefined,
           verification: undefined,
-          changedFiles: task.changedFiles ?? [],
-          commands: task.commands ?? [],
+          changedFiles: [
+            ...new Set([...(finalTask.changedFiles ?? []), ...(result.changedFiles ?? [])]),
+          ],
+          commands: [
+            ...new Set([...(finalTask.commands ?? []), ...(result.ranCommands ?? [])]),
+          ],
           notes: `Repair pass — the previous attempt identified a concrete remaining fix. Apply only this fix, verify it, then finish: ${repairInstruction}${runLogNote}`,
         });
         await appendTaskContext(

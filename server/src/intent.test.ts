@@ -184,3 +184,35 @@ test("run/preview requests override a project-switch clarification", () => {
   assert.ok(intent.toolGroups.includes("command"));
   assert.ok(intent.toolGroups.includes("browser"));
 });
+
+
+test("explicit remove/keep instructions become edits instead of clarification requests", () => {
+  const instruction =
+    "üst HUD'daki İşlem göstergesini kaldır. Canvas içindeki yinelenen HEDEF yazısını kaldır. Hedef ve puan tek bir üst barda kalsın; Süre çipi aynı barda kalsın. Operatör butonu vurgusunu ve alt giriş alanını bozma. Gerçek sayfada doğrula.";
+  const intent = parseIntentResponse(
+    JSON.stringify({
+      kind: "analyze",
+      understanding: instruction,
+      needsClarification: true,
+      question: "HUD’da hangi öğeleri kaldırmak istediğinizi netleştirir misiniz?",
+      options: [
+        {
+          label: "İşlem göstergesini kaldır, hedef ve puanı tek üst bar",
+          suffix: "İşlem göstergesini kaldır, hedef ve puanı tek üst bar’da tut.",
+        },
+        {
+          label: "İşlem göstergesini kaldır, hedef ve puanı ayrı üst bar",
+          suffix: "İşlem göstergesini kaldır, hedef ve puanı ayrı üst bar’da tut.",
+        },
+      ],
+      scope: "small",
+      mode: "single",
+      areas: ["index.html"],
+      verification: "browser",
+    }),
+    analysis,
+    instruction,
+  );
+  assert.equal(intent.kind, "edit");
+  assert.equal(intent.needsClarification, false);
+});
