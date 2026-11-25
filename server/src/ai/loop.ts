@@ -23,6 +23,7 @@ import { ensureDevServerForRequest } from "../processes";
 import { checkFileSyntax } from "../syntax";
 import { runBrowserCheck } from "../browserCheck";
 import { requestIsRunPreview } from "../../../shared/projectMatch";
+import { findTaskScenario, isScenarioVerificationTask } from "./scenarioMatch";
 import {
   appendAgentRunEvent,
   appendLesson,
@@ -309,12 +310,22 @@ function isVerificationOnlyTask(task: ProjectTask): boolean {
     return true;
   }
   const verify =
-    /\b(verify|verification|validate|runtime check|test the|run the test|doğrula|kontrol et|test et|çalışma zamanı)/i.test(
+    /\b(verify|verification|validate|prove|confirm|runtime check|test the|run the test|doğrula|kontrol et|test et|çalışma zamanı|kanıtla)/i.test(
       text,
     );
+  const reportingOnly =
+    /(?:before\/after|evidence table|final answer|report the evidence|deliver the)/i.test(text) &&
+    !/\b(?:fix|update|change|implement|create|remove|delete|replace|refactor)\b|düzelt|güncelle|değiştir|kaldır|sil/i.test(
+      text,
+    );
+  if (verify && reportingOnly) return true;
+  const withoutNegatedWrites = text.replace(
+    /\b(?:do not|don't|never|without|no)\s+(?:\w+\s+){0,3}(?:add|fix|update|change|implement|create|remove|delete|replace|write|refactor|ensure|make|modify)\b/gi,
+    "",
+  );
   const write =
     /\b(add|fix|update|change|implement|create|remove|delete|rename|refactor|move|write|repair|wire|restore|ensure|enable|tune|adjust|enforce|expose|register|route|convert|support|extend|validate|return|reject|handle|respond)\b|düzelt|ekle|güncelle|değiştir|kaldır|sil|taşı|yaz|onar|bağla/i.test(
-      text,
+      withoutNegatedWrites,
     );
   return verify && !write;
 }
@@ -331,6 +342,27 @@ function foldTrailingVerification(tasks: ProjectTask[]): ProjectTask[] {
     updatedAt: nowIso(),
   };
   return [...tasks.slice(0, -2), merged];
+}
+
+function collapseVerificationTasks(tasks: ProjectTask[]): ProjectTask[] {
+  if (tasks.length < 2) return tasks;
+  if (!tasks.every((task) => isVerificationOnlyTask(task))) return tasks;
+  const [first, ...rest] = tasks;
+  return [
+    {
+      ...first,
+      detail: [first.detail, ...rest.map((task) => task.detail)]
+        .filter(Boolean)
+        .join("\n")
+        .slice(0, 4_000),
+      acceptance: [first.acceptance, ...rest.map((task) => task.acceptance)]
+        .filter(Boolean)
+        .join(" ")
+        .slice(0, 1_000),
+      dependsOn: [],
+      updatedAt: nowIso(),
+    },
+  ];
 }
 
 function isCleanupOnlyTask(task: ProjectTask): boolean {
@@ -657,6 +689,7 @@ export async function planProjectTasks(
   }
   tasks = foldTrailingVerification(tasks);
   tasks = foldTrailingCleanup(tasks);
+  tasks = collapseVerificationTasks(tasks);
   if (options.intent && tasks.length > 0) {
     const limit =
       options.intent.scope === "small"
@@ -2237,12 +2270,78 @@ export async function runProjectLoop(
         executedCount < maxTasks &&
         Date.now() - startedAt < maxMs
       ) {
-        const nextTask = nextSchedulableTask();
+        let nextTask = nextSchedulableTask();
         if (!nextTask) break;
         if (!seenTasks.has(nextTask.id)) {
           seenTasks.add(nextTask.id);
           executedCount += 1;
         }
+
+        // A saved deterministic scenario is stronger than asking the model to
+        // choose a verification recipe. For verification-only tasks, run it
+        // directly; a pass closes the task without an LLM call.
+        if (isScenarioVerificationTask(nextTask)) {
+          const match = await findTaskScenario(analysis.rootPath, nextTask).catch(() => null);
+          if (match) {
+            const scenarioTaskId = nextTask.id;
+            const check = await runBrowserCheck(analysis.id, analysis.rootPath, {
+              path: match.path,
+              steps: match.steps,
+              timeoutMs: match.timeoutMs,
+              signal,
+            }).catch((error: unknown) => ({
+              ok: false,
+              summary: error instanceof Error ? error.message : "Scenario failed.",
+              steps: [] as { index: number; action: string; ok: boolean; detail: string }[],
+            }));
+            if (check.ok) {
+              const evidence = check.steps
+                .map(
+                  (step) =>
+                    `${step.ok ? "PASS" : "FAIL"} #${step.index} ${step.action}: ${step.detail}`,
+                )
+                .join("\n");
+              queue = markTask(queue, scenarioTaskId, {
+                status: "done",
+                completedAt: nowIso(),
+                resultSummary: `Saved scenario ${match.name} passed without a model edit.\n${check.summary}${evidence ? `\n${evidence}` : ""}`,
+                notes: "Deterministic saved scenario verified this task; no model call was needed.",
+                toolIssues: undefined,
+                changedFiles: [],
+                commands: [],
+                verification: {
+                  command: `scenario:${match.name}`,
+                  ok: true,
+                  output: check.summary,
+                },
+              });
+              queue = await saveQueue(analysis.rootPath, queue);
+              await appendTaskContext(
+                analysis.rootPath,
+                `Scenario verification · ${scenarioTaskId}`,
+                `The saved scenario ${match.name} passed. ${check.summary}`,
+              ).catch(() => undefined);
+              emit({
+                type: "task",
+                queue,
+                task: queue.tasks.find((item) => item.id === scenarioTaskId),
+              });
+              continue;
+            }
+            queue = markTask(queue, scenarioTaskId, {
+              notes: [
+                nextTask.notes,
+                `Saved scenario ${match.name} failed before the run: ${check.summary.slice(0, 700)}`,
+              ]
+                .filter(Boolean)
+                .join("\n"),
+            });
+            const refreshed = queue.tasks.find((item) => item.id === scenarioTaskId);
+            if (refreshed) nextTask = refreshed;
+            emit({ type: "task", queue, task: nextTask });
+          }
+        }
+
         const wouldWrite =
           workspaceMode === "build" &&
           options.allowWrite === true &&
