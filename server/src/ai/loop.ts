@@ -2280,8 +2280,14 @@ export async function runProjectLoop(
         // A saved deterministic scenario is stronger than asking the model to
         // choose a verification recipe. For verification-only tasks, run it
         // directly; a pass closes the task without an LLM call.
-        if (isScenarioVerificationTask(nextTask)) {
-          const match = await findTaskScenario(analysis.rootPath, nextTask).catch(() => null);
+        const scenarioMatch = await findTaskScenario(analysis.rootPath, nextTask).catch(
+          () => null,
+        );
+        const scenarioEligible =
+          scenarioMatch &&
+          (isScenarioVerificationTask(nextTask) || scenarioMatch.score >= 6);
+        if (scenarioEligible) {
+          const match = scenarioMatch;
           if (match) {
             const scenarioTaskId = nextTask.id;
             const check = await runBrowserCheck(analysis.id, analysis.rootPath, {
