@@ -266,7 +266,7 @@ const TOOL_SPECS: AgentToolSpec[] = [
     example:
       '{"action":"browser_check","args":{"path":"index.html","steps":[{"action":"fill","selector":"#task-input","value":"Test"},{"action":"click","selector":"#add-task"},{"action":"expectText","selector":"#task-list","text":"Test"}]}}',
     description:
-      "Drive the real preview or a running dev server in a browser and assert UI state. Use `url` for a live server (for example http://127.0.0.1:8501); `path` is only for a static project file. A URL placed in `path` is treated as `url`.",
+      "Drive the real preview or a running dev server in a browser and assert UI state. Use `url` for a live server (for example http://127.0.0.1:8501); `path` is only for a static project file. A URL placed in `path` is treated as `url`. For keyboard/canvas games use a pressKeys step (for example keys: [\"3\",\"0\",\"*\",\"1\",\"Enter\"]) followed by expectText on the score/HUD.",
     whenToUse: "Use for UI/game behavior, clicks, forms and console errors; prefer DOM-visible checks over unknown globals.",
     inputSchema: {
       type: "object",

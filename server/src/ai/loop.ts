@@ -172,6 +172,7 @@ Rules:
 - Never create a task only to deduplicate or normalize existing definitions. Put the "do not re-add existing items" constraint in the relevant behavior task's acceptance instead.
 - Small mechanical edits are "simple"; normal implementation is "standard"; broad refactors/debugging are "hard".
 - Fold verification into the last behavior task. Do not create a separate verification-only task; the executor runs the project's verification command itself.
+- For game/canvas score verification, put the exact browser_check steps in the acceptance: a pressKeys step with the public key sequence (for example ["3","0","*","1","Enter"]) followed by expectText on the score/HUD. Never tell the executor to call startRound, round, state or other closure internals.
 - Do not invent files that do not exist; inspect is allowed later by the executor.
 - Use the project map and goal-relevant symbols to name the correct file/function. If a symbol hint points to a file, use that file as the primary edit target. Prefer files loaded by the HTML entry or imported by it. Do not add runtime behavior to a file that is not loaded; verify an import before using an unreferenced file.
 - Do not invent cleanup/dedup tasks unless the project map or a concrete duplicate shows it is needed. Verify first.
@@ -310,7 +311,7 @@ function isVerificationOnlyTask(task: ProjectTask): boolean {
       text,
     );
   const write =
-    /\b(add|fix|update|change|implement|create|remove|delete|rename|refactor|move|write|repair|wire|restore|ensure|enable|tune|adjust|enforce|report|expose|register|route|convert|support|extend|validate|return|reject|handle|respond)\b|düzelt|ekle|güncelle|değiştir|kaldır|sil|taşı|yaz|onar|bağla/i.test(
+    /\b(add|fix|update|change|implement|create|remove|delete|rename|refactor|move|write|repair|wire|restore|ensure|enable|tune|adjust|enforce|expose|register|route|convert|support|extend|validate|return|reject|handle|respond)\b|düzelt|ekle|güncelle|değiştir|kaldır|sil|taşı|yaz|onar|bağla/i.test(
       text,
     );
   return verify && !write;
@@ -1118,6 +1119,10 @@ function taskInstruction(
 ): string {
   const brief = resolveWorkBrief(task.title);
   const extractionTask = brief?.mode === "extract";
+  const scoreVerification = !extractionTask &&
+    /presskeys|scoring|score|puan|canvas|game|oyun/i.test(
+      `${task.title}\n${task.detail}\n${task.acceptance ?? ""}`,
+    );
   const prior = priorTasks
     .filter((item) => item.status === "done" && item.resultSummary)
     .slice(-8)
@@ -1178,6 +1183,9 @@ function taskInstruction(
     extractionTask
       ? ""
       : "For scoring/round logic use the canvas-game-verification recipe: find the owning function, then drive the real page with browser_check pressKeys and assert #score deltas (before/after). Never call startRound, round or state from eval. If the behavior already exists, finish with a before/after evidence table.",
+    scoreVerification
+      ? `Required score-verification shape: {"action":"browser_check","args":{"path":"index.html","steps":[{"action":"pressKeys","keys":["3","0","*","1","Enter"]},{"action":"expectText","selector":"#score","text":"1"}]}}. Prepare a deterministic target/operation with one short eval wait before these steps; do not call startRound/round/state from eval.`
+      : "",
     extractionTask
       ? ""
       : "If a tool call fails, fix only that call's arguments and retry. For a script syntax/runtime error make one focused repair attempt; do not restart the task or re-read the whole file.",

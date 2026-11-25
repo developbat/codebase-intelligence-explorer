@@ -222,7 +222,7 @@ Rules:
 Order of work:
 1. Start with browser_check on the real entry page (usually index.html).
 2. Inspect the runtime result: title, buttons, inputs, canvases, console/page errors, broken images and horizontal overflow.
-3. Exercise the key visible flow with clicks/keys or a saved scenario. Use expectVisible/expectText/expectValue for evidence.
+3. Exercise the key visible flow with clicks/keys or a saved scenario. Use expectVisible/expectText/expectValue for evidence. For canvas/keyboard games use pressKeys with public keys, then assert the score/HUD.
 4. Use audit_content when asset references, broken local links or Markdown structure matter.
 7. Read source only for the specific control or error that needs explanation. Read at most 3 focused ranges.
 8. Do not edit project source. Do not run broad project scans.
