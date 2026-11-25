@@ -180,6 +180,8 @@ Rules:
 - The context notes in .cie/agent/context.md and .cie/agent/TASKS.md are for continuity; you may mention them.
 - Write task titles, details and acceptance in English. Keep quoted user text, file paths, function names and code identifiers unchanged.
 - Never return placeholder tasks such as "...", "TODO", "TBD" or "fill me". Every task must contain a real title, detail and acceptance.
+- Preserve the user's exact rule and qualifiers (smaller/larger/only/never). Never replace them with an example-specific shortcut: if the user says the smaller of the two operands, write min(a,b), not "the second operand"; examples are illustrations, not the rule.
+- If the preflight code already implements the requested rule, do not create an edit task that claims a flat bonus or missing guard; create a verification-only task or fold the verification into the behavior task.
 - Work in any programming language.`;
 
 export function splitLargeGoal(goal: string, verification?: string): ProjectTask[] | null {
@@ -1116,6 +1118,7 @@ function taskInstruction(
   inspection = false,
   runPreviewUrl?: string,
   parallelNote?: string,
+  originalRequest?: string,
 ): string {
   const brief = resolveWorkBrief(task.title);
   const extractionTask = brief?.mode === "extract";
@@ -1139,6 +1142,9 @@ function taskInstruction(
       : "";
   return [
     `You are executing task ${task.id} of ${total} in a persistent project task loop.`,
+    originalRequest
+      ? `Original user request (authoritative; resolve conflicts in its favor):\n${originalRequest}`
+      : "",
     `Task: ${task.title}`,
     cleanTaskDetail(task.detail),
     task.acceptance ? `Acceptance: ${task.acceptance}` : "",
@@ -1179,6 +1185,9 @@ function taskInstruction(
     extractionTask ? "" : "Put all UI assertions into one browser_check call (up to 6 steps). Run the verification command once after the final edit; do not repeat a successful check unless code changed.",
     extractionTask ? "" : "Do not create .cie/agent/checks or .cie/agent/scenarios files for a one-off verification; use the existing tests and browser_check.",
     extractionTask ? "" : "Before the first edit, search for the exact feature name, symbol or label. If it already exists, verify it and finish with evidence instead of adding a duplicate.",
+    extractionTask
+      ? ""
+      : "Compare the task detail with the original user request before editing. If the detail narrows or contradicts it (for example the original says the smaller operand, while the detail says the second operand), follow the original request and state the discrepancy.",
     extractionTask ? "" : "For HTML/canvas changes, run browser_check or game_check on the real entry page before finish. Canvas games need a real pointer/click or eval step and an asserted HUD/score/status change, not just canvas visibility. If you cannot verify, report the exact blocker; do not call it complete.",
     extractionTask
       ? ""
@@ -2097,6 +2106,7 @@ export async function runProjectLoop(
         inspectionRun,
         runPreviewUrl ?? undefined,
         parallelNote,
+        queue.goal,
       ),
       {
         activeFile: options.activeFile,
@@ -2601,6 +2611,10 @@ export async function runProjectLoop(
       });
     }
     const noEditTokenBurn = changedBefore === 0 && taskSpentTokens >= 300_000;
+    const hardTaskTokens = Math.max(
+      240_000,
+      taskBudgetForEffort(taskBudgetEffort(task)).tokens * 2,
+    );
     const failureText = `${result.summary ?? ""}\n${result.steps
       .map((step) => step.observation ?? "")
       .join("\n")}`;
@@ -2628,7 +2642,8 @@ export async function runProjectLoop(
       // budget. Bounded globally so a broken goal cannot loop forever.
       if (
         repairAttempts < RECOVERY_POLICY.maxRepairsPerTask &&
-        autoRepairs < RECOVERY_POLICY.maxRepairsPerRun
+        autoRepairs < RECOVERY_POLICY.maxRepairsPerRun &&
+        taskSpentTokens < hardTaskTokens
       ) {
         autoRepairs += 1;
         const repaired =
@@ -2717,7 +2732,10 @@ export async function runProjectLoop(
       queue = markTask(queue, task.id, {
         status: "blocked",
         completedAt: nowIso(),
-        notes: `Blocked: the previous attempt ${reason} after ${taskSpentTokens.toLocaleString()} tokens. Automatic recovery was tried ${repairAttempts} time(s) and stopped to prevent an endless loop. Split this goal into smaller single-behavior tasks, or retry manually with a narrower scope.`,
+        notes:
+          taskSpentTokens >= hardTaskTokens
+            ? `Blocked to control cost: ${taskSpentTokens.toLocaleString()} tokens spent across attempts (limit ${hardTaskTokens.toLocaleString()}). The last attempt ${reason}. Split the goal into smaller single-behavior tasks or retry with a narrower scope and the exact verification recipe.`
+            : `Blocked: the previous attempt ${reason} after ${taskSpentTokens.toLocaleString()} tokens. Automatic recovery was tried ${repairAttempts} time(s) and stopped to prevent an endless loop. Split this goal into smaller single-behavior tasks, or retry manually with a narrower scope.`,
       });
       await appendTaskContext(
         analysis.rootPath,
