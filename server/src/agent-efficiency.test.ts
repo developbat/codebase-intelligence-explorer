@@ -60,6 +60,13 @@ test("remaining-work summaries are detected without flagging clean completions",
   assert.equal(reportsRemainingWork("İş yapılmadı, route wiring eksik."), true);
   assert.equal(reportsRemainingWork("All changes are complete; typecheck passed."), false);
   assert.equal(
+    reportsRemainingWork(
+      "## Durum: uygulama yazıldı, kabul doğrulanmadı. Davranış kanıtlanamadı.",
+    ),
+    true,
+  );
+  assert.equal(reportsRemainingWork("Davranış doğrulandı; testler geçti."), false);
+  assert.equal(
     reportsIncompleteWiring("index.html'de eksik kontrol veya bağlantı yok; tümü mevcut."),
     false,
   );

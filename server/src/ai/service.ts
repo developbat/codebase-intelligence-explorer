@@ -2069,7 +2069,7 @@ export function looksLikePlanningText(summary: string): boolean {
 
 export function reportsRemainingWork(summary: string): boolean {
   const remaining =
-    /\b(not (?:done|implemented|completed)|remaining work|remains? (?:undone|to be done))\b|(?:[iİ]ş|görev|kısım|adım|özellik|madde)\s+(?:yapılmadı|tamamlanmadı)|eksik kaldı|\bkalan\s*[:(]|\bnext step\b|sonraki adım/i.test(
+    /\b(not (?:done|implemented|completed|verified)|remaining work|remains? (?:undone|to be done))\b|(?:[iİ]ş|görev|kısım|adım|özellik|madde)\s+(?:yapılmadı|tamamlanmadı)|eksik kaldı|\bkalan\s*[:(]|\bnext step\b|sonraki adım|doğrulanmadı|doğrulanamadı|kanıtlanamadı|kanıtlanmadı|test edilmedi|çalıştırılmadı|calistirilmadi|kabul edilmedi|tamamlanamadı/i.test(
       summary,
     );
   const none =
@@ -2927,6 +2927,7 @@ export function extractListItems(content: string, filePath: string, limit: numbe
 }
 
 const AGENT_IGNORED_DIRS = new Set([
+  ".cie",
   "node_modules",
   ".git",
   ".hg",

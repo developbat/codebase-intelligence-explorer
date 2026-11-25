@@ -253,6 +253,7 @@ Order of work:
 1. For a run/preview request with a dev server URL, call browser_check on that URL first (pass it in url, not path).
 1b. Put all visible assertions into ONE browser_check call (up to 6 steps). Re-run it only after a code change that could affect the page.
 1c. Never kill, pkill, killall or nohup the dev server; the app manages it. If the page is stale, report the blocker instead of restarting a process.
+1d. For a canvas game, use game_check or browser_check with a real pointer/click (or eval) step and assert the HUD/score/status changes. Canvas visibility alone is not verification.
 2. If a relevant scenario exists under .cie/agent/scenarios, run it with run_test_scenario first. Read its JSON only if it fails or needs a new variant.
 3. Otherwise use browser_check on the real entry page with DOM selectors, visible text and public UI state.
 4. For a running dev server, pass its address in browser_check url (for example http://127.0.0.1:8501). Use path only for a static project file; never put a server URL in path.
@@ -328,7 +329,9 @@ Search strategy:
 - The app runs the detected test/build verification automatically after your edit. Run it manually only when you need its failure output to fix a specific issue; do not run it just to confirm.
 - Never run kill, pkill, killall or nohup against a dev server. The app manages the server and its preview; if the page is stale, call browser_check on the existing URL or report the blocker.
 - Before the first edit, search for the exact feature name, symbol or label. If it already exists, verify it and finish with evidence; never add a duplicate implementation.
+- For HTML/canvas changes, run a real browser_check or game_check on the entry page before finish. If you cannot verify it, report the exact blocker; never describe an unverified change as complete.
 - Before writing a new check/script, call list_project_tools. Reuse a saved tool with run_project_tool instead of paying to recreate it. Only run a tool name that appears in the seed or in list_project_tools; never invent a name.
+- Large files: never send a whole file in one write_file call. Write a small skeleton first, then append_text sections of at most ~120 lines each. A truncated JSON reply wastes a full turn.
 - Use delegate_research for a broad read-only investigation whose intermediate file reads would pollute the main context. The subagent returns only a compact summary; do not use it for edits or commands.
 - For existing files, prefer replace_in_file for localized edits. Use replace_many for several localized edits in the same file. For a new self-contained block at the end (CSS section, HTML section, helper), use append_text. Use write_file only for new files or when most of the file changes.
 - For a small edit (color, label, property, condition), first locate the exact selector/property/symbol/snippet, read only 20-60 surrounding lines, then replace_in_file with that exact snippet. Do not read or send the whole file.
@@ -385,7 +388,9 @@ Rules:
 - The app runs the detected test/build verification automatically after your edit. Run it manually only when you need its failure output to fix a specific issue; do not run it just to confirm.
 - Never run kill, pkill, killall or nohup against a dev server. The app manages the server and its preview; if the page is stale, call browser_check on the existing URL or report the blocker.
 - Before the first edit, search for the exact feature name, symbol or label. If it already exists, verify it and finish with evidence; never add a duplicate implementation.
+- For HTML/canvas changes, run a real browser_check or game_check on the entry page before finish. If you cannot verify it, report the exact blocker; never describe an unverified change as complete.
 - Before writing a new check/script, call list_project_tools. Reuse a saved tool with run_project_tool instead of paying to recreate it. Only run a tool name that appears in the seed or in list_project_tools; never invent a name.
+- Large files: never send a whole file in one write_file call. Write a small skeleton first, then append_text sections of at most ~120 lines each. A truncated JSON reply wastes a full turn.
 - Use delegate_research for a broad read-only investigation whose intermediate file reads would pollute the main context. The subagent returns only a compact summary; do not use it for edits or commands.
 - For existing files, prefer replace_in_file for localized edits. Use write_file only for new files or when most of the file changes.
 - If the requested behavior is already implemented, verify it, report exactly that, and do not rewrite or duplicate the work.

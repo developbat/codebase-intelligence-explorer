@@ -1,9 +1,31 @@
+import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import type { AnalysisResult, RecentProject } from "../../shared/types";
 
 const ID_PATTERN = /^[a-f0-9]{16}$/;
+
+/**
+ * The recent-project index is updated by several flows at once (create, open,
+ * remove, watcher). A read-modify-write race produced duplicate temp names and
+ * `rename ... .tmp -> index.json` ENOENT errors. Serialize index updates and
+ * make temp names unique.
+ */
+const fileQueues = new Map<string, Promise<void>>();
+
+function enqueueFile<T>(filePath: string, task: () => Promise<T>): Promise<T> {
+  const previous = fileQueues.get(filePath) ?? Promise.resolve();
+  const run = previous.then(task, task);
+  fileQueues.set(
+    filePath,
+    run.then(
+      () => undefined,
+      () => undefined,
+    ),
+  );
+  return run;
+}
 
 export function getDataDir(): string {
   return process.env.CIE_DATA_DIR || path.join(os.homedir(), ".codebase-intelligence-explorer");
@@ -49,7 +71,7 @@ async function readIndex(): Promise<StoreIndex> {
 async function writeJsonAtomic(filePath: string, value: unknown): Promise<void> {
   const dir = path.dirname(filePath);
   await fs.mkdir(dir, { recursive: true, mode: 0o700 });
-  const temp = `${filePath}.${process.pid}.${Date.now()}.tmp`;
+  const temp = `${filePath}.${process.pid}.${crypto.randomUUID()}.tmp`;
   await fs.writeFile(temp, JSON.stringify(value), { encoding: "utf8", mode: 0o600 });
   await fs.rename(temp, filePath);
 }
@@ -67,14 +89,16 @@ export async function saveAnalysis(result: AnalysisResult): Promise<RecentProjec
   const resultPath = path.join(projectsDir(), result.id, "analysis.json");
   await writeJsonAtomic(resultPath, result);
 
-  const index = await readIndex();
-  const withoutCurrent = index.projects.filter((project) => project.id !== result.id);
-  const summary = summaryOf(result);
-  const projects = [summary, ...withoutCurrent]
-    .sort((a, b) => (a.lastOpenedAt < b.lastOpenedAt ? 1 : -1))
-    .slice(0, 20);
-  await writeIndex({ projects });
-  return summary;
+  return enqueueFile(indexPath(), async () => {
+    const index = await readIndex();
+    const withoutCurrent = index.projects.filter((project) => project.id !== result.id);
+    const summary = summaryOf(result);
+    const projects = [summary, ...withoutCurrent]
+      .sort((a, b) => (a.lastOpenedAt < b.lastOpenedAt ? 1 : -1))
+      .slice(0, 20);
+    await writeIndex({ projects });
+    return summary;
+  });
 }
 
 export async function loadAnalysis(id: string): Promise<AnalysisResult> {
@@ -85,15 +109,17 @@ export async function loadAnalysis(id: string): Promise<AnalysisResult> {
 
 export async function touchProject(id: string): Promise<void> {
   if (!isValidProjectId(id)) return;
-  const index = await readIndex();
-  const project = index.projects.find((item) => item.id === id);
-  if (!project) return;
-  project.lastOpenedAt = new Date().toISOString();
-  const projects = index.projects
-    .filter((item) => item.id !== id)
-    .concat(project)
-    .sort((a, b) => (a.lastOpenedAt < b.lastOpenedAt ? 1 : -1));
-  await writeIndex({ projects });
+  await enqueueFile(indexPath(), async () => {
+    const index = await readIndex();
+    const project = index.projects.find((item) => item.id === id);
+    if (!project) return;
+    project.lastOpenedAt = new Date().toISOString();
+    const projects = index.projects
+      .filter((item) => item.id !== id)
+      .concat(project)
+      .sort((a, b) => (a.lastOpenedAt < b.lastOpenedAt ? 1 : -1));
+    await writeIndex({ projects });
+  });
 }
 
 export async function listRecent(): Promise<RecentProject[]> {
@@ -107,7 +133,9 @@ export async function getRecentProject(id: string): Promise<RecentProject | unde
 
 export async function removeAnalysis(id: string): Promise<void> {
   if (!isValidProjectId(id)) throw new Error("Invalid project id.");
-  const index = await readIndex();
-  await writeIndex({ projects: index.projects.filter((project) => project.id !== id) });
+  await enqueueFile(indexPath(), async () => {
+    const index = await readIndex();
+    await writeIndex({ projects: index.projects.filter((project) => project.id !== id) });
+  });
   await fs.rm(path.join(projectsDir(), id), { recursive: true, force: true });
 }

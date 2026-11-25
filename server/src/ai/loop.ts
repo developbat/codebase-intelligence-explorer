@@ -762,7 +762,7 @@ export function summaryAllowsNoChanges(summary: string): boolean {
 }
 
 function summaryReportsBlocker(summary: string): boolean {
-  return /\b(blocker|blocked|cannot|can't|unable to|not present|does not appear|missing|failed to|verification failed|could not)\b|yapılamadı|başarısız|engellendi|eksik|bulunamadı/i.test(
+  return /\b(blocker|blocked|cannot|can't|unable to|not present|does not appear|missing|failed to|verification failed|could not|not verified|unverified)\b|yapılamadı|başarısız|engellendi|eksik|bulunamadı|doğrulanmadı|doğrulanamadı|kanıtlanamadı|kanıtlanmadı|test edilmedi|çalıştırılmadı|calistirilmadi|kabul edilmedi|tamamlanamadı/i.test(
     summary,
   );
 }
@@ -906,7 +906,9 @@ function taskInstruction(
     extractionTask ? "" : "Put all UI assertions into one browser_check call (up to 6 steps). Run the verification command once after the final edit; do not repeat a successful check unless code changed.",
     extractionTask ? "" : "Do not create .cie/agent/checks or .cie/agent/scenarios files for a one-off verification; use the existing tests and browser_check.",
     extractionTask ? "" : "Before the first edit, search for the exact feature name, symbol or label. If it already exists, verify it and finish with evidence instead of adding a duplicate.",
+    extractionTask ? "" : "For HTML/canvas changes, run browser_check or game_check on the real entry page before finish. Canvas games need a real pointer/click or eval step and an asserted HUD/score/status change, not just canvas visibility. If you cannot verify, report the exact blocker; do not call it complete.",
     extractionTask ? "" : "Never kill, pkill, killall or nohup the dev server; the app manages the server and the preview.",
+    extractionTask ? "" : "Large files: use a small write_file skeleton plus append_text sections (max ~120 lines each); never send a whole large file in one call.",
     extractionTask ? "" : "Read the smallest range you need. Do not read a whole large file before planning; read the relevant functions, then edit. If you have read the same file twice without editing, stop reading and make the smallest change.",
     (task.repairAttempts ?? 0) > 0
       ? `Narrow retry: read at most ${RECOVERY_POLICY.maxFilesForNarrowRetry} files (or none when the content is already in context), apply the smallest edit, then verify. Do not repeat earlier reads.`
@@ -1795,6 +1797,19 @@ export async function runProjectLoop(
       summaryReportsBlocker(result.summary) &&
       !summaryAllowsNoChanges(result.summary);
     const pendingWork = !inspectionTask && reportsRemainingWork(result.summary);
+    const projectHasHtml = analysis.files.some((file) => /\.html?$/i.test(file.path));
+    const uiFilesChanged = result.changedFiles.some((file) =>
+      /\.(?:html?|css|scss|sass|less|jsx|tsx|vue|svelte|mjs|cjs|js)$/i.test(file),
+    );
+    const hadRealUiCheck = result.steps.some(
+      (step) =>
+        step.ok &&
+        (step.action === "browser_check" ||
+          step.action === "game_check" ||
+          step.action === "run_test_scenario"),
+    );
+    const missingUiVerification =
+      !inspectionTask && projectHasHtml && uiFilesChanged && !hadRealUiCheck;
     const status =
       result.stoppedReason === "aborted" || result.stoppedReason === "budget"
         ? "blocked"
@@ -1804,7 +1819,8 @@ export async function runProjectLoop(
             malformedToolReply ||
             writeWithoutChange ||
             verificationBlocker ||
-            pendingWork
+            pendingWork ||
+            missingUiVerification
           ? "failed"
           : "done";
     const unavailableModel = /error 410\b|end of life|no longer available|model_not_found|model .* not found|does not exist/i.test(
@@ -2198,8 +2214,10 @@ export async function runProjectLoop(
           changedFiles: task.changedFiles ?? [],
           commands: task.commands ?? [],
           notes: `Retry the same model: the provider worked, but the task was incomplete. Continue from the current files, complete the missing work and verify it. Do not restart from scratch.${
-            failedToolNote ? ` ${failedToolNote}` : ""
-          }${runLogNote}`,
+            missingUiVerification
+              ? " No real-page check ran after the UI change. Run browser_check or game_check on the actual entry page and assert visible behavior; for a canvas game, click at least one key and check the HUD/status."
+              : ""
+          }${failedToolNote ? ` ${failedToolNote}` : ""}${runLogNote}`,
         });
         await appendTaskContext(
           analysis.rootPath,
