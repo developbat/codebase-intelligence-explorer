@@ -2,6 +2,7 @@ import type { AnalysisResult } from "../../../shared/types";
 import type {
   AiAgentEvent,
   AiAgentResult,
+  AiAgentStep,
   AiTokenUsage,
   AiWorkspaceMode,
 } from "../../../shared/ai";
@@ -20,6 +21,7 @@ import { getDataDir, loadAnalysis } from "../store";
 import { readSourceFile } from "../editor";
 import { ensureDevServerForRequest } from "../processes";
 import { checkFileSyntax } from "../syntax";
+import { runBrowserCheck } from "../browserCheck";
 import { requestIsRunPreview } from "../../../shared/projectMatch";
 import {
   appendAgentRunEvent,
@@ -172,6 +174,7 @@ Rules:
 - Do not invent files that do not exist; inspect is allowed later by the executor.
 - Use the project map and goal-relevant symbols to name the correct file/function. If a symbol hint points to a file, use that file as the primary edit target. Prefer files loaded by the HTML entry or imported by it. Do not add runtime behavior to a file that is not loaded; verify an import before using an unreferenced file.
 - Do not invent cleanup/dedup tasks unless the project map or a concrete duplicate shows it is needed. Verify first.
+- If the Existing-code preflight shows a requested feature already exists, either omit it or make it a verification-only task that changes no files. Never create a task that re-adds it.
 - The context notes in .cie/agent/context.md and .cie/agent/TASKS.md are for continuity; you may mention them.
 - Write task titles, details and acceptance in English. Keep quoted user text, file paths, function names and code identifiers unchanged.
 - Never return placeholder tasks such as "...", "TODO", "TBD" or "fill me". Every task must contain a real title, detail and acceptance.
@@ -445,7 +448,10 @@ export async function planProjectTasks(
   const analysis = await loadAnalysis(projectId);
   const verification = preferredVerificationCommand(analysis.tooling);
   const config = await resolveAgentRole("planner");
-  const projectMap = await ensureProjectMap(analysis).catch(() => "");
+  const [projectMap, preflightHints] = await Promise.all([
+    ensureProjectMap(analysis).catch(() => ""),
+    featurePreflightHints(analysis, goal).catch(() => []),
+  ]);
   const goalTokens = [...new Set((goal.toLowerCase().match(/[a-z0-9_]{3,}/g) ?? []))].filter(
     (token) => !["the", "and", "for", "with", "add", "fix", "make", "get", "set", "use", "from", "this", "that", "var", "let", "const"].includes(token),
   );
@@ -470,6 +476,9 @@ export async function planProjectTasks(
           ? `Goal-relevant existing symbols (use these files as primary edit targets): ${goalHints.join(
               "; ",
             )}`
+          : "",
+        preflightHints.length > 0
+          ? `Existing-code preflight (the requested behavior may already exist; verify before planning and never create an edit task that re-adds it):\n${preflightHints.join("\n")}`
           : "",
         projectMap ? `Project map (use it for file and symbol ownership):\n${projectMap.slice(0, 14_000)}` : "",
         "Write task titles, details and acceptance in English. Keep quoted user text, file paths and code identifiers unchanged.",
@@ -780,6 +789,16 @@ const FEATURE_SYNONYMS: Record<string, string[]> = {
   "can": ["life", "lives"],
   "puan": ["score", "points"],
   "ses": ["sound", "audio"],
+  "satış": ["sales", "sale"],
+  "satışları": ["sales", "sale"],
+  "gün": ["day", "daily"],
+  "günü": ["day", "daily"],
+  "ay": ["month", "monthly"],
+  "değişim": ["change", "delta"],
+  "json": ["json", "export", "download"],
+  "csv": ["csv", "export", "download"],
+  "dışa": ["export", "download"],
+  "aktar": ["export", "download"],
 };
 
 function featureExistenceHints(analysis: AnalysisResult, task: ProjectTask): string[] {
@@ -807,6 +826,207 @@ function featureExistenceHints(analysis: AnalysisResult, task: ProjectTask): str
     if (hints.size >= 8) break;
   }
   return [...hints.values()];
+}
+
+const PREFLIGHT_STOP = new Set([
+  "ekle", "ekley", "eklen", "oluştur", "olustur", "güncelle", "guncelle",
+  "değiştir", "degistir", "göster", "goster", "yap", "olsun", "için", "icin",
+  "bir", "ve", "ile", "daha", "çok", "cok", "olan", "olarak", "da", "de",
+  "dışında", "disinda", "add", "create", "update", "change", "show", "display",
+  "with", "from", "this", "that", "the", "and", "for", "make", "use",
+]);
+
+/**
+ * Extract compact feature queries from a goal. These are used before planning
+ * to find behavior that already exists, so the planner does not create a task
+ * that re-adds it.
+ */
+export function buildFeatureQueries(goal: string, limit = 8): string[] {
+  const chunks = goal
+    .split(/\n|;|\.|,|\?|!/)
+    .map((chunk) => chunk.replace(/^[\s*+\-\d.)]+/, "").trim())
+    .filter((chunk) => chunk.length >= 6 && chunk.split(/\s+/).length >= 2)
+    .slice(0, 10);
+  const queries = new Set<string>();
+  for (const chunk of chunks) {
+    const words = (chunk.toLowerCase().match(/[a-zçğıöşü0-9_]+/gi) ?? []).filter(
+      (word) => word.length >= 3 && !PREFLIGHT_STOP.has(word),
+    );
+    if (words.length === 0) continue;
+    queries.add(words.slice(0, 3).join(" "));
+    for (const word of words.slice(0, 4)) {
+      queries.add(word);
+      for (const synonym of FEATURE_SYNONYMS[word] ?? []) queries.add(synonym);
+    }
+    if (queries.size >= limit * 2) break;
+  }
+  return [...queries].slice(0, limit);
+}
+
+/**
+ * Search the real files for the requested features before planning. Symbol
+ * hints alone miss plain strings such as `st.download_button("JSON indir")`;
+ * code hits let the planner say "this already exists" and skip a duplicate task.
+ */
+export async function featurePreflightHints(
+  analysis: AnalysisResult,
+  goal: string,
+  limit = 8,
+): Promise<string[]> {
+  const sourcePattern =
+    /\.(?:py|js|mjs|cjs|jsx|ts|tsx|vue|svelte|html?|css|scss|sass|less|php|go|rs|java|kt|kts|cs|rb|swift|dart|ex|exs|json|ya?ml|toml|md|txt)$/i;
+  const files = analysis.files
+    .filter(
+      (file) =>
+        sourcePattern.test(file.path) &&
+        !/^(?:\.cie|node_modules|dist|build|vendor|\.git)\//.test(file.path),
+    )
+    .slice(0, 180);
+  const documents: { path: string; lines: string[] }[] = [];
+  await Promise.all(
+    files.map(async (file) => {
+      try {
+        const absolute = path.resolve(analysis.rootPath, file.path);
+        const stat = await fs.stat(absolute);
+        if (!stat.isFile() || stat.size > 300_000) return;
+        const content = await fs.readFile(absolute, "utf8");
+        documents.push({ path: file.path, lines: content.split("\n") });
+      } catch {
+        // unreadable files are skipped
+      }
+    }),
+  );
+
+  const hints = new Map<string, string>();
+  for (const query of buildFeatureQueries(goal, 8)) {
+    const tokens = query
+      .toLowerCase()
+      .split(/\s+/)
+      .filter((token) => token.length >= 4 && !PREFLIGHT_STOP.has(token));
+    if (tokens.length === 0) continue;
+    const matches: { path: string; line: number; text: string; score: number }[] = [];
+    for (const document of documents) {
+      for (let index = 0; index < document.lines.length; index += 1) {
+        const text = document.lines[index];
+        if (!text.trim()) continue;
+        const lower = text.toLowerCase();
+        const score = tokens.reduce((total, token) => total + (lower.includes(token) ? 1 : 0), 0);
+        if (score > 0) matches.push({ path: document.path, line: index + 1, text, score });
+      }
+    }
+    matches.sort((left, right) => right.score - left.score);
+    for (const match of matches.slice(0, 2)) {
+      const key = `${match.path}:${match.line}`;
+      if (hints.has(key)) continue;
+      hints.set(
+        key,
+        `${query}: ${match.path}:${match.line} — ${match.text.replace(/\s+/g, " ").trim().slice(0, 180)}`,
+      );
+      if (hints.size >= limit) break;
+    }
+    if (hints.size >= limit) break;
+  }
+  return [...hints.values()];
+}
+
+interface UiSmokeResult {
+  ok: boolean;
+  summary: string;
+}
+
+async function staticHtmlEntry(
+  analysis: AnalysisResult,
+  changedFiles: string[] = [],
+): Promise<string | null> {
+  const html = [...new Set([...analysis.files.map((file) => file.path), ...changedFiles])].filter(
+    (file) => /\.html?$/i.test(file),
+  );
+  const entry = html.find((file) => /(^|\/)index\.html?$/i.test(file)) ?? html[0] ?? null;
+  if (!entry) return null;
+  try {
+    await fs.access(path.resolve(analysis.rootPath, entry));
+    return entry;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Deterministic baseline for static HTML changes when the agent did not run an
+ * interactive check. It clicks safe buttons / canvas points and reports page
+ * errors, console errors and horizontal overflow. Task-specific assertions are
+ * still required; this only prevents a completely unchecked page.
+ */
+export async function runUiEntrySmoke(
+  analysis: AnalysisResult,
+  changedFiles: string[] = [],
+): Promise<UiSmokeResult | null> {
+  const entry = await staticHtmlEntry(analysis, changedFiles);
+  if (!entry) return null;
+  // A React/Next/Vue dev-server page cannot be validated through the static
+  // preview route; leave those to the agent's browser_check.
+  const requiresDevServer = (analysis.frameworks ?? []).some((framework) =>
+    /^(?:react|next|vue|nuxt|svelte|angular|solid|astro|expo)/
+      .test(framework),
+  );
+  if (requiresDevServer) return null;
+  const script = `(() => {
+    const before = document.body.innerText;
+    const buttons = [...document.querySelectorAll('button')].filter((button) =>
+      button.offsetParent && !button.disabled &&
+      !/delete|remove|logout|sil|çıkış|cikis|reset|temizle/i.test(button.textContent || '')
+    ).slice(0, 3);
+    for (const button of buttons) { try { button.click(); } catch {} }
+    const canvas = document.querySelector('canvas');
+    if (canvas) {
+      const rect = canvas.getBoundingClientRect();
+      for (const [fx, fy] of [[0.12, 0.28], [0.5, 0.5], [0.82, 0.75]]) {
+        try {
+          canvas.dispatchEvent(new PointerEvent('pointerdown', {
+            clientX: rect.left + rect.width * fx,
+            clientY: rect.top + rect.height * fy,
+            bubbles: true,
+            pointerId: 9,
+          }));
+        } catch {}
+      }
+    }
+    return JSON.stringify({
+      buttons: buttons.length,
+      canvas: Boolean(canvas),
+      changed: before !== document.body.innerText,
+    });
+  })()`;
+  const result = await runBrowserCheck(analysis.id, analysis.rootPath, {
+    path: entry,
+    steps: [
+      { action: "expectVisible", selector: "body" },
+      { action: "eval", value: script },
+    ],
+    screenshot: false,
+    timeoutMs: 15_000,
+  }).catch(() => null);
+  if (!result) return { ok: false, summary: "UI smoke could not run." };
+  const evalDetail = result.steps.find((step) => step.action === "eval")?.detail ?? "";
+  const interactive = /"buttons":[1-9]|"canvas":true/.test(evalDetail);
+  const changed = /"changed":true/.test(evalDetail);
+  const errors = [...result.consoleErrors, ...result.pageErrors, ...result.resourceErrors];
+  const overflow = result.metrics.horizontalOverflow;
+  if (!result.ok) return { ok: false, summary: result.summary.slice(0, 500) };
+  if (errors.length > 0) {
+    return { ok: false, summary: `Console/page errors: ${errors.slice(0, 3).join(" · ")}` };
+  }
+  if (overflow) return { ok: false, summary: "The page has horizontal overflow." };
+  if (interactive && !changed) {
+    return {
+      ok: false,
+      summary: "Interactive elements did not change visible state after a click.",
+    };
+  }
+  return {
+    ok: true,
+    summary: `UI smoke passed (${interactive ? "interactive" : "static"}).`,
+  };
 }
 
 async function filesChangedSince(
@@ -1128,6 +1348,44 @@ export function shouldRetryWithEditFirst(
   changedFiles: string[],
 ): boolean {
   return stoppedReason === "max_steps" && changedFiles.length === 0;
+}
+
+/**
+ * A UI task is only verified by a real interaction plus an assertion. A
+ * screenshot/visibility check alone does not prove buttons, canvas keys or
+ * forms work.
+ */
+export function isInteractiveUiCheck(step: AiAgentStep): boolean {
+  if (!step.ok) return false;
+  if (step.action === "run_test_scenario") return true;
+  if (step.action !== "browser_check" && step.action !== "game_check") return false;
+  const raw = step.args?.steps;
+  const steps = Array.isArray(raw) ? raw : [];
+  const actions = steps
+    .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object")
+    .map((item) => String(item.action ?? ""));
+  const hasInteraction = actions.some((action) =>
+    ["click", "fill", "press", "eval"].includes(action),
+  );
+  const hasAssertion =
+    actions.some((action) =>
+      ["expectText", "expectValue", "expectVisible", "expectCount", "expectStable"].includes(action),
+    ) ||
+    steps.some(
+      (item) =>
+        item &&
+        typeof item === "object" &&
+        String((item as Record<string, unknown>).action ?? "") === "eval" &&
+        typeof (item as Record<string, unknown>).expectText === "string",
+    );
+  if (hasInteraction && hasAssertion) return true;
+  // Older observations may not retain args; use their PASS/FAIL detail.
+  return (
+    /\b(click|fill|press|eval)\b/i.test(step.observation ?? "") &&
+    /\b(expectText|expectValue|expectVisible|expectCount|expectStable)\b/i.test(
+      step.observation ?? "",
+    )
+  );
 }
 
 export function isInspectionAnswer(summary: string): boolean {
@@ -1797,19 +2055,25 @@ export async function runProjectLoop(
       summaryReportsBlocker(result.summary) &&
       !summaryAllowsNoChanges(result.summary);
     const pendingWork = !inspectionTask && reportsRemainingWork(result.summary);
-    const projectHasHtml = analysis.files.some((file) => /\.html?$/i.test(file.path));
+    const projectHasHtml =
+      analysis.files.some((file) => /\.html?$/i.test(file.path)) ||
+      result.changedFiles.some((file) => /\.html?$/i.test(file));
     const uiFilesChanged = result.changedFiles.some((file) =>
       /\.(?:html?|css|scss|sass|less|jsx|tsx|vue|svelte|mjs|cjs|js)$/i.test(file),
     );
-    const hadRealUiCheck = result.steps.some(
-      (step) =>
-        step.ok &&
-        (step.action === "browser_check" ||
-          step.action === "game_check" ||
-          step.action === "run_test_scenario"),
-    );
-    const missingUiVerification =
+    const hadRealUiCheck = result.steps.some(isInteractiveUiCheck);
+    const needsUiVerification =
       !inspectionTask && projectHasHtml && uiFilesChanged && !hadRealUiCheck;
+    let uiSmokeSummary = "";
+    if (needsUiVerification) {
+      const smoke = await runUiEntrySmoke(analysis, result.changedFiles).catch(() => null);
+      if (smoke) {
+        uiSmokeSummary = smoke.ok
+          ? `UI smoke passed: ${smoke.summary}`
+          : `UI smoke failed: ${smoke.summary}`;
+      }
+    }
+    const missingUiVerification = needsUiVerification;
     const status =
       result.stoppedReason === "aborted" || result.stoppedReason === "budget"
         ? "blocked"
@@ -2215,7 +2479,7 @@ export async function runProjectLoop(
           commands: task.commands ?? [],
           notes: `Retry the same model: the provider worked, but the task was incomplete. Continue from the current files, complete the missing work and verify it. Do not restart from scratch.${
             missingUiVerification
-              ? " No real-page check ran after the UI change. Run browser_check or game_check on the actual entry page and assert visible behavior; for a canvas game, click at least one key and check the HUD/status."
+              ? ` No interactive real-page check ran after the UI change. Run browser_check or game_check on the actual entry page with a click/fill/press/eval and an assertion; for a canvas game, click a key and check the HUD/status.${uiSmokeSummary ? ` ${uiSmokeSummary}` : ""}`
               : ""
           }${failedToolNote ? ` ${failedToolNote}` : ""}${runLogNote}`,
         });
