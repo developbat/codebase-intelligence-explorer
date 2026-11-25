@@ -24665,3 +24665,56 @@ button.canvas-stat {
   color: #f5c26b;
   font-size: 8px;
 }
+
+
+/* Changed files under the final answer details. */
+.studio-workflow-changed {
+  margin-top: 10px;
+  border-top: 1px solid rgba(148, 163, 184, 0.12);
+  padding-top: 8px;
+}
+
+.studio-workflow-changed-head {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: #9fb3c8;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.studio-workflow-changed-head span {
+  margin-left: auto;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.12);
+  font-family: var(--mono);
+  font-size: 9px;
+}
+
+.studio-workflow-changed-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 6px;
+}
+
+.studio-workflow-changed-list button {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 3px 7px;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 5px;
+  background: rgba(148, 163, 184, 0.05);
+  color: #cfe3f5;
+  font-family: var(--mono);
+  font-size: 9px;
+  cursor: pointer;
+}
+
+.studio-workflow-changed-list button:hover {
+  border-color: rgba(34, 211, 238, 0.45);
+  color: #ffffff;
+}

@@ -497,12 +497,14 @@ function StudioTree({
 function CollapsibleAnswer({ value }: { value: string }) {
   const { t } = useI18n();
   const [open, setOpen] = useState(true);
-  const long = value.length > 420 || value.split("\n").filter((line) => line.trim()).length > 5;
-  if (!long) return <MarkdownText value={value} />;
+  // The final report should read like a report, not an internal checklist.
+  const display = value.replace(/^(\s*)[-*]\s+\[[ xX]\]\s+/gm, "$1- ");
+  const long = display.length > 420 || display.split("\n").filter((line) => line.trim()).length > 5;
+  if (!long) return <MarkdownText value={display} />;
   return (
     <>
       <div className={`studio-answer-body ${open ? "is-expanded" : "is-collapsed"}`}>
-        <MarkdownText value={value} />
+        <MarkdownText value={display} />
       </div>
       <button className="studio-answer-toggle" onClick={() => setOpen((current) => !current)}>
         {open ? t("Show less") : t("Show full result")}
@@ -772,6 +774,7 @@ export function CodeStudio({
     changeReport?: ChangeReport;
     readMap?: AiReadMapEntry[];
     extraction?: ExtractionTable;
+    changedFiles?: string[];
   };
   type StudioChatTab = { id: string; title: string; createdAt: string; updatedAt: string };
   const [chatMessages, setChatMessages] = useState<StudioChatMessage[]>([]);
@@ -1223,7 +1226,7 @@ export function CodeStudio({
           JSON.stringify(
             chatMessages
               .slice(-40)
-              .map(({ role, content, evidence, tokenUsage, logs, plan, planPath, mode, provider, model, taskQueue, intent }) => ({
+              .map(({ role, content, evidence, tokenUsage, logs, plan, planPath, mode, provider, model, taskQueue, intent, changedFiles }) => ({
                 role,
                 content,
                 evidence,
@@ -1236,6 +1239,7 @@ export function CodeStudio({
                 model,
                 taskQueue,
                 intent,
+                changedFiles,
               })),
           ),
         );
@@ -2673,7 +2677,7 @@ export function CodeStudio({
   function serializeChatMessages(messages: StudioChatMessage[]) {
     return messages
       .slice(-40)
-      .map(({ role, content, evidence, tokenUsage, logs, plan, planPath, mode, provider, model, taskQueue, intent, changeReport, readMap, extraction }) => ({
+      .map(({ role, content, evidence, tokenUsage, logs, plan, planPath, mode, provider, model, taskQueue, intent, changeReport, readMap, extraction, changedFiles }) => ({
         role,
         content,
         evidence,
@@ -2689,6 +2693,7 @@ export function CodeStudio({
         changeReport,
         readMap,
         extraction,
+        changedFiles,
       }));
   }
 
@@ -3053,6 +3058,7 @@ export function CodeStudio({
           changeReport: result.changeReport,
           readMap: result.readMap,
           extraction: result.extraction,
+          changedFiles: result.changedFiles,
         },
       ]);
       if (result.changedFiles.length > 0) {
@@ -4083,7 +4089,8 @@ export function CodeStudio({
                 ) : null}
                 {workflowMessage.role === "assistant" &&
                 ((workflowMessage.steps && workflowMessage.steps.length > 0) ||
-                  (workflowMessage.evidence && workflowMessage.evidence.length > 0)) ? (
+                  (workflowMessage.evidence && workflowMessage.evidence.length > 0) ||
+                  (workflowMessage.changedFiles && workflowMessage.changedFiles.length > 0)) ? (
                   <details className="studio-workflow-details" open={hasError ? true : undefined}>
                     <summary>
                       <span>{t("Details")}</span>
@@ -4214,6 +4221,26 @@ export function CodeStudio({
                             {item.startLine ? `:${item.startLine}` : ""}
                           </button>
                         ))}
+                      </div>
+                    ) : null}
+                    {workflowMessage.changedFiles && workflowMessage.changedFiles.length > 0 ? (
+                      <div className="studio-workflow-changed">
+                        <div className="studio-workflow-changed-head">
+                          <FileCode2 size={10} />
+                          {t("Changed files")}
+                          <span>{workflowMessage.changedFiles.length}</span>
+                        </div>
+                        <div className="studio-workflow-changed-list">
+                          {workflowMessage.changedFiles.slice(0, 12).map((filePath) => (
+                            <button
+                              key={filePath}
+                              onClick={() => void openFile(filePath)}
+                              title={filePath}
+                            >
+                              {filePath}
+                            </button>
+                          ))}
+                        </div>
                       </div>
                     ) : null}
                   </details>

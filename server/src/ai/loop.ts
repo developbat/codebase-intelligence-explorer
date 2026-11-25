@@ -737,7 +737,7 @@ export async function planProjectTasks(
 }
 
 const TASK_WRITE_VERBS =
-  /\b(add|create|implement|update|change|edit|write|refactor|fix|remove|delete|rename|move|append|replace|insert|build|generate|repair|wire|restore|ensure|enable|tune|adjust|enforce|expose|register|convert|support|extend|validate|improve|optimize|enhance)\b|oluştur|ekle|güncelle|değiştir|düzelt|sil|taşı|yaz|kaldır|onar|bağla|kaydet|düzenle|iyileştir|optimize et/i;
+  /\b(add|create|implement|update|change|edit|write|refactor|fix|remove|delete|rename|move|append|replace|insert|build|generate|repair|wire|restore|ensure|enable|disable|unlock|allow|prevent|make|define|adjust|route|set|use|render|tune|enforce|expose|register|convert|support|extend|validate|improve|optimize|enhance)\b|oluştur|ekle|güncelle|değiştir|düzelt|sil|taşı|yaz|kaldır|onar|bağla|kaydet|düzenle|iyileştir|optimize et/i;
 const TASK_INSPECTION_VERBS =
   /\b(inspect|read|review|verify|check|analy[sz]e|research|understand|plan|list|show|explain|find|enumerate|count)\b|incele|oku|gözden geçir|doğrula|kontrol et|araştır|listele|listeler|listeleme|liste|göster|açıkla|(?<![a-zçğıöşü])say(?![a-zçğıöşü])/i;
 
@@ -1152,6 +1152,7 @@ function taskInstruction(
   runPreviewUrl?: string,
   parallelNote?: string,
   originalRequest?: string,
+  language?: string,
 ): string {
   const brief = resolveWorkBrief(task.title);
   const extractionTask = brief?.mode === "extract";
@@ -1237,6 +1238,7 @@ function taskInstruction(
     (task.repairAttempts ?? 0) > 0
       ? `Narrow retry: read at most ${RECOVERY_POLICY.maxFilesForNarrowRetry} files (or none when the content is already in context), apply the smallest edit, then verify. Do not repeat earlier reads.`
       : "",
+    `Final answer: write one concise report in ${language && language !== "unknown" ? language : "the user's language"}. Start with the outcome, then what changed, verification evidence and changed files. Do not include planning notes, task checklists, English analysis or internal tool logs; those belong in Details. Do not use Markdown task-list checkboxes.`,
     "Stay scoped to this task. Do not do later tasks. Do not revert earlier work.",
     verification && !extractionTask ? `Verification command: ${verification}` : "",
     extractionTask
@@ -2140,6 +2142,7 @@ export async function runProjectLoop(
         runPreviewUrl ?? undefined,
         parallelNote,
         queue.goal,
+        options.language,
       ),
       {
         activeFile: options.activeFile,
@@ -2283,9 +2286,10 @@ export async function runProjectLoop(
         const scenarioMatch = await findTaskScenario(analysis.rootPath, nextTask).catch(
           () => null,
         );
-        const scenarioEligible =
-          scenarioMatch &&
-          (isScenarioVerificationTask(nextTask) || scenarioMatch.score >= 6);
+        // Only verification-only tasks may be closed by a saved scenario.
+        // A write task can share generic words (score/game/feedback) with an
+        // existing scenario without covering its new requirements.
+        const scenarioEligible = scenarioMatch && isScenarioVerificationTask(nextTask);
         if (scenarioEligible) {
           const match = scenarioMatch;
           if (match) {
