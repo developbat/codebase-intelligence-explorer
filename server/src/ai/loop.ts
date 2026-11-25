@@ -2068,6 +2068,7 @@ export async function runProjectLoop(
     const microEdit = isMicroEditTask(task);
     const tightReads =
       !microEdit &&
+      budgetEffort === "simple" &&
       task.detail.length < 3_500 &&
       taskTargetFiles(analysis, task).length <= 1;
     const defaultBudget = taskBudgetForEffort(budgetEffort);
@@ -2290,7 +2291,7 @@ export async function runProjectLoop(
         .map((item) => item.id),
     );
 
-  function nextSchedulableTask(): ProjectTask | undefined {
+  function nextSchedulableTask(allowNew = true): ProjectTask | undefined {
     const done = doneForScheduling();
     const running = [...activeRuns.values()];
     const activeWrites = running.some(
@@ -2312,6 +2313,9 @@ export async function runProjectLoop(
     );
     return queue?.tasks.find((task) => {
       if (task.status !== "pending" || activeRuns.has(task.id)) return false;
+      // Repairs of already-started tasks may continue after maxTasks; only new
+      // tasks are capped.
+      if (!allowNew && !seenTasks.has(task.id)) return false;
       if (!task.dependsOn.every((dependency) => done.has(dependency))) return false;
       if (activeExclusive) return false;
       const wouldWrite =
@@ -2330,8 +2334,11 @@ export async function runProjectLoop(
     });
   }
 
+  const pendingRetry = () =>
+    Boolean(queue?.tasks.some((task) => task.status === "pending" && seenTasks.has(task.id)));
   while (
     activeRuns.size > 0 ||
+    pendingRetry() ||
     (executedCount < maxTasks && Date.now() - startedAt < maxMs)
   ) {
     if (signal?.aborted) {
@@ -2343,13 +2350,11 @@ export async function runProjectLoop(
     // Start up to maxParallel independent tasks. Write tasks with known file
     // targets are serialized when their targets overlap; read-only tasks and
     // disjoint files can proceed together.
-    if (executedCount < maxTasks && Date.now() - startedAt < maxMs) {
-      while (
-        activeRuns.size < maxParallel &&
-        executedCount < maxTasks &&
-        Date.now() - startedAt < maxMs
-      ) {
-        let nextTask = nextSchedulableTask();
+    if (Date.now() - startedAt < maxMs) {
+      while (activeRuns.size < maxParallel && Date.now() - startedAt < maxMs) {
+        const allowNew = executedCount < maxTasks;
+        if (!allowNew && !pendingRetry()) break;
+        let nextTask = nextSchedulableTask(allowNew);
         if (!nextTask) break;
         if (!seenTasks.has(nextTask.id)) {
           seenTasks.add(nextTask.id);
