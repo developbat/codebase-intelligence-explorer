@@ -18,6 +18,7 @@
     "eval:change": "tsx server/src/evalChange.ts",
     "eval:extract": "tsx server/src/evalExtraction.ts",
     "eval:tools": "tsx server/src/evalToolUse.ts",
+    "eval:templates": "tsx server/src/templateE2E.ts",
     "eval:verify": "tsx server/src/evalVerify.ts"
   },
   "dependencies": {
