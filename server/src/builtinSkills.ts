@@ -185,7 +185,28 @@ Then assert the same selector a real user would see. A check that only proves th
 - Read the newest \`.cie/agent/runs/*.json\` file to see the exact failed action and observation before retrying.
 - Never finish with "blocked" while a correctable tool error is open.
 
-## 6. Save the scenario
+## 6. Visual quality (icons, HUD, overlays)
+
+Semantic checks are not enough. A visible element can still be unreadable.
+
+- **SVG icons**: set explicit \`width\`/\`height\` (12–24px) and an explicit \`fill\`
+  with contrast ≥ 3:1 against the HUD background. Default \`fill\` is black and
+  disappears on dark UIs.
+- **Icon + value**: put both in a flex row (\`display:flex; align-items:center;
+  gap:6px\`). An unconstrained inline SVG defaults to 300×150 and pushes the
+  value to the next line.
+- **HUD distribution**: use \`justify-content: space-between\` (or grid). Remove
+  empty flex spacers such as an empty \`#round-chips\` with \`margin-left:auto\`;
+  they cluster the metrics on the left.
+- **Overlays**: position them relative to a wrapper around the canvas, not the
+  whole page; use percentage offsets and \`pointer-events:none\`.
+- **Screenshot**: take one before finishing and reject invisible icons,
+  left-clustered items, overlapping labels and horizontal overflow.
+- **Scenario assertions**: add an \`eval\` step that checks computed \`fill\`
+  contrast, icon size, icon/value vertical centers, item spread and the target
+  rectangle. Assertions on DOM presence alone let a broken UI pass.
+
+## 7. Save the scenario
 
 Write the verified steps to \`.cie/agent/scenarios/<name>.json\` and run it with \`run_test_scenario\`. Scenario files let the next run prove the fix instead of re-diagnosing.
 

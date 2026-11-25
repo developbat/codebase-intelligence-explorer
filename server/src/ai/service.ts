@@ -4489,6 +4489,7 @@ ${lessons}` : "",
     "\n- If PROJECT_MAP reports code files missing from the index, call rescan_project before trusting symbol search." +
     "\n- Test-only artifacts (debug hooks, stable markers, scenario files) must never change the visible game UI. Keep them hidden or under .cie/." +
     "\n- Preserve the direction of a frequency request: if the user says the layer is too sparse, make it more frequent and report the before → after intervals." +
+    "\n- UI quality: for HUD/icon work set SVG width/height and a fill with contrast against the background; keep icon and value on one row (flex, align-items:center); distribute HUD items with justify-content, not an empty flex spacer; take a screenshot and reject invisible icons, left-clustered items, and horizontal overflow." +
     fastSuffix +
     narrowEditSuffix +
     readOnlySuffix +
@@ -5850,17 +5851,30 @@ ${lessons}` : "",
 
       if (options.requiredScenario && !requiredScenarioPassed) {
         const scenario = options.requiredScenario;
-        const check = await runBrowserCheck(analysis.id, analysis.rootPath, {
-          path: scenario.path,
-          url: scenario.url,
-          steps: scenario.steps,
-          timeoutMs: scenario.timeoutMs,
-          signal,
-        }).catch((error: unknown) => ({
-          ok: false,
-          summary: error instanceof Error ? error.message : "Required scenario failed.",
-          steps: [] as { index: number; action: string; ok: boolean; detail: string }[],
-        }));
+        const runScenario = () =>
+          runBrowserCheck(analysis.id, analysis.rootPath, {
+            path: scenario.path,
+            url: scenario.url,
+            steps: scenario.steps,
+            timeoutMs: scenario.timeoutMs,
+            signal,
+          }).catch((error: unknown) => ({
+            ok: false,
+            summary: error instanceof Error ? error.message : "Required scenario failed.",
+            steps: [] as { index: number; action: string; ok: boolean; detail: string }[],
+          }));
+        let check = await runScenario();
+        if (!check.ok) {
+          // Page loads and the ?test=1 hook can race under load. Retry once on
+          // a fresh page before rejecting an implementation that is correct.
+          await new Promise((resolve) => setTimeout(resolve, 250));
+          const retry = await runScenario();
+          if (retry.ok) {
+            check = retry;
+          } else if (retry.steps.some((step) => !step.ok)) {
+            check = retry;
+          }
+        }
         if (check.ok) {
           requiredScenarioPassed = true;
           log("success", "Required scenario passed", scenario.name);

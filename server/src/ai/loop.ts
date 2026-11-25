@@ -2667,7 +2667,11 @@ export async function runProjectLoop(
             missingUiVerification
           ? "failed"
           : "done";
-    if (scenarioRescue?.ok || microCompleted) status = "done";
+    const requiredScenarioSatisfied =
+      !requiredScenario ||
+      Boolean(scenarioRescue?.ok) ||
+      result.logs?.some((entry) => entry.label === "Required scenario passed");
+    if (scenarioRescue?.ok || (microCompleted && requiredScenarioSatisfied)) status = "done";
     const unavailableModel = /error 410\b|end of life|no longer available|model_not_found|model .* not found|does not exist/i.test(
       result.summary,
     );
@@ -2842,7 +2846,7 @@ export async function runProjectLoop(
             output: scenarioRescue.summary,
           }
         : undefined;
-    const microVerification = microCompleted
+    const microVerification = microCompleted && requiredScenarioSatisfied
       ? uiSmokeOk
         ? {
             command: "ui-smoke",
