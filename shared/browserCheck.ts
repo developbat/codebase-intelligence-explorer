@@ -9,6 +9,7 @@ export type BrowserCheckAction =
   | "expectStable"
   | "waitForText"
   | "waitForSelector"
+  | "pressKeys"
   | "reload"
   | "eval"
   | "storageGet";
@@ -27,6 +28,8 @@ export interface BrowserCheckStep {
   durationMs?: number;
   /** expectStable: allowed number of value changes during the sample. Default 0. */
   maxChanges?: number;
+  /** pressKeys: keys to press in order, e.g. ["3","0","*","1","Enter"]. */
+  keys?: string[];
   /** Accepted aliases for eval code; normalized before execution. */
   expression?: string;
   code?: string;
@@ -98,6 +101,7 @@ const BROWSER_ACTIONS: BrowserCheckAction[] = [
   "expectStable",
   "waitForText",
   "waitForSelector",
+  "pressKeys",
   "reload",
   "eval",
   "storageGet",
@@ -114,6 +118,7 @@ const CANONICAL_ACTION: Record<string, BrowserCheckAction> = {
   expectstable: "expectStable",
   waitfortext: "waitForText",
   waitforselector: "waitForSelector",
+  presskeys: "pressKeys",
   reload: "reload",
   eval: "eval",
   storageget: "storageGet",
@@ -247,6 +252,24 @@ export function normalizeBrowserSteps(raw: unknown): BrowserCheckStep[] {
       step.value = code;
       const expected = stepText(input.expectText ?? input.contains ?? input.expected);
       if (expected !== undefined) step.expectText = expected;
+    } else if (action === "pressKeys") {
+      const rawKeys = Array.isArray(input.keys)
+        ? input.keys
+        : typeof input.value === "string"
+          ? input.value.split(/[\s,]+/)
+          : [];
+      const keys = rawKeys
+        .map((key) => String(key).trim())
+        .filter(Boolean)
+        .map((key) => (key === "\n" ? "Enter" : key))
+        .slice(0, 40);
+      if (keys.length === 0) {
+        errors.push(
+          `${label} (pressKeys): "keys" must be a non-empty array, e.g. ["3","0","*","1","Enter"].`,
+        );
+        return;
+      }
+      step.keys = keys;
     } else if (action === "storageGet") {
       const key = stepText(input.key ?? input.selector);
       if (!key) {

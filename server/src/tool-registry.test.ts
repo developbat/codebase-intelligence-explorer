@@ -83,3 +83,16 @@ test("every tool action is unique and grouped", () => {
     assert.ok(tool.example.includes('"action"'));
   }
 });
+
+
+test("replace_in_file accepts an empty replacement and common aliases", () => {
+  assert.equal(validateToolArgs("replace_in_file", { path: "a.js", find: "x", replace: "" }), null);
+  assert.equal(
+    validateToolArgs("replace_in_file", { file: "a.js", oldText: "x", newText: "y" }),
+    null,
+  );
+  assert.match(
+    validateToolArgs("replace_in_file", { path: "a.js", find: "x" }) ?? "",
+    /requires one of: replace/,
+  );
+});

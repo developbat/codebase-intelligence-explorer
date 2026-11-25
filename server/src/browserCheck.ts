@@ -315,6 +315,14 @@ async function runStep(page: Page, step: BrowserCheckStep): Promise<string> {
     await page.locator(selector).first().waitFor({ state: "visible", timeout: stepTimeout(step) });
     return `${selector} appeared`;
   }
+  if (step.action === "pressKeys") {
+    const keys = (step.keys ?? []).map((key) => String(key)).filter(Boolean).slice(0, 40);
+    if (keys.length === 0) throw new Error("keys is required for pressKeys.");
+    for (const key of keys) {
+      await page.keyboard.press(key);
+    }
+    return `Pressed keys: ${keys.join(" ")}`;
+  }
   if (step.action === "reload") {
     await page.reload({ waitUntil: "load", timeout: stepTimeout(step) });
     return "Reloaded page";
@@ -323,8 +331,22 @@ async function runStep(page: Page, step: BrowserCheckStep): Promise<string> {
     const code = (step.value ?? step.expression ?? step.code ?? step.script ?? step.text ?? "").trim();
     if (!code) throw new Error("value is required for eval.");
     if (code.length > 8_000) throw new Error("eval code is limited to 8000 characters.");
+    try {
+      // Compile only; catches missing braces/parens before the browser runs it.
+      new Function(code);
+    } catch (error) {
+      throw new Error(
+        `Eval syntax error: ${error instanceof Error ? error.message : String(error)}. Prefer {action:"pressKeys",keys:[...]} with expectText for keyboard-driven games.`,
+      );
+    }
     const result = await page.evaluate(code).catch((error: unknown) => {
-      throw new Error(`Page script failed: ${error instanceof Error ? error.message : String(error)}`);
+      const message = error instanceof Error ? error.message : String(error);
+      const hint = /(?:startRound|round|state|submitRound) is not defined/i.test(message)
+        ? " Game internals are private closure state; drive the public page with pressKeys and assert the HUD/score instead."
+        : /forEach|is not a function|undefined/i.test(message)
+          ? " Check the data shape in the script; for simple input/score checks use pressKeys plus expectText/expectValue."
+          : "";
+      throw new Error(`Page script failed: ${message}.${hint}`);
     });
     const text =
       typeof result === "string" ? result : result === undefined ? "" : JSON.stringify(result);

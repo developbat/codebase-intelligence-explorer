@@ -68,3 +68,20 @@ test("browser steps report every invalid step with the accepted shape", () => {
     },
   );
 });
+
+
+test("pressKeys normalizes a key list and rejects an empty call", () => {
+  const [step] = normalizeBrowserSteps([
+    { action: "pressKeys", keys: ["3", "0", "*", "1", "Enter"] },
+  ]);
+  assert.equal(step.action, "pressKeys");
+  assert.deepEqual(step.keys, ["3", "0", "*", "1", "Enter"]);
+  const [fromValue] = normalizeBrowserSteps([
+    { action: "pressKeys", value: "3,0,*,1,Enter" },
+  ]);
+  assert.deepEqual(fromValue.keys, ["3", "0", "*", "1", "Enter"]);
+  assert.throws(
+    () => normalizeBrowserSteps([{ action: "pressKeys" }]),
+    /keys.*non-empty/i,
+  );
+});

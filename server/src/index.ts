@@ -2277,6 +2277,14 @@ app.post("/api/projects/:id/ai/loop/stream", async (req, res) => {
 
   const controller = new AbortController();
   registerAgentRun(req.params.id, controller);
+  // Closing the tab or aborting the stream must stop the background task loop,
+  // not leave it running and finishing a task minutes later.
+  res.on("close", () => {
+    if (!res.writableEnded) controller.abort();
+  });
+  req.on("aborted", () => {
+    if (!res.writableEnded) controller.abort();
+  });
   res.on("error", () => undefined);
   const write = (event: unknown) => {
     if (res.writable && !res.destroyed && !res.writableEnded) {

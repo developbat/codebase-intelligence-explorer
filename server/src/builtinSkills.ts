@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 
-const BUILTIN_VERSION = "3";
+const BUILTIN_VERSION = "4";
 
 interface BuiltinSkill {
   slug: string;
@@ -215,6 +215,84 @@ Behavior must stay identical unless the user asked for a behavior change.
 ## Stop conditions
 
 If the refactor needs a schema change, a dependency upgrade or touches more than five files, stop and report the plan instead of making a risky partial change.`,
+  },
+  {
+    slug: "requirements-first",
+    name: "Requirements First",
+    description:
+      "Turn a user request into an exact acceptance table, locate the owning code, and prove the result before editing. Use when a task is vague, repeated, or burns tokens reading.",
+    body: `# Requirements First
+
+Do not explore the whole project. Convert the request into a small proof plan.
+
+## 1. Restate the requirement
+
+Write one line per behavior the user asked for. For each line define the exact input and expected output, for example: target 30, multiply, 30x1 -> score +1; 6x5 -> score +5.
+
+## 2. Locate the owner
+
+- Use project_search/find_in_file/read_symbol to find the one function that owns the behavior.
+- Read only that function plus the smallest caller/range needed; prefer 2 files and 4 ranges maximum.
+- Do not read a whole large file when a symbol range is enough.
+- Do not assume a behavior is missing because a similar input guard exists.
+
+## 3. Prove or edit
+
+- Run the acceptance with a real check (browser_check, run_command, or the project test).
+- If it already passes, finish with a before/after evidence table; do not invent a duplicate implementation.
+- If it fails, make the smallest edit in the owning function and rerun the same check.
+
+## 4. Stop the loop
+
+If two verification attempts fail, do not read more files. Write the exact failing input, expected value and observed value; then use the canvas-game-verification skill or a focused repair call. Report the blocker if it is genuinely external.
+
+## Output
+
+Return: requirement table, files/lines inspected, check command or browser steps, before/after values, and the minimal change (or "no change needed" with evidence).`,
+  },
+  {
+    slug: "canvas-game-verification",
+    name: "Canvas Game Verification",
+    description:
+      "Verify canvas game scoring or HUD behavior by pressing public keys and asserting score deltas. Use for point, timer, target, round and game-over tasks.",
+    body: `# Canvas Game Verification
+
+Prove the behavior through the public page. Never call game closure functions such as startRound, round, or state from an eval script; they are usually private.
+
+## 1. Read the public state
+
+Use the visible status/HUD to get the current target and operator. For this calculator the status text is like:
+
+Hedef 30 · sadece × kullan · 10 sn
+
+Do not guess the operator.
+
+## 2. Press real keys
+
+Use the first-class pressKeys step instead of a custom eval when possible:
+
+{"action":"browser_check","args":{"path":"index.html","steps":[
+  {"action":"pressKeys","keys":["3","0","*","1","Enter"]},
+  {"action":"expectText","selector":"#score","text":"1"}
+]}}
+
+Key mapping for this game: * = ×, - = −, + = +, Enter = =. Digits are single characters.
+
+## 3. Make the round deterministic
+
+If the target/operator is random, either wait for the wanted round or override Math.random before the next round starts. A short eval may prepare the state, but the key presses and score assertion must still be public:
+
+{"action":"eval","value":"(async()=>{ /* wait for next round; override Math.random; return status */ })()"}
+
+Then run pressKeys and expectText/expectValue. Read #score before and after and assert the delta, not the total, when previous score may be non-zero.
+
+## 4. Report evidence
+
+Return a compact table: target, operator, expression, before, after, expected delta, observed delta. If every row passes, say "no change needed" with the table. If a row fails, report the exact observed value and fix only the owning scoring code.
+
+## 5. Tool failures
+
+If pressKeys or eval fails, correct only that call. Do not keep re-reading the file. If the failure is a script error, use one small repair attempt; if it still fails, report the exact error.`,
   },
 ];
 

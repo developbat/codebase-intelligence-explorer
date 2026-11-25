@@ -1175,6 +1175,12 @@ function taskInstruction(
     extractionTask ? "" : "Do not create .cie/agent/checks or .cie/agent/scenarios files for a one-off verification; use the existing tests and browser_check.",
     extractionTask ? "" : "Before the first edit, search for the exact feature name, symbol or label. If it already exists, verify it and finish with evidence instead of adding a duplicate.",
     extractionTask ? "" : "For HTML/canvas changes, run browser_check or game_check on the real entry page before finish. Canvas games need a real pointer/click or eval step and an asserted HUD/score/status change, not just canvas visibility. If you cannot verify, report the exact blocker; do not call it complete.",
+    extractionTask
+      ? ""
+      : "For scoring/round logic use the canvas-game-verification recipe: find the owning function, then drive the real page with browser_check pressKeys and assert #score deltas (before/after). Never call startRound, round or state from eval. If the behavior already exists, finish with a before/after evidence table.",
+    extractionTask
+      ? ""
+      : "If a tool call fails, fix only that call's arguments and retry. For a script syntax/runtime error make one focused repair attempt; do not restart the task or re-read the whole file.",
     extractionTask ? "" : "Never kill, pkill, killall or nohup the dev server; the app manages the server and the preview.",
     extractionTask ? "" : "Large files: use a small write_file skeleton plus append_text sections (max ~120 lines each); never send a whole large file in one call.",
     extractionTask ? "" : "Read the smallest range you need. Do not read a whole large file before planning; read the relevant functions, then edit. If you have read the same file twice without editing, stop reading and make the smallest change.",

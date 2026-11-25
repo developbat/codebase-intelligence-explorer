@@ -293,6 +293,7 @@ const TOOL_SPECS: AgentToolSpec[] = [
                   "expectStable",
                   "waitForText",
                   "waitForSelector",
+                  "pressKeys",
                   "reload",
                   "eval",
                   "storageGet",
@@ -313,6 +314,12 @@ const TOOL_SPECS: AgentToolSpec[] = [
               },
               key: { type: "string", description: "localStorage key for storageGet." },
               count: { type: "number", description: "Expected element count for expectCount." },
+              keys: {
+                type: "array",
+                items: { type: "string" },
+                description:
+                  "pressKeys: keys in order, e.g. [\"3\",\"0\",\"*\",\"1\",\"Enter\"]. Uses public keyboard events on the real page.",
+              },
               durationMs: { type: "number", description: "expectStable sample window." },
               maxChanges: { type: "number", description: "expectStable allowed value changes." },
               timeoutMs: { type: "number" },
@@ -504,7 +511,14 @@ const TOOL_SPECS: AgentToolSpec[] = [
     description: "Replace one exact existing snippet.",
     whenToUse: "Use for a small precise edit; read the exact range first.",
     permission: "write",
-    args: { required: [["path"], ["find"], ["replace"]], types: { path: "string", find: "string", replace: "string" } },
+    args: {
+      required: [
+        ["path", "file", "filePath", "target"],
+        ["find", "search", "old", "oldText", "old_string", "oldString", "from"],
+        ["replace", "replacement", "new", "newText", "new_string", "newString", "to", "with"],
+      ],
+      types: { path: "string", find: "string", replace: "string" },
+    },
   },
   {
     action: "replace_many",
@@ -890,10 +904,26 @@ export function validateToolArgs(
   }
   const schema = spec?.args;
   if (!schema) return null;
+  // Deleting a snippet is a valid replace with an empty replacement.
+  const allowEmpty =
+    action === "replace_in_file"
+      ? new Set([
+          "replace",
+          "replacement",
+          "new",
+          "newText",
+          "new_string",
+          "newString",
+          "to",
+          "with",
+        ])
+      : new Set<string>();
   for (const aliases of schema.required ?? []) {
     const present = aliases.some((key) => {
       const value = args[key];
-      return value !== undefined && value !== null && value !== "";
+      if (value === undefined || value === null) return false;
+      if (value === "" && !allowEmpty.has(key)) return false;
+      return true;
     });
     if (!present) {
       return `${action} requires one of: ${aliases.join(", ")}.`;

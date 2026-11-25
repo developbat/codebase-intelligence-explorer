@@ -2161,7 +2161,7 @@ const TOOL_ARG_TEMPLATES: Record<string, string> = {
   delete_file: '{"action":"delete_file","args":{"path":"relative/file.ext"}}',
   rename_path: '{"action":"rename_path","args":{"path":"old/path","to":"new/path"}}',
   browser_check:
-    '{"action":"browser_check","args":{"path":"index.html","steps":[{"action":"click","selector":"#play"},{"action":"eval","value":"document.querySelector(\"#score\").textContent","expectText":"0"}]}}',
+    '{"action":"browser_check","args":{"path":"index.html","steps":[{"action":"click","selector":"#play"},{"action":"pressKeys","keys":["3","0","*","1","Enter"]},{"action":"expectText","selector":"#score","text":"1"}]}}',
   game_check:
     '{"action":"game_check","args":{"path":"index.html","steps":[{"action":"expectVisible","selector":"canvas"},{"action":"eval","value":"window.score ?? 0"}]}}',
 };
@@ -2422,6 +2422,48 @@ async function auditNoChangeAcceptance(
       ? parsed.missing.filter((item): item is string => typeof item === "string").slice(0, 8)
       : [];
     return { ok: parsed.ok, missing };
+  } catch {
+    return null;
+  }
+}
+
+async function suggestToolRepair(
+  config: Awaited<ReturnType<typeof resolveProvider>>,
+  action: string,
+  args: Record<string, unknown>,
+  error: string,
+): Promise<string | null> {
+  const messages: ChatMessage[] = [
+    {
+      role: "system",
+      content:
+        "You repair one failed coding-agent tool call. Return only a JSON object with action and args. Do not explain, do not add markdown.",
+    },
+    {
+      role: "user",
+      content: [
+        `Failed action: ${action}`,
+        `Failed args: ${JSON.stringify(args).slice(0, 2_000)}`,
+        `Error: ${error.slice(0, 1_200)}`,
+        "Return the corrected call. Use the canonical keys: path, find, replace, content, query, selector, value, keys.",
+      ].join("\n"),
+    },
+  ];
+  try {
+    const completion = await chat(config, messages, {
+      maxTokens: 500,
+      temperature: 0,
+      timeoutMs: 30_000,
+    });
+    const match = completion.match(/\{[\s\S]*\}/);
+    if (!match) return null;
+    const parsed = JSON.parse(match[0]) as { action?: unknown; args?: unknown };
+    if (typeof parsed.action !== "string" || !parsed.action.trim()) return null;
+    const repairedArgs =
+      parsed.args && typeof parsed.args === "object" && !Array.isArray(parsed.args)
+        ? parsed.args
+        : {};
+    return JSON.stringify({ action: parsed.action.trim(), args: repairedArgs });
   } catch {
     return null;
   }
@@ -4661,6 +4703,7 @@ ${lessons}` : "",
     return latest;
   };
   let toolFailureNudges = 0;
+  let toolRepairs = 0;
   let acceptanceAudits = 0;
   let transientRetries = 0;
   let budgetWarned = false;
@@ -7432,6 +7475,19 @@ ${lessons}` : "",
       observation = toolError instanceof Error ? toolError.message : "The tool call failed.";
       if (/required|must be a string|limit reached|too large|outside the project|denied/i.test(observation)) {
         observation += `\n\nFix the arguments and retry the same tool now. Do not finish while this call is failing.${toolArgHint(action)}`;
+      }
+      if (
+        toolRepairs < 1 &&
+        /required|does not match|syntax error|unknown .*action|value is required|selector is required|read budget/i.test(
+          observation,
+        )
+      ) {
+        toolRepairs += 1;
+        const suggestion = await suggestToolRepair(config, action, args, observation);
+        if (suggestion) {
+          observation += `\n\nCorrected call suggestion (use it, or fix the argument yourself):\n${suggestion}`;
+          log("warn", "Tool call repair suggested", `${action} · ${suggestion.slice(0, 140)}`);
+        }
       }
       unresolvedToolFailures.set(toolFailureKey(action, args), { action, observation, index });
       ok = false;
