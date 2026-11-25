@@ -38,6 +38,8 @@ export interface ProjectTask {
     outputTokens: number;
     totalTokens: number;
   };
+  /** Tokens spent across every attempt, including auto-repairs. */
+  lifetimeTokens?: number;
   costUsd?: number;
   verification?: {
     command?: string;

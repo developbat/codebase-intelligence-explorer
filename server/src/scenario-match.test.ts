@@ -98,4 +98,24 @@ test("recognizes verification-only tasks but not behavior edits", () => {
     ),
     false,
   );
+  assert.equal(
+    isScenarioVerificationTask(
+      task({
+        title: "Implement division from level 3",
+        detail: "Implement OPS and makeTarget.",
+        acceptance: "Division works.",
+      }),
+    ),
+    false,
+  );
+  assert.equal(
+    isScenarioVerificationTask(
+      task({
+        title: "Make feedback re-trigger reliably and verify both cases",
+        detail: "Verify after the change.",
+        acceptance: "Both cases pass.",
+      }),
+    ),
+    false,
+  );
 });

@@ -4242,7 +4242,10 @@ export async function runAgentTask(
   const contextMode = options.intent?.context ?? "project";
   const historyMode = options.intent?.history ?? "recent";
   const workBriefSource = actionPlanSource;
-  const workBrief = contextMode !== "none" ? resolveWorkBrief(workBriefSource) : null;
+  const workBrief =
+    contextMode !== "none" && options.forceWrite !== true
+      ? resolveWorkBrief(workBriefSource)
+      : null;
   const extractionBrief = workBrief?.mode === "extract";
   const compoundChange =
     workBrief?.mode === "change" &&

@@ -2665,6 +2665,10 @@ export async function runProjectLoop(
         ? "Stopped at the step limit; the answer above is the best evidence collected."
         : undefined;
     const toolIssues = summarizeToolIssues(result.steps);
+    const lifetimeTokens =
+      (task.lifetimeTokens ?? 0) +
+      (result.tokenUsage?.totalTokens ?? 0) +
+      (reviewUsage?.totalTokens ?? 0);
     queue = markTask(queue, task.id, {
       status,
       completedAt: nowIso(),
@@ -2679,6 +2683,7 @@ export async function runProjectLoop(
         addUsage(task.tokenUsage ?? emptyUsage(), result.tokenUsage),
         reviewUsage,
       ),
+      lifetimeTokens,
       costUsd:
         reviewCost === undefined ? totalCost : Number(((totalCost ?? 0) + reviewCost).toFixed(6)),
       verification: taskVerification ?? (verification ? { command: verification } : undefined),
@@ -2752,7 +2757,7 @@ export async function runProjectLoop(
       if (
         repairAttempts < RECOVERY_POLICY.maxRepairsPerTask &&
         autoRepairs < RECOVERY_POLICY.maxRepairsPerRun &&
-        taskSpentTokens < hardTaskTokens
+        lifetimeTokens < hardTaskTokens
       ) {
         autoRepairs += 1;
         const repaired =
@@ -2842,8 +2847,8 @@ export async function runProjectLoop(
         status: "blocked",
         completedAt: nowIso(),
         notes:
-          taskSpentTokens >= hardTaskTokens
-            ? `Blocked to control cost: ${taskSpentTokens.toLocaleString()} tokens spent across attempts (limit ${hardTaskTokens.toLocaleString()}). The last attempt ${reason}. Split the goal into smaller single-behavior tasks or retry with a narrower scope and the exact verification recipe.`
+          lifetimeTokens >= hardTaskTokens
+            ? `Blocked to control cost: ${lifetimeTokens.toLocaleString()} tokens spent across attempts (limit ${hardTaskTokens.toLocaleString()}). The last attempt ${reason}. Split the goal into smaller single-behavior tasks or retry with a narrower scope and the exact verification recipe.`
             : `Blocked: the previous attempt ${reason} after ${taskSpentTokens.toLocaleString()} tokens. Automatic recovery was tried ${repairAttempts} time(s) and stopped to prevent an endless loop. Split this goal into smaller single-behavior tasks, or retry manually with a narrower scope.`,
       });
       await appendTaskContext(

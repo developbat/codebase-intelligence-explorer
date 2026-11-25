@@ -145,23 +145,15 @@ export async function findTaskScenario(
 
 /** A task that only needs to prove an existing behavior, not change it. */
 export function isScenarioVerificationTask(task: ProjectTask): boolean {
-  const text = `${task.title}\n${task.detail}\n${task.acceptance ?? ""}`;
+  const title = task.title.trim();
   const verifies =
-    /(?:verify|verification|prove|confirm|check|test|scenario|doğrula|kontrol|kanıtla|senaryo)/i.test(
-      text,
+    /^(?:verify|prove|confirm|check|validate|test|run\b[^\n]{0,80}\bscenario|scenario|doğrula|kontrol|kanıtla|senaryo)/i.test(
+      title,
     );
   if (!verifies) return false;
-  const conditional =
-    /(?:if (?:it is )?missing|already exists|only if needed|gerekirse|zaten|mevcut|no file changes|without editing|do not modify|do not add)/i.test(
-      text,
-    );
-  const withoutNegatedWrites = text.replace(
-    /\b(?:do not|don't|never|without|no)\s+(?:\w+\s+){0,3}(?:edit|fix|update|change|implement|create|add|remove|delete|replace|write|refactor|ensure|make|modify)\b/gi,
-    "",
-  );
   const writes =
-    /\b(?:edit|fix|update|change|implement|create|add|remove|delete|replace|write|refactor|ensure|make)\b|ekle|düzelt|güncelle|değiştir|kaldır|sil|yaz/i.test(
-      withoutNegatedWrites,
+    /\b(?:edit|fix|update|change|implement|create|add|remove|delete|replace|write|refactor|ensure|make|unlock|define|route|set)\b|ekle|düzelt|güncelle|değiştir|kaldır|sil|yaz/i.test(
+      title,
     );
-  return !writes || conditional;
+  return !writes;
 }
