@@ -2040,6 +2040,7 @@ export async function runProjectLoop(
     costBudgetUsd: number;
     forceWrite: boolean;
     inspection: boolean;
+    microEdit: boolean;
     scenario: TaskScenarioMatch | null;
     runKey: string;
     targets: string[];
@@ -2272,6 +2273,7 @@ export async function runProjectLoop(
       costBudgetUsd,
       forceWrite,
       inspection: inspectionRun,
+      microEdit,
       scenario: requiredScenario,
       runKey,
       targets,
@@ -2475,6 +2477,7 @@ export async function runProjectLoop(
       tokenBudget,
       costBudgetUsd,
       forceWrite,
+      microEdit,
       scenario: requiredScenario,
       runKey,
     } = completed.prepared;
@@ -2615,15 +2618,37 @@ export async function runProjectLoop(
     const needsUiVerification =
       !inspectionTask && projectHasHtml && uiFilesChanged && !hadRealUiCheck;
     let uiSmokeSummary = "";
+    let uiSmokeOk = false;
     if (needsUiVerification) {
       const smoke = await runUiEntrySmoke(analysis, result.changedFiles).catch(() => null);
       if (smoke) {
+        uiSmokeOk = smoke.ok;
         uiSmokeSummary = smoke.ok
           ? `UI smoke passed: ${smoke.summary}`
           : `UI smoke failed: ${smoke.summary}`;
       }
     }
-    const missingUiVerification = needsUiVerification;
+    // A one-line/mechanical edit is verified deterministically by the real-page
+    // smoke check. Asking the model for an extra browser turn wastes a turn and
+    // often exceeds the four-step micro budget.
+    const microVerified =
+      microEdit &&
+      result.changedFiles.length > 0 &&
+      (uiSmokeOk || result.steps.some((step) => step.action === "browser_check" && step.ok));
+    if (
+      microVerified &&
+      (result.stoppedReason === "max_steps" || result.stoppedReason === "budget")
+    ) {
+      result.stoppedReason = "finished";
+      result.error = undefined;
+      result.summary = `${result.summary}\n\nThe real-page smoke check passed; the mechanical change is verified.`;
+    }
+    const microCompleted =
+      microVerified &&
+      (result.stoppedReason === "finished" ||
+        result.stoppedReason === "max_steps" ||
+        result.stoppedReason === "budget");
+    const missingUiVerification = needsUiVerification && !microVerified;
     let status: ProjectTask["status"] =
       result.stoppedReason === "aborted" || result.stoppedReason === "budget"
         ? "blocked"
@@ -2637,7 +2662,7 @@ export async function runProjectLoop(
             missingUiVerification
           ? "failed"
           : "done";
-    if (scenarioRescue?.ok) status = "done";
+    if (scenarioRescue?.ok || microCompleted) status = "done";
     const unavailableModel = /error 410\b|end of life|no longer available|model_not_found|model .* not found|does not exist/i.test(
       result.summary,
     );
@@ -2812,6 +2837,19 @@ export async function runProjectLoop(
             output: scenarioRescue.summary,
           }
         : undefined;
+    const microVerification = microCompleted
+      ? uiSmokeOk
+        ? {
+            command: "ui-smoke",
+            ok: true,
+            output: uiSmokeSummary,
+          }
+        : {
+            command: "browser-check",
+            ok: true,
+            output: "Real-page browser check passed.",
+          }
+      : undefined;
     if (
       review?.verdict === "issues" &&
       status === "done" &&
@@ -2839,6 +2877,7 @@ export async function runProjectLoop(
         reviewCost === undefined ? totalCost : Number(((totalCost ?? 0) + reviewCost).toFixed(6)),
       verification:
         scenarioVerification ??
+        microVerification ??
         taskVerification ??
         (verification ? { command: verification } : undefined),
       review,

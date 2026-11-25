@@ -4270,7 +4270,7 @@ export async function runAgentTask(
       : `Work brief: change task (kind=${workBrief.kind}). First call extract_entities with kind="${workBrief.kind}" to identify the current targets; then apply the requested change with replace_many or apply_mapped_changes and verify it. Do not rewrite whole files or invent existing items. After apply_mapped_changes reports Verification with 0 remaining, call finish immediately; do not chase rgb/rgba equivalents, variable names or visual variants unless the user explicitly asked for them.`
     : "";
   const projectMap =
-    contextMode === "none" || testTask
+    contextMode === "none" || testTask || options.microEdit === true
       ? ""
       : await ensureProjectMap(analysis).catch(() => "");
   if (projectMap) {
@@ -4281,6 +4281,7 @@ export async function runAgentTask(
   const latestProjectPlan =
     contextMode !== "none" &&
     !testTask &&
+    options.microEdit !== true &&
     (workspaceMode === "plan" || workspaceMode === "build")
       ? await readLatestProjectPlan(
           analysis.rootPath,
@@ -4306,13 +4307,16 @@ export async function runAgentTask(
     const allowed = new Set<AgentToolGroup>(["core", "browser", "command", "document"]);
     toolGroups.splice(0, toolGroups.length, ...toolGroups.filter((group) => allowed.has(group)));
   }
+  if (options.microEdit === true) {
+    toolGroups.splice(0, toolGroups.length, "edit", "browser");
+  }
   const suggestedTools = suggestToolsForInstruction(actionPlanSource, toolGroups, 8);
   if (suggestedTools.length > 0) {
     log("info", "Capability suggestions", suggestedTools.join(", "));
   }
   const projectToolList = await listProjectTools(analysis.rootPath).catch(() => null);
   const seed =
-    contextMode === "none"
+    contextMode === "none" || options.microEdit === true
       ? ""
       : await agentSeedContext(analysis, instruction, options.activeFile, projectToolList);
   const seedLimit =
@@ -4331,16 +4335,17 @@ export async function runAgentTask(
       ),
     ),
   ].slice(0, 8);
-  const lessonsRaw = await readLessons(analysis.rootPath).catch(() => "");
+  const lessonsRaw =
+    options.microEdit === true ? "" : await readLessons(analysis.rootPath).catch(() => "");
   const lessons = testTask && lessonsRaw.length > 1_500 ? lessonsRaw.slice(0, 1_500) : lessonsRaw;
   const projectContext =
-    contextMode === "none"
+    contextMode === "none" || options.microEdit === true
       ? ""
       : contextMode === "focused"
         ? compactProjectBrief(analysis)
         : projectBrief(analysis);
   const projectFiles =
-    contextMode === "none"
+    contextMode === "none" || options.microEdit === true
       ? ""
       : contextMode === "focused"
         ? focusedFiles.length > 0
@@ -4434,12 +4439,13 @@ ${lessons}` : "",
   const mentionedSkill = skillLoad.mentions.length > 0;
   const includeSkills =
     !testTask &&
+    options.microEdit !== true &&
     (!options.intent ||
       contextMode === "project" ||
       toolGroups.includes("skills") ||
       mentionedSkill);
   const skillsPrompt = includeSkills ? renderSkillsForPrompt(enabledSkills) : "";
-  const capabilityIndex = skillLoad.index || "";
+  const capabilityIndex = options.microEdit === true ? "" : skillLoad.index || "";
   if (skillLoad.mentions.length > 0) {
     log("info", "Skill mention", `${skillLoad.mentions.join(", ")} · used for this run only`);
   }
@@ -4485,7 +4491,10 @@ ${lessons}` : "",
     "\n- Preserve the direction of a frequency request: if the user says the layer is too sparse, make it more frequent and report the before → after intervals." +
     fastSuffix +
     narrowEditSuffix +
-    readOnlySuffix;
+    readOnlySuffix +
+    (options.microEdit === true
+      ? "\n\nThis is a micro edit. After the smallest exact edit, call finish immediately. Do not call browser_check: the server runs a deterministic real-page smoke check (page load, console errors, interaction) after your edit. Only run a saved scenario if the task explicitly names one."
+      : "");
   log(
     "info",
     "Prompt selected",
@@ -5938,6 +5947,7 @@ ${lessons}` : "",
         projectHasHtml &&
         uiFilesChanged &&
         !explainedNoCheck &&
+        options.microEdit !== true &&
         realBrowserChecks + realScenarioRuns === 0 &&
         modelTurns >= 2
       ) {
