@@ -1,6 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { chromium, type Browser, type Page } from "playwright-core";
+import { chromium, type Browser, type BrowserContext, type Page } from "playwright-core";
 import { attachLivePage, startLiveSession, stopLiveSession } from "./liveBrowser";
 import type {
   BrowserCheckMetrics,
@@ -31,6 +31,99 @@ const CHROME_CANDIDATES = [
   "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
   "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
 ].filter((value): value is string => Boolean(value));
+
+// A single headless Chromium is reused across checks. Launching Chrome costs
+// several seconds; contexts are still isolated per check. Headful checks run in
+// a dedicated browser and close immediately so no window is left behind.
+const POOL_IDLE_MS = 90_000;
+let pooledBrowser: Browser | null = null;
+let pooledExecutable = "";
+let pooledActive = 0;
+let pooledIdleTimer: NodeJS.Timeout | null = null;
+let pooledLaunch: Promise<Browser> | null = null;
+
+function clearPoolIdle(): void {
+  if (pooledIdleTimer) {
+    clearTimeout(pooledIdleTimer);
+    pooledIdleTimer = null;
+  }
+}
+
+async function closePooledBrowser(): Promise<void> {
+  clearPoolIdle();
+  const browser = pooledBrowser;
+  pooledBrowser = null;
+  pooledExecutable = "";
+  pooledActive = 0;
+  if (browser) await browser.close().catch(() => undefined);
+}
+
+function schedulePoolIdleClose(): void {
+  clearPoolIdle();
+  if (pooledActive > 0 || !pooledBrowser) return;
+  pooledIdleTimer = setTimeout(() => {
+    pooledIdleTimer = null;
+    if (pooledActive === 0) void closePooledBrowser();
+  }, POOL_IDLE_MS);
+  pooledIdleTimer.unref?.();
+}
+
+async function acquireHeadlessBrowser(
+  executablePath: string,
+  timeoutMs: number,
+): Promise<Browser> {
+  const usable =
+    pooledBrowser && pooledBrowser.isConnected() && pooledExecutable === executablePath;
+  if (usable && pooledBrowser) {
+    pooledActive += 1;
+    clearPoolIdle();
+    return pooledBrowser;
+  }
+  if (pooledLaunch) {
+    const browser = await pooledLaunch.catch(() => null);
+    if (browser && browser.isConnected() && pooledExecutable === executablePath) {
+      pooledActive += 1;
+      clearPoolIdle();
+      return browser;
+    }
+  }
+  if (pooledBrowser) await closePooledBrowser();
+  const launch = chromium.launch({
+    headless: true,
+    executablePath,
+    timeout: timeoutMs,
+    slowMo: 0,
+    args: ["--no-sandbox", "--disable-dev-shm-usage"],
+  });
+  pooledLaunch = launch;
+  try {
+    const browser = await launch;
+    pooledBrowser = browser;
+    pooledExecutable = executablePath;
+    pooledActive += 1;
+    clearPoolIdle();
+    browser.on("disconnected", () => {
+      if (pooledBrowser === browser) {
+        pooledBrowser = null;
+        pooledExecutable = "";
+        pooledActive = 0;
+        clearPoolIdle();
+      }
+    });
+    return browser;
+  } finally {
+    pooledLaunch = null;
+  }
+}
+
+function releaseHeadlessBrowser(): void {
+  pooledActive = Math.max(0, pooledActive - 1);
+  if (pooledActive === 0) schedulePoolIdleClose();
+}
+
+process.once("exit", () => {
+  void pooledBrowser?.close().catch(() => undefined);
+});
 
 export async function browserExecutable(): Promise<string> {
   for (const candidate of CHROME_CANDIDATES) {
@@ -317,6 +410,8 @@ export async function runBrowserCheck(
   requestedPath = requestedPath.replace(/^\/+/, "");
   const viewport = options.mobile ? { width: 390, height: 844 } : { width: 1280, height: 800 };
   let browser: Browser | null = null;
+  let context: BrowserContext | null = null;
+  let usingPool = false;
   let consoleErrors: string[] = [];
   const pageErrors: string[] = [];
   const resourceErrors: string[] = [];
@@ -325,27 +420,44 @@ export async function runBrowserCheck(
   let showingWindow = options.visible === true && process.env.CIE_BROWSER_HEADLESS !== "1";
   if (options.live) startLiveSession(projectId, requestedPath);
   const closeOnAbort = () => {
-    void browser?.close().catch(() => undefined);
+    void context?.close().catch(() => undefined);
+    if (!usingPool) void browser?.close().catch(() => undefined);
   };
   options.signal?.addEventListener("abort", closeOnAbort, { once: true });
   try {
-    const launch = (headless: boolean) =>
+    const launchHeadful = () =>
       chromium.launch({
-        headless,
+        headless: false,
         executablePath,
         timeout: timeoutMs,
-        slowMo: headless ? 0 : 120,
+        slowMo: 120,
         args: ["--no-sandbox", "--disable-dev-shm-usage"],
       });
     try {
-      browser = await launch(!showingWindow);
+      if (showingWindow) {
+        browser = await launchHeadful();
+        usingPool = false;
+      } else {
+        browser = await acquireHeadlessBrowser(executablePath, timeoutMs);
+        usingPool = true;
+      }
     } catch (error) {
       if (!showingWindow) throw error;
       // A server without a display can still verify headlessly.
       showingWindow = false;
-      browser = await launch(true);
+      browser = await acquireHeadlessBrowser(executablePath, timeoutMs);
+      usingPool = true;
     }
-    const context = await browser.newContext({ viewport });
+    try {
+      context = await browser.newContext({ viewport });
+    } catch (error) {
+      if (!usingPool) throw error;
+      // A pooled browser can die while idle; replace it once.
+      await closePooledBrowser();
+      browser = await acquireHeadlessBrowser(executablePath, timeoutMs);
+      usingPool = true;
+      context = await browser.newContext({ viewport });
+    }
     page = await context.newPage();
     if (options.live) attachLivePage(projectId, page, requestedPath);
     if (showingWindow) await page.bringToFront().catch(() => undefined);
@@ -489,7 +601,10 @@ export async function runBrowserCheck(
   } finally {
     options.signal?.removeEventListener("abort", closeOnAbort);
     if (options.live) stopLiveSession(projectId);
-    if (browser) {
+    if (context) await context.close().catch(() => undefined);
+    if (usingPool) {
+      releaseHeadlessBrowser();
+    } else if (browser) {
       await browser.close().catch(() => undefined);
     }
   }
