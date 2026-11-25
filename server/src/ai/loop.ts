@@ -1193,7 +1193,7 @@ function taskInstruction(
       ? ""
       : "For scoring/round logic use the canvas-game-verification recipe: find the owning function, then drive the real page with browser_check pressKeys and assert #score deltas (before/after). Never call startRound, round or state from eval. If the behavior already exists, finish with a before/after evidence table.",
     scoreVerification
-      ? `Required score-verification shape: {"action":"browser_check","args":{"path":"index.html","steps":[{"action":"pressKeys","keys":["3","0","*","1","Enter"]},{"action":"expectText","selector":"#score","text":"1"}]}}. Prepare a deterministic target/operation with one short eval wait before these steps; do not call startRound/round/state from eval.`
+      ? `Required score-verification shape: {"action":"browser_check","args":{"path":"index.html","steps":[{"action":"pressKeys","keys":["3","0","*","1","Enter"]},{"action":"expectText","selector":"#score","text":"1"}]}}. Prepare a deterministic target/operation with one short eval wait before these steps; do not call startRound/round/state from eval. First check .cie/agent/scenarios for a matching saved scenario and run it with run_test_scenario.`
       : "",
     extractionTask
       ? ""

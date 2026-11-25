@@ -269,7 +269,7 @@ Do not guess the operator.
 
 ## 2. Press real keys
 
-Use the first-class pressKeys step instead of a custom eval when possible:
+First check .cie/agent/scenarios for a matching saved scenario and run it with run_test_scenario. If none exists, use the first-class pressKeys step instead of a custom eval:
 
 {"action":"browser_check","args":{"path":"index.html","steps":[
   {"action":"pressKeys","keys":["3","0","*","1","Enter"]},
