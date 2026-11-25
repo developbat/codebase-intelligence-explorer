@@ -3891,6 +3891,13 @@ export async function runAgentTask(
     intent?: IntentAnalysis;
     /** Show the local browser window while browser checks run. */
     liveBrowser?: boolean;
+    /** A saved deterministic scenario that must pass before finish is accepted. */
+    requiredScenario?: {
+      name: string;
+      path: string;
+      steps: BrowserCheckStep[];
+      timeoutMs?: number;
+    };
   } = {},
   emit: (event: AiAgentEvent) => void = () => {},
   signal?: AbortSignal,
@@ -4707,6 +4714,8 @@ ${lessons}` : "",
   };
   let toolFailureNudges = 0;
   let toolRepairs = 0;
+  let scenarioRejections = 0;
+  let requiredScenarioPassed = false;
   let acceptanceAudits = 0;
   let transientRetries = 0;
   let budgetWarned = false;
@@ -5790,6 +5799,53 @@ ${lessons}` : "",
             role: "user",
             content: `Observation (step ${index}) [acceptance]: ${observation}`,
           });
+          continue;
+        }
+      }
+
+      if (options.requiredScenario && !requiredScenarioPassed) {
+        const scenario = options.requiredScenario;
+        const check = await runBrowserCheck(analysis.id, analysis.rootPath, {
+          path: scenario.path,
+          steps: scenario.steps,
+          timeoutMs: scenario.timeoutMs,
+          signal,
+        }).catch((error: unknown) => ({
+          ok: false,
+          summary: error instanceof Error ? error.message : "Required scenario failed.",
+          steps: [] as { index: number; action: string; ok: boolean; detail: string }[],
+        }));
+        if (check.ok) {
+          requiredScenarioPassed = true;
+          log("success", "Required scenario passed", scenario.name);
+        } else {
+          scenarioRejections += 1;
+          const failed = check.steps
+            .filter((item) => !item.ok)
+            .map((item) => `#${item.index} ${item.action}: ${item.detail.slice(0, 300)}`)
+            .join("\n");
+          const observation = `Finish rejected: required scenario ${scenario.name} failed.\n${check.summary}${
+            failed ? `\n${failed}` : ""
+          }\nFix the implementation or the scenario, run the scenario again, and do not finish until it passes.`;
+          log("warn", "Finish rejected: required scenario failed", scenario.name);
+          recordStep({
+            index,
+            action: "invalid",
+            args: {},
+            observation,
+            ok: false,
+            durationMs: Date.now() - started,
+            tokenUsage: stepUsage,
+          });
+          transcript.push({
+            role: "user",
+            content: `Observation (step ${index}) [scenario]: ${observation}`,
+          });
+          if (scenarioRejections >= 2) {
+            stoppedReason = "error";
+            errorMessage = `Required scenario ${scenario.name} failed twice. The task is not verified. ${check.summary}`;
+            break;
+          }
           continue;
         }
       }

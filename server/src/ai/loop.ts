@@ -2036,6 +2036,12 @@ export async function runProjectLoop(
     const runKey = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
     const budgetEffort = taskBudgetEffort(task);
     const forceWrite = workspaceMode === "build" && taskLooksLikeWrite(task);
+    const scenarioMatch = await findTaskScenario(analysis.rootPath, task).catch(() => null);
+    const scenarioText = `${task.title}\n${task.detail}\n${task.acceptance ?? ""}`.toLowerCase();
+    const requiredScenario =
+      scenarioMatch && scenarioText.includes(scenarioMatch.name.toLowerCase())
+        ? scenarioMatch
+        : null;
     const defaultBudget = taskBudgetForEffort(budgetEffort);
     const tokenBudget = options.tokenBudget ?? defaultBudget.tokens;
     const costBudgetUsd = options.costBudgetUsd ?? defaultBudget.costUsd;
@@ -2088,6 +2094,36 @@ export async function runProjectLoop(
         options.model = alternate.model;
       }
     }
+    // Flash/fast models are good at locating code but have been unreliable for
+    // multi-step writes. When automatic switching is enabled, use the provider's
+    // configured non-flash model for write tasks.
+    if (autoSwitchModels && forceWrite && /flash|fast/i.test(taskConfig.model)) {
+      const providerModel = settings?.providers.find((item) => item.id === taskConfig.id)?.model;
+      if (
+        providerModel &&
+        providerModel !== taskConfig.model &&
+        !/flash|fast/i.test(providerModel)
+      ) {
+        const upgraded = await resolveProvider(
+          taskConfig.id as Parameters<typeof resolveProvider>[0],
+          providerModel,
+        ).catch(() => null);
+        if (upgraded) {
+          emit({
+            type: "log",
+            entry: {
+              id: `log-${Date.now()}-write-model`,
+              at: nowIso(),
+              level: "info",
+              label: "Write task model",
+              detail: `${taskConfig.id}/${taskConfig.model} → ${upgraded.id}/${upgraded.model}`,
+            },
+          });
+          taskConfig = upgraded;
+        }
+      }
+    }
+
     // Small local models are useful for reading, searching and summarizing, but
     // their JSON edit protocol is not reliable enough to let an auto-assigned
     // fast/reviewer worker rewrite project files. Keep edits on the main model.
@@ -2169,6 +2205,14 @@ export async function runProjectLoop(
         workBriefText: cleanTaskDetail(current.detail) || current.title,
         history: options.history?.slice(-8),
         liveBrowser: options.liveBrowser === true,
+        requiredScenario: requiredScenario
+          ? {
+              name: requiredScenario.name,
+              path: requiredScenario.path,
+              steps: requiredScenario.steps,
+              timeoutMs: requiredScenario.timeoutMs,
+            }
+          : undefined,
       },
       (event) => {
         if (event.type === "done") return;
