@@ -6,6 +6,7 @@ import type { ProjectTask } from "../../../shared/tasks";
 export interface TaskScenarioMatch {
   name: string;
   path: string;
+  url?: string;
   steps: BrowserCheckStep[];
   timeoutMs?: number;
   score: number;
@@ -132,6 +133,7 @@ export async function findTaskScenario(
     matches.push({
       name,
       path: typeof record.path === "string" ? record.path : "index.html",
+      url: typeof (record as { url?: unknown }).url === "string" ? (record as { url: string }).url : undefined,
       steps,
       timeoutMs:
         typeof record.timeoutMs === "number" ? record.timeoutMs : undefined,

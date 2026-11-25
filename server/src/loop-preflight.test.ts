@@ -12,6 +12,7 @@ import {
   softTaskTokenBudget,
   summarizeToolIssues,
   summaryAllowsNoChanges,
+  isMicroEditTask,
   taskBudgetEffort,
   taskLooksLikeWrite,
   taskTargetFiles,
@@ -296,4 +297,38 @@ test("turkish end-state goals are classified as edits, not inspection", () => {
   } as unknown as Parameters<typeof taskLooksLikeWrite>[0];
   assert.equal(taskLooksLikeWrite(task), true);
   assert.equal(taskBudgetEffort(task), "standard");
+});
+
+
+test("exact file-line micro tasks use the short edit profile", () => {
+  const base = {
+    id: "task-1",
+    status: "pending",
+    effort: "standard",
+    role: "main",
+    dependsOn: [],
+    attempts: 0,
+    changedFiles: [],
+    commands: [],
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+  assert.equal(
+    isMicroEditTask({
+      ...base,
+      title: "Add division to OPS",
+      detail: "In game.js line 476 change OPS to include ÷. Change only that line.",
+      acceptance: "OPS contains ÷.",
+    } as unknown as Parameters<typeof isMicroEditTask>[0]),
+    true,
+  );
+  assert.equal(
+    isMicroEditTask({
+      ...base,
+      title: "Refactor the whole project",
+      detail: "Redesign all files and the architecture.",
+      acceptance: "Everything is clean.",
+    } as unknown as Parameters<typeof isMicroEditTask>[0]),
+    false,
+  );
 });

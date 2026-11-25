@@ -3897,6 +3897,7 @@ export async function runAgentTask(
     requiredScenario?: {
       name: string;
       path: string;
+      url?: string;
       steps: BrowserCheckStep[];
       timeoutMs?: number;
     };
@@ -4641,6 +4642,7 @@ ${lessons}` : "",
     invalidateExtractionCache(projectId, changedPaths);
   };
   let modelTurns = 0;
+  const microEditMode = options.microEdit === true;
   let writeNudges = 0;
   let readRejections = 0;
   let evidenceNudges = 0;
@@ -4805,7 +4807,7 @@ ${lessons}` : "",
             "This is a continuation of your own prior analysis. The findings are already in context. Stop researching and apply the fix now: read at most one or two exact ranges to confirm line numbers, then use replace_in_file or write_file. Do not rescan the project.",
         });
         log("warn", "Continuation: start editing", "prior findings available; no rescan needed");
-      } else if (modelTurns >= 4 && writeNudges === 0) {
+      } else if (modelTurns >= (microEditMode ? 2 : 4) && writeNudges === 0) {
         writeNudges = 1;
         transcript.push({
           role: "system",
@@ -4813,7 +4815,7 @@ ${lessons}` : "",
             "No file has been changed yet. You have enough context. If the requested behavior already exists, verify it and finish with evidence instead of editing. Otherwise perform the requested edit now with replace_in_file or write_file. Do not read more files unless a single exact line is essential; read only that range.",
         });
         log("warn", "Write reminder", "No files changed yet; asking the model to edit now.");
-      } else if (modelTurns >= 12 && writeNudges === 1) {
+      } else if (modelTurns >= (microEditMode ? 3 : 12) && writeNudges === 1) {
         writeNudges = 2;
         transcript.push({
           role: "system",
@@ -5811,6 +5813,7 @@ ${lessons}` : "",
         const scenario = options.requiredScenario;
         const check = await runBrowserCheck(analysis.id, analysis.rootPath, {
           path: scenario.path,
+          url: scenario.url,
           steps: scenario.steps,
           timeoutMs: scenario.timeoutMs,
           signal,
@@ -6370,9 +6373,10 @@ ${lessons}` : "",
         );
         const covered = readRangeCovered(ranges, requestedStart, wholeFile, requestedEnd);
         if (covered && coveredEntry) {
-          const cachedContent = coveredEntry.observation
-            ? clampObservation(coveredEntry.observation, 3_000)
-            : "";
+          const cachedContent =
+            !microEditMode && coveredEntry.observation
+              ? clampObservation(coveredEntry.observation, 3_000)
+              : "";
           observation =
             `Cached read: ${filePath}${
               wholeFile ? " (whole file)" : `:${requestedStart}-${requestedEnd}`
@@ -7700,7 +7704,7 @@ ${lessons}` : "",
     } else if (!READ_ONLY_ACTIONS.has(step.action)) {
       readOnlyStepsSinceChange = 0;
     }
-    if (readOnlyMode && readOnlyStepsSinceChange >= 8 && !inspectionNudged) {
+    if (readOnlyMode && readOnlyStepsSinceChange >= (microEditMode ? 4 : 8) && !inspectionNudged) {
       inspectionNudged = true;
       transcript.push({
         role: "system",
@@ -7715,7 +7719,7 @@ ${lessons}` : "",
       plan.needsWrite &&
       changedFiles.length === 0 &&
       !verificationPassed &&
-      readOnlyStepsSinceChange >= 8 &&
+      readOnlyStepsSinceChange >= (microEditMode ? 3 : 8) &&
       !readDecisionNudged
     ) {
       readDecisionNudged = true;
@@ -7733,7 +7737,7 @@ ${lessons}` : "",
       !readOnlyMode &&
       verificationPassed &&
       changedFiles.length === 0 &&
-      readOnlyStepsSinceChange >= 8 &&
+      readOnlyStepsSinceChange >= (microEditMode ? 3 : 8) &&
       !verificationNudged
     ) {
       verificationNudged = true;

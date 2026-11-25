@@ -1312,6 +1312,20 @@ export function taskBudgetEffort(task: ProjectTask): ProjectTaskEffort {
   return uiOrVerification ? "standard" : "simple";
 }
 
+/** A mechanical edit with an exact file/line target should use a short context budget. */
+export function isMicroEditTask(task: ProjectTask): boolean {
+  const text = `${task.title}\n${task.detail}\n${task.acceptance ?? ""}`;
+  if (/one-line|only that line|change only that line|sadece .*satır|tek satır/i.test(text)) {
+    return true;
+  }
+  const exactLine =
+    /\b[A-Za-z0-9_./-]+\.(?:js|mjs|cjs|jsx|ts|tsx|css|html?|py|php|go|rs|java|kt|kts|cs|rb|swift|dart|json|md):\d+/i.test(
+      text,
+    ) || /\bline\s+\d{2,4}\b/i.test(text);
+  const broad = /project-wide|multiple files|all files|refactor|architecture|redesign/i.test(text);
+  return exactLine && !broad && text.length < 3_000;
+}
+
 interface RetryRecovery {
   note: string;
   quarantined: string[];
@@ -2042,9 +2056,7 @@ export async function runProjectLoop(
       scenarioMatch && scenarioText.includes(scenarioMatch.name.toLowerCase())
         ? scenarioMatch
         : null;
-    const microEdit = /one-line|only that line|change only that line|sadece .*satır|tek satır/i.test(
-      `${task.title}\n${task.detail}`,
-    );
+    const microEdit = isMicroEditTask(task);
     const defaultBudget = taskBudgetForEffort(budgetEffort);
     const tokenBudget = options.tokenBudget ?? defaultBudget.tokens;
     const costBudgetUsd = options.costBudgetUsd ?? defaultBudget.costUsd;
@@ -2196,7 +2208,7 @@ export async function runProjectLoop(
         forceFast: budgetEffort === "simple",
         forceWrite,
         inspection: inspectionRun,
-        maxSteps: taskStepBudget(budgetEffort),
+        maxSteps: microEdit ? 4 : taskStepBudget(budgetEffort),
         tokenBudget,
         softTokenBudget: softTaskTokenBudget(budgetEffort),
         costBudgetUsd,
@@ -2344,6 +2356,7 @@ export async function runProjectLoop(
             const scenarioTaskId = nextTask.id;
             const check = await runBrowserCheck(analysis.id, analysis.rootPath, {
               path: match.path,
+              url: match.url,
               steps: match.steps,
               timeoutMs: match.timeoutMs,
               signal,
@@ -2556,7 +2569,7 @@ export async function runProjectLoop(
       }
     }
     const missingUiVerification = needsUiVerification;
-    const status =
+    let status: ProjectTask["status"] =
       result.stoppedReason === "aborted" || result.stoppedReason === "budget"
         ? "blocked"
         : inspectionAnswer
@@ -2624,30 +2637,45 @@ export async function runProjectLoop(
         }
         if (files.length > 0) {
           try {
-            const completion = await chat(
-              reviewConfig,
-              [
-                {
-                  role: "system",
-                  content:
-                    'You are a strict senior code reviewer. Review only the changed files shown. Reply with compact JSON only: {"verdict":"ok"|"issues","issues":["short issue"],"summary":"one sentence"}. Do not rewrite code. Flag broken syntax, missing UI wiring, or clearly wrong behavior; otherwise return ok.',
-                },
-                {
-                  role: "user",
-                  content: `Task: ${current.title}\n${current.detail}\n\nChanged files:\n${files
-                    .map((file) => `--- ${file.path} ---\n${file.content}`)
-                    .join("\n\n")}`,
-                },
-              ],
+            const reviewMessages = [
               {
+                role: "system" as const,
+                content:
+                  'You are a strict senior code reviewer. Review only the changed files shown and the agent\'s evidence. Reply with compact JSON only: {"verdict":"ok"|"issues","issues":["short issue"],"summary":"one sentence"}. Do not rewrite code. If a required scenario or verification passed, do not flag the feature as absent from a truncated excerpt; only flag concrete broken syntax, wrong behavior or missing wiring visible in the evidence.',
+              },
+              {
+                role: "user" as const,
+                content: `Task: ${current.title}\n${current.detail}\n\nAcceptance: ${current.acceptance ?? ""}\n\nAgent result:\n${(result.summary ?? "").slice(0, 2_000)}\n\nVerification: ${
+                  taskVerification ? `${taskVerification.command ?? ""} ok=${taskVerification.ok}` : "none"
+                }\n\nChanged files:\n${files
+                  .map((file) => `--- ${file.path} ---\n${file.content}`)
+                  .join("\n\n")}`,
+              },
+            ];
+            const runReview = async (config: typeof reviewConfig) =>
+              chat(config, reviewMessages, {
                 maxTokens: 700,
                 temperature: 0,
                 timeoutMs: 60_000,
                 onUsage: (usage) => {
                   reviewUsage = usage;
                 },
-              },
-            );
+              });
+            let completion = "";
+            try {
+              completion = await runReview(reviewConfig);
+              if (!/\{[\s\S]*\}/.test(completion)) throw new Error("Reviewer did not return JSON.");
+            } catch {
+              // The configured reviewer is often an unavailable free/NIM model.
+              // Fall back to the task model once instead of losing the review.
+              if (reviewConfig.id !== taskConfig.id || reviewConfig.model !== taskConfig.model) {
+                completion = await runReview(taskConfig).catch(() => "");
+                if (completion && !/\{[\s\S]*\}/.test(completion)) completion = "";
+              } else {
+                completion = "";
+              }
+            }
+            if (!completion) throw new Error("Reviewer unavailable.");
             const parsed = parseReviewReply(completion);
             review = {
               ...parsed,
@@ -2717,6 +2745,17 @@ export async function runProjectLoop(
       (task.lifetimeTokens ?? 0) +
       (result.tokenUsage?.totalTokens ?? 0) +
       (reviewUsage?.totalTokens ?? 0);
+    const scenarioVerified = result.logs?.some(
+      (entry) => entry.label === "Required scenario passed",
+    );
+    if (
+      review?.verdict === "issues" &&
+      status === "done" &&
+      !taskVerification?.ok &&
+      !scenarioVerified
+    ) {
+      status = "failed";
+    }
     queue = markTask(queue, task.id, {
       status,
       completedAt: nowIso(),

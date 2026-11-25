@@ -499,12 +499,14 @@ const runTestScenarioHandler: AgentToolHandler = async (
   const scenarioFile = await readSourceFile(context.analysis.rootPath, relative);
   const scenario = JSON.parse(scenarioFile.content) as {
     path?: string;
+    url?: string;
     mobile?: boolean;
     timeoutMs?: number;
     steps?: NonNullable<Parameters<typeof runBrowserCheck>[2]>["steps"];
   };
   const result = await runBrowserCheck(context.projectId, context.analysis.rootPath, {
     path: scenario.path,
+    url: scenario.url,
     mobile: scenario.mobile,
     timeoutMs: scenario.timeoutMs,
     steps: scenario.steps ?? [],
