@@ -2131,5 +2131,13 @@ export const tr: Dictionary = {
     "Yalnızca çıktı · komut çalıştırmak istediğinde girişi aç.",
   "Stop this background job": "Bu arka plan işini durdur",
   "Resume keeps completed tasks and changed files; it does not restart the project.":
-    "Sürdürme tamamlanan görevleri ve değişen dosyaları korur; projeyi baştan başlatmaz."
+    "Sürdürme tamamlanan görevleri ve değişen dosyaları korur; projeyi baştan başlatmaz.",
+  "Drag to resize": "Yeniden boyutlandırmak için sürükle",
+  "Expand or shrink footer": "Alt alanı büyüt veya küçült",
+  "Mode": "Mod",
+  "Loading…": "Yükleniyor…",
+  "Could not load Git status.": "Git durumu yüklenemedi.",
+  "Git status is unavailable.": "Git durumu kullanılamıyor.",
+  "No tasks yet. Send a request in Chat to start a task queue.":
+    "Henüz görev yok. Görev kuyruğu başlatmak için Sohbet'ten istek gönder."
 };

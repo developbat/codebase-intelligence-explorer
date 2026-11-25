@@ -131,6 +131,7 @@ import {
 import type {
   AnalysisResult,
   ChangeReport,
+  GitStatus,
   RunCommandResult,
   TestDiscovery,
   TestRunResult,
@@ -143,6 +144,7 @@ import { useI18n } from "../i18n";
 import { ProjectSwitcher } from "./ProjectSwitcher";
 import { MarkdownText } from "./MarkdownText";
 import { GitDiffView } from "./GitDiffView";
+import { GitSummary } from "./GitSummary";
 import { ExtractionTableView } from "./ExtractionTable";
 import { ContentInventoryPanel } from "./ContentInventoryPanel";
 import { JsonPreview } from "./JsonPreview";
@@ -797,7 +799,6 @@ export function CodeStudio({
     reason: string;
   } | null>(null);
   const lastIntentRef = useRef<IntentAnalysis | null>(null);
-  const [taskPanelOpen, setTaskPanelOpen] = useState(false);
   const [waitSeconds, setWaitSeconds] = useState(0);
   const chatLiveLogsRef = useRef<AiAgentLogEntry[]>([]);
   const lastIndexedChatRef = useRef<Record<string, string>>({});
@@ -818,6 +819,15 @@ export function CodeStudio({
   const [previewFullscreen, setPreviewFullscreen] = useState(false);
   const [rightTab, setRightTab] = useState<"preview" | string>("preview");
   const [consoleOpen, setConsoleOpen] = useState(false);
+  const [footerTab, setFooterTab] = useState<"chat" | "console" | "tasks" | "git">("chat");
+  const [footerHeight, setFooterHeight] = useState(() => {
+    const stored = Number(localStorage.getItem("cie:studio-footer-height"));
+    return Number.isFinite(stored) && stored >= 180 ? stored : 260;
+  });
+  const [footerGit, setFooterGit] = useState<GitStatus | null>(null);
+  const [footerGitBusy, setFooterGitBusy] = useState(false);
+  const [footerGitError, setFooterGitError] = useState<string | null>(null);
+  const footerDragRef = useRef<{ startY: number; startHeight: number } | null>(null);
   const [indexStatus, setIndexStatus] = useState<ProjectIndexStatus | null>(null);
   const [environmentAlert, setEnvironmentAlert] = useState<{ names: string[] } | null>(null);
   const [checkCommand, setCheckCommand] = useState("");
@@ -1459,10 +1469,6 @@ export function CodeStudio({
   const dirty = Boolean(activeFile && activeContent !== activeSaved);
   const activeLanguage = activeFile?.split(".").pop()?.toUpperCase() ?? "";
 
-  const sessionTokens = chatMessages.reduce(
-    (total, message) => total + (message.tokenUsage?.totalTokens ?? 0),
-    0,
-  );
   const liveTokens = chatLiveSteps.reduce(
     (total, step) => total + (step.tokenUsage?.totalTokens ?? 0),
     0,
@@ -1687,6 +1693,63 @@ export function CodeStudio({
     return () => window.clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [consoleOpen, bottomTab, analysis.id, hasRunningJobs, chatBusy, rightTab, livePreviewUrl]);
+
+  // Keep the legacy consoleOpen flag and the new footer tab in sync.
+  useEffect(() => {
+    if (consoleOpen && footerTab !== "console") setFooterTab("console");
+    else if (!consoleOpen && footerTab === "console") setFooterTab("chat");
+  }, [consoleOpen, footerTab]);
+
+  useEffect(() => {
+    localStorage.setItem("cie:studio-footer-height", String(Math.round(footerHeight)));
+  }, [footerHeight]);
+
+  useEffect(() => {
+    if (footerTab !== "git") return;
+    let cancelled = false;
+    setFooterGitBusy(true);
+    setFooterGitError(null);
+    void api
+      .gitStatus(analysis.id)
+      .then((status) => {
+        if (!cancelled) setFooterGit(status);
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) {
+          setFooterGitError(
+            error instanceof Error ? error.message : t("Could not load Git status."),
+          );
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setFooterGitBusy(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [footerTab, analysis.id]);
+
+  function startFooterResize(event: ReactPointerEvent<HTMLDivElement>) {
+    event.preventDefault();
+    footerDragRef.current = { startY: event.clientY, startHeight: footerHeight };
+    const onMove = (moveEvent: PointerEvent) => {
+      const drag = footerDragRef.current;
+      if (!drag) return;
+      const next = Math.min(
+        window.innerHeight * 0.75,
+        Math.max(180, drag.startHeight + drag.startY - moveEvent.clientY),
+      );
+      setFooterHeight(next);
+    };
+    const onUp = () => {
+      footerDragRef.current = null;
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  }
 
   function openSettings(tab: SettingsTab, addModel = false) {
     onOpenSettings?.(tab, addModel);
@@ -4524,35 +4587,79 @@ export function CodeStudio({
           </div>
         ) : null}
 
-        <div className={`studio-composer is-${studioMode}`}>
-          {taskQueue && taskQueue.tasks.length > 0 && taskPanelOpen ? (
-            <div className="studio-composer-task-panel">
-              <div className="studio-composer-task-head">
-                <strong>{t("Task queue")}</strong>
-                <button onClick={() => setTaskPanelOpen(false)} aria-label={t("Close")}>
-                  <X size={12} />
-                </button>
-              </div>
-              <TaskQueueCard
-                queue={taskQueue}
-                defaultOpen
-                liveStepCount={chatLiveSteps.length}
-                onOpenFile={(path) => void openFile(path)}
-                onRetryFailed={() => {
-                  if (!taskQueue) return;
-                  setTaskPanelOpen(false);
-                  void askProject(taskQueue.goal, false, {
-                    retryFailed: true,
-                    skipClarify: true,
-                    workspaceMode: "build",
-                  });
-                }}
-                onUpdateTask={updateQueueTask}
-                onDeleteTask={deleteQueueTask}
-                onMoveTask={moveQueueTask}
+        <div
+          className={`studio-footer-dock is-${studioMode}`}
+          style={{ height: footerHeight }}
+        >
+          <div
+            className="studio-footer-resize"
+            onPointerDown={startFooterResize}
+            title={t("Drag to resize")}
+            role="separator"
+            aria-orientation="horizontal"
+          />
+          <div className="studio-footer-tabs">
+            <button
+              className={footerTab === "chat" ? "is-active" : ""}
+              onClick={() => {
+                setFooterTab("chat");
+                setConsoleOpen(false);
+              }}
+            >
+              <MessageSquare size={12} /> {t("Chat")}
+            </button>
+            <button
+              className={footerTab === "console" ? "is-active" : ""}
+              onClick={() => {
+                setFooterTab("console");
+                setConsoleOpen(true);
+              }}
+            >
+              <Terminal size={12} /> {t("Console")}
+              {jobs.some((job) => job.status === "running") ? (
+                <b>{jobs.filter((job) => job.status === "running").length}</b>
+              ) : null}
+            </button>
+            <button
+              className={footerTab === "tasks" ? "is-active" : ""}
+              onClick={() => {
+                setFooterTab("tasks");
+                setConsoleOpen(false);
+              }}
+            >
+              <ListChecks size={12} /> {t("Task queue")}
+              {taskQueue ? (
+                <b>
+                  {taskQueue.tasks.filter((task) => task.status === "done").length}/
+                  {taskQueue.tasks.length}
+                </b>
+              ) : null}
+            </button>
+            <button
+              className={footerTab === "git" ? "is-active" : ""}
+              onClick={() => {
+                setFooterTab("git");
+                setConsoleOpen(false);
+              }}
+            >
+              <GitCompareArrows size={12} /> {t("Git")}
+              {footerGit && footerGit.files.length > 0 ? <b>{footerGit.files.length}</b> : null}
+            </button>
+            <span className="studio-footer-spacer" />
+            <button
+              className="studio-footer-collapse"
+              onClick={() => setFooterHeight((value) => (value > 240 ? 220 : 320))}
+              title={t("Expand or shrink footer")}
+            >
+              <ChevronUp
+                size={11}
+                style={{ transform: footerHeight > 240 ? "rotate(180deg)" : undefined }}
               />
-            </div>
-          ) : null}
+            </button>
+          </div>
+          <div className="studio-footer-body">
+            {footerTab === "chat" ? (
+              <div className={`studio-composer is-${studioMode}`}>
 
           {clarification ? (
             <div className="studio-clarify">
@@ -4637,16 +4744,31 @@ export function CodeStudio({
               placeholder={modePlaceholder}
               rows={3}
             />
-            <button
-              className="studio-attach-inline"
-              onClick={() => taskFileInputRef.current?.click()}
-              disabled={assetBusy || chatBusy}
-              title={t("Attach a file (PDF, Word, Excel, JSON, text, image)")}
-              aria-label={t("Attach a file (PDF, Word, Excel, JSON, text, image)")}
-            >
-              {assetBusy ? <Loader2 size={15} className="spin" /> : <Paperclip size={15} />}
-              <span>{t("File")}</span>
-            </button>
+            <div className="studio-input-tools">
+              <button
+                className="studio-attach-inline"
+                onClick={() => taskFileInputRef.current?.click()}
+                disabled={assetBusy || chatBusy}
+                title={t("Attach a file (PDF, Word, Excel, JSON, text, image)")}
+                aria-label={t("Attach a file (PDF, Word, Excel, JSON, text, image)")}
+              >
+                {assetBusy ? <Loader2 size={15} className="spin" /> : <Paperclip size={15} />}
+                <span>{t("File")}</span>
+              </button>
+              <label className="studio-inline-mode" title={t("Mode")}>
+                <select
+                  value={studioMode}
+                  onChange={(event) => setStudioMode(event.target.value as AiWorkspaceMode)}
+                  disabled={chatBusy}
+                  aria-label={t("Mode")}
+                >
+                  <option value="ask">{t("Ask")}</option>
+                  <option value="plan">{t("Plan")}</option>
+                  <option value="build">{t("Build")}</option>
+                  <option value="research">{t("Research")}</option>
+                </select>
+              </label>
+            </div>
             <input
               ref={taskFileInputRef}
               type="file"
@@ -4683,55 +4805,6 @@ export function CodeStudio({
 
           <div className="studio-composer-footer">
             <div className="studio-composer-actions">
-              <label className="studio-mode-select">
-                <span>{t("Mode")}</span>
-                <select
-                  value={studioMode}
-                  onChange={(event) => {
-                    const next = event.target.value as AiWorkspaceMode;
-                    setStudioMode(next);
-                    setTaskPanelOpen(false);
-                  }}
-                  disabled={chatBusy}
-                  aria-label={t("Mode")}
-                >
-                  <option value="ask">{t("Ask")}</option>
-                  <option value="plan">{t("Plan")}</option>
-                  <option value="build">{t("Build")}</option>
-                  <option value="research">{t("Research")}</option>
-                </select>
-              </label>
-
-              <button
-                type="button"
-                className={`studio-permission-pill ${
-                  readOnlyMode ? "is-blocked" : agentAllowWrite ? "is-open" : "is-ask"
-                }`}
-                onClick={() => {
-                  if (readOnlyMode) {
-                    setStudioMode("build");
-                  } else {
-                    openSettings("general");
-                  }
-                }}
-                title={
-                  readOnlyMode
-                    ? t("Writes are blocked in Ask, Plan and Research modes. Switch to Build to edit files.")
-                    : agentAllowWrite
-                      ? t("Writes are pre-approved. Open Settings to require a prompt for each write.")
-                      : t("Writes ask for approval. Open Settings to pre-approve file writes.")
-                }
-              >
-                <Settings2 size={12} />
-                <span>
-                  {readOnlyMode
-                    ? t("Writes blocked: read-only")
-                    : agentAllowWrite
-                      ? t("Writes: auto-approved")
-                      : t("Writes: ask each time")}
-                </span>
-              </button>
-
               {studioMode === "plan" ? (
                 <button
                   className="studio-footer-link"
@@ -4742,32 +4815,6 @@ export function CodeStudio({
                   <span>{t("Project plan")}</span>
                 </button>
               ) : null}
-              {taskQueue && taskQueue.tasks.length > 0 ? (
-                <button
-                  className={`studio-composer-task-button ${
-                    taskQueue.status === "failed" ? "is-failed" : ""
-                  }`}
-                  onClick={() => setTaskPanelOpen((value) => !value)}
-                  title={t("Open task queue")}
-                >
-                  <ListChecks size={14} />
-                  <span>{t("Task queue")}</span>
-                  <b>
-                    {taskQueue.tasks.filter((task) => task.status === "done").length}/{taskQueue.tasks.length}
-                  </b>
-                  {taskQueue.status === "failed" ? <AlertTriangle size={12} /> : null}
-                </button>
-              ) : null}
-              <span className="studio-session-tokens">
-                {sessionTokens > 0 ? `${t("Session")} ${formatTokens(sessionTokens)} ${t("tokens")}` : ""}
-              </span>
-              <button
-                className={`studio-loop-toggle ${consoleOpen ? "is-on" : ""}`}
-                onClick={() => setConsoleOpen((value) => !value)}
-                title={t("Console")}
-              >
-                <Terminal size={12} /> {t("Console")}
-              </button>
               {chatMessages.length > 0 ? (
                 <button className="studio-composer-clear" onClick={clearActiveChat}>
                   {t("Clear")}
@@ -4776,8 +4823,7 @@ export function CodeStudio({
             </div>
           </div>
         </div>
-
-        {consoleOpen ? (
+            ) : footerTab === "console" ? (
 <div className="studio-bottom">
                 <div className="studio-bottom-tabs">
                   <button
@@ -4810,12 +4856,6 @@ export function CodeStudio({
                     ) : null}
                   </button>
                   <span className="studio-bottom-spacer" />
-                  <button
-                    onClick={() => setConsoleOpen(false)}
-                    title={t("Close console")}
-                  >
-                    <X size={11} /> {t("Close")}
-                  </button>
                   {activeTerminal?.result ? (
                     <span className={`studio-exit ${activeTerminal.result.exitCode === 0 ? "ok" : "bad"}`}>
                       {t("exit")} {activeTerminal.result.exitCode ?? "—"} · {activeTerminal.result.durationMs} ms
@@ -5649,7 +5689,92 @@ export function CodeStudio({
                   </div>
                 ) : null}
               </div>
-        ) : null}
+            ) : footerTab === "tasks" ? (
+              <div className="studio-footer-tasks">
+                {taskQueue && taskQueue.tasks.length > 0 ? (
+                  <TaskQueueCard
+                    queue={taskQueue}
+                    defaultOpen
+                    liveStepCount={chatLiveSteps.length}
+                    onOpenFile={(path) => void openFile(path)}
+                    onRetryFailed={() => {
+                      if (!taskQueue) return;
+                      void askProject(taskQueue.goal, false, {
+                        retryFailed: true,
+                        skipClarify: true,
+                        workspaceMode: "build",
+                      });
+                    }}
+                    onUpdateTask={updateQueueTask}
+                    onDeleteTask={deleteQueueTask}
+                    onMoveTask={moveQueueTask}
+                  />
+                ) : (
+                  <div className="studio-footer-empty">
+                    <ListChecks size={18} />
+                    <span>{t("No tasks yet. Send a request in Chat to start a task queue.")}</span>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="studio-footer-git">
+                <div className="studio-footer-git-head">
+                  <strong>
+                    <GitCompareArrows size={12} /> {t("Git")}
+                  </strong>
+                  <button
+                    onClick={() => {
+                      setFooterGitBusy(true);
+                      setFooterGitError(null);
+                      void api
+                        .gitStatus(analysis.id)
+                        .then(setFooterGit)
+                        .catch((error: unknown) =>
+                          setFooterGitError(
+                            error instanceof Error ? error.message : t("Could not load Git status."),
+                          ),
+                        )
+                        .finally(() => setFooterGitBusy(false));
+                    }}
+                  >
+                    <RefreshCw size={10} /> {t("Refresh")}
+                  </button>
+                </div>
+                {footerGitBusy ? (
+                  <div className="studio-footer-empty">
+                    <Loader2 size={14} className="spin" /> {t("Loading…")}
+                  </div>
+                ) : footerGitError ? (
+                  <div className="studio-footer-empty is-error">
+                    <AlertTriangle size={14} /> {footerGitError}
+                  </div>
+                ) : footerGit ? (
+                  <>
+                    <GitSummary status={footerGit} />
+                    <div className="studio-footer-git-files">
+                      {footerGit.files.length > 0 ? (
+                        footerGit.files.slice(0, 80).map((file) => (
+                          <button
+                            key={file.path}
+                            onClick={() => void openFile(file.path)}
+                            title={file.path}
+                          >
+                            <span className={`is-${file.status}`}>{file.status}</span>
+                            <code>{file.path}</code>
+                          </button>
+                        ))
+                      ) : (
+                        <p>{t("Working tree is clean. There are no uncommitted changes to review.")}</p>
+                      )}
+                    </div>
+                  </>
+                ) : (
+                  <div className="studio-footer-empty">{t("Git status is unavailable.")}</div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
       </section>
 
       <section className="studio-right-panel">
