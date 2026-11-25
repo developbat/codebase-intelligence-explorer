@@ -272,7 +272,53 @@ const TOOL_SPECS: AgentToolSpec[] = [
       type: "object",
       required: ["steps"],
       properties: {
-        steps: { type: "array", items: { type: "object" } },
+        steps: {
+          type: "array",
+          description:
+            "Ordered browser steps. Each step needs action plus selector/value/text as appropriate.",
+          items: {
+            type: "object",
+            required: ["action"],
+            properties: {
+              action: {
+                type: "string",
+                enum: [
+                  "click",
+                  "fill",
+                  "press",
+                  "expectText",
+                  "expectValue",
+                  "expectVisible",
+                  "expectCount",
+                  "expectStable",
+                  "waitForText",
+                  "waitForSelector",
+                  "reload",
+                  "eval",
+                  "storageGet",
+                ],
+              },
+              selector: {
+                type: "string",
+                description: "Project page selector, e.g. #play or body. Required for click/fill/expect*/waitForSelector.",
+              },
+              value: {
+                type: "string",
+                description:
+                  "Value for fill/press/eval/expectValue. For eval this is the JavaScript expression (aliases expression/code/script are accepted).",
+              },
+              text: {
+                type: "string",
+                description: "Expected text for expectText/waitForText.",
+              },
+              key: { type: "string", description: "localStorage key for storageGet." },
+              count: { type: "number", description: "Expected element count for expectCount." },
+              durationMs: { type: "number", description: "expectStable sample window." },
+              maxChanges: { type: "number", description: "expectStable allowed value changes." },
+              timeoutMs: { type: "number" },
+            },
+          },
+        },
         path: {
           type: "string",
           description: "Project-relative static file (for example index.html). Do not put a server URL here.",

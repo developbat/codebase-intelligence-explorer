@@ -236,3 +236,48 @@ test("writes a live run log even before the attempt finishes", async () => {
     await fs.rm(root, { recursive: true, force: true });
   }
 });
+
+
+test("run evidence stays unique when an attempt number is reused", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "cie-run-key-"));
+  try {
+    const record = {
+      taskId: "task-1",
+      attempt: 1,
+      goal: "verify existing behavior",
+      stoppedReason: "finished",
+      summary: "verified",
+      changedFiles: [],
+      steps: [
+        { index: 1, action: "browser_check", ok: true, observation: "passed" },
+      ],
+    };
+    const first = await saveAgentRun(root, { ...record, runKey: "first-run" });
+    const second = await saveAgentRun(root, { ...record, runKey: "second-run" });
+    assert.notEqual(first, second);
+    assert.match(first, /task-1-a1-first-run\.json$/);
+    assert.match(second, /task-1-a1-second-run\.json$/);
+    assert.equal(
+      JSON.parse(await fs.readFile(path.join(root, first), "utf8")).runKey,
+      "first-run",
+    );
+    await startAgentRunLive(root, "task-1", 1, "first-run");
+    await appendAgentRunEvent(root, "task-1", 1, {
+      type: "step",
+      step: {
+        index: 1,
+        action: "read_file",
+        args: { path: "app.js" },
+        observation: "read ok",
+        ok: true,
+        durationMs: 5,
+      },
+    }, "first-run");
+    assert.match(
+      await fs.readFile(path.join(root, ".cie/agent/runs/task-1-a1-first-run.live.jsonl"), "utf8"),
+      /read ok/,
+    );
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});

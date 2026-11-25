@@ -11,6 +11,9 @@ import {
   isInteractiveUiCheck,
   softTaskTokenBudget,
   summarizeToolIssues,
+  summaryAllowsNoChanges,
+  taskBudgetEffort,
+  taskLooksLikeWrite,
   taskTargetFiles,
   tasksOverlap,
 } from "./ai/loop";
@@ -205,4 +208,71 @@ test("task locks match case-insensitively across separators", () => {
   const locks = new Set(["src/app.tsx"]);
   assert.equal(tasksOverlap(["SRC\\App.tsx"], locks), true);
   assert.equal(tasksOverlap(["./src/other.ts"], locks), false);
+});
+
+
+test("turkish number words are not mistaken for an inspection request", () => {
+  const task = {
+    id: "task-1",
+    title: "hedef sayıya ulaşmaya çalış",
+    detail: "Bu davranışı oyuna ekle.",
+    acceptance: "Çalışır.",
+    status: "pending",
+    effort: "simple",
+    role: "main",
+    dependsOn: [],
+    attempts: 0,
+    changedFiles: [],
+    commands: [],
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  } as unknown as Parameters<typeof taskLooksLikeWrite>[0];
+  assert.equal(taskLooksLikeWrite(task), true);
+});
+
+test("UI and verification tasks get a standard budget even when planned simple", () => {
+  const base = {
+    id: "task-1",
+    status: "pending",
+    role: "main",
+    dependsOn: [],
+    attempts: 0,
+    changedFiles: [],
+    commands: [],
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+  const uiTask = {
+    ...base,
+    title: "Hedef sayı turunu doğrula",
+    detail: "Canvas oyununu browser ile kontrol et.",
+    acceptance: "Doğrulandı.",
+    effort: "simple",
+  } as unknown as Parameters<typeof taskBudgetEffort>[0];
+  const textTask = {
+    ...base,
+    title: "Fix typo",
+    detail: "Fix the typo in README.",
+    acceptance: "Fixed.",
+    effort: "simple",
+  } as unknown as Parameters<typeof taskBudgetEffort>[0];
+  assert.equal(taskBudgetEffort(uiTask), "standard");
+  assert.equal(taskBudgetEffort(textTask), "simple");
+});
+
+test("turkish no-change summaries pass the verification gate", () => {
+  assert.equal(
+    summaryAllowsNoChanges("İstenen davranış zaten uygulanmış ve doğrulanmış"),
+    true,
+  );
+});
+
+test("summarizeToolIssues marks recovered failures separately", () => {
+  const issues = summarizeToolIssues([
+    step({ index: 1, action: "read_file", ok: false, observation: "Narrow edit: read at most 160 lines" }),
+    step({ index: 2, action: "read_file", ok: true, observation: "read ok" }),
+    step({ index: 3, action: "browser_check", ok: false, observation: "Browser check found problems" }),
+  ]);
+  assert.ok(issues.some((issue) => /recovered read_file ×1/.test(issue)));
+  assert.ok(issues.some((issue) => /^browser_check ×1/.test(issue)));
 });

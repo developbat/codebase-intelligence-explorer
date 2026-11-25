@@ -44,6 +44,7 @@ import { pickAlternateAgentModel } from "./agents";
 import {
   RECOVERY_POLICY,
   buildResumeContract,
+  cleanTaskDetail,
   environmentRepairNote,
   isEnvironmentFailure,
   isReadLoopFailure,
@@ -702,7 +703,7 @@ export async function planProjectTasks(
 const TASK_WRITE_VERBS =
   /\b(add|create|implement|update|change|edit|write|refactor|fix|remove|delete|rename|move|append|replace|insert|build|generate|repair|wire|restore|ensure|enable|tune|adjust|enforce|expose|register|convert|support|extend|validate|improve|optimize|enhance)\b|oluştur|ekle|güncelle|değiştir|düzelt|sil|taşı|yaz|kaldır|onar|bağla|kaydet|düzenle|iyileştir|optimize et/i;
 const TASK_INSPECTION_VERBS =
-  /\b(inspect|read|review|verify|check|analy[sz]e|research|understand|plan|list|show|explain|find|enumerate|count)\b|incele|oku|gözden geçir|doğrula|kontrol et|araştır|listele|listeler|listeleme|liste|göster|açıkla|say/i;
+  /\b(inspect|read|review|verify|check|analy[sz]e|research|understand|plan|list|show|explain|find|enumerate|count)\b|incele|oku|gözden geçir|doğrula|kontrol et|araştır|listele|listeler|listeleme|liste|göster|açıkla|(?<![a-zçğıöşü])say(?![a-zçğıöşü])/i;
 
 export function taskLooksLikeWrite(task: ProjectTask): boolean {
   const title = task.title;
@@ -765,7 +766,7 @@ export function summaryAllowsNoChanges(summary: string): boolean {
   if (/\b(not complete|incomplete|not done|failed|missing|tamamlanmadı|yapılmadı|eksik)\b/i.test(summary)) {
     return false;
   }
-  return /already (?:present|exists|implemented|applied|there|complete|complete and|satisf(?:y|ies|ied)|fits|matches)|no changes? (?:are )?(?:needed|required)|nothing to change|none needed|task[\s-]*\d*\s*(?:is\s*)?complete|görev[\s-]*\d*\s*tamamlandı|created and verified|verified|confirmed|nothing (?:was|is) (?:changed|rewritten)|no (?:changes|modifications) (?:made|required)|zaten (?:var|mevcut|tamam|tam|işlevsel|karşılan|uyumlu)|değişiklik gerekmiyor|gerek yok/i.test(
+  return /already (?:present|exists|implemented|applied|there|complete|complete and|satisf(?:y|ies|ied)|fits|matches)|no changes? (?:are )?(?:needed|required)|nothing to change|none needed|task[\s-]*\d*\s*(?:is\s*)?complete|görev[\s-]*\d*\s*tamamlandı|created and verified|verified|confirmed|nothing (?:was|is) (?:changed|rewritten)|no (?:changes|modifications) (?:made|required)|zaten (?:var|mevcut|tamam|tam|işlevsel|karşılan|uyumlu|uygulanmış|eklenmiş|yapılmış|mevcutmuş)|değişiklik gerekmiyor|gerek yok/i.test(
     summary,
   );
 }
@@ -846,7 +847,7 @@ export function taskTargetFiles(
     found.add(normalized);
   };
   for (const file of task.changedFiles) add(file);
-  const text = `${task.title}\n${task.detail}\n${task.acceptance ?? ""}`;
+  const text = `${task.title}\n${cleanTaskDetail(task.detail)}\n${task.acceptance ?? ""}`;
   for (const match of text.match(CODE_FILE_PATTERN) ?? []) add(match);
   // Symbol hints catch a feature mentioned only by name (e.g. monthly chart).
   for (const hint of featureExistenceHints(analysis, task)) {
@@ -1128,7 +1129,7 @@ function taskInstruction(
   return [
     `You are executing task ${task.id} of ${total} in a persistent project task loop.`,
     `Task: ${task.title}`,
-    task.detail,
+    cleanTaskDetail(task.detail),
     task.acceptance ? `Acceptance: ${task.acceptance}` : "",
     task.notes ? `Retry note: ${task.notes}` : "",
     resumeContract,
@@ -1229,6 +1230,22 @@ export function taskStepBudget(effort: ProjectTaskEffort): number {
  */
 export function softTaskTokenBudget(effort: ProjectTaskEffort): number {
   return Math.round(taskBudgetForEffort(effort).tokens * 1.25);
+}
+
+/**
+ * A "simple" edit can still require a real browser round-trip and several
+ * reads. Give UI/verification tasks the standard safety budget so they do not
+ * burn a whole retry on a short verification.
+ */
+export function taskBudgetEffort(task: ProjectTask): ProjectTaskEffort {
+  if (task.effort !== "simple") return task.effort;
+  const text = `${task.title}\n${cleanTaskDetail(task.detail)}`;
+  const uiOrVerification =
+    taskLooksLikeVerification(task) ||
+    /\b(?:browser|ui|ux|arayüz|arayuz|canvas|game|oyun|ekran|page|sayfa|html|css|screenshot|responsive|mobil)\b|\.(?:html?|css|jsx?|tsx?|vue|svelte)\b/i.test(
+      text,
+    );
+  return uiOrVerification ? "standard" : "simple";
 }
 
 interface RetryRecovery {
@@ -1461,6 +1478,12 @@ export function summarizeToolIssues(steps: AiAgentStep[]): string[] {
     ) {
       label = "missing project tool";
     }
+    // A failure followed by a successful call to the same tool was recovered
+    // and should not look like a blocker in the task card.
+    const recovered = steps.some(
+      (later) => later.index > step.index && later.ok && later.action === step.action,
+    );
+    if (recovered) label = `recovered ${label}`;
     const sample = (step.observation ?? "").replace(/\s+/g, " ").trim().slice(0, 140);
     const current = groups.get(label);
     if (current) current.count += 1;
@@ -1581,6 +1604,9 @@ export function intentTask(
             : intent.scope === "medium"
               ? "standard"
               : "hard";
+  const assumptions = intent.assumptions.filter(
+    (item) => !/Intent analyst could not parse|Intent analysis could not run/i.test(item),
+  );
   return {
     id: "task-1",
     title: goal.length > 90 ? `${goal.slice(0, 87)}…` : goal,
@@ -1588,7 +1614,7 @@ export function intentTask(
       intent.understanding,
       intent.approach ? `Approach: ${intent.approach}` : "",
       intent.areas.length > 0 ? `Likely areas: ${intent.areas.join(", ")}` : "",
-      intent.assumptions.length > 0 ? `Assumptions: ${intent.assumptions.join("; ")}` : goal,
+      assumptions.length > 0 ? `Assumptions: ${assumptions.join("; ")}` : intent.understanding ? "" : goal,
     ]
       .filter(Boolean)
       .join("\n"),
@@ -1887,6 +1913,9 @@ export async function runProjectLoop(
           ...(narrow ? {} : { repairAttempts: task.repairAttempts ?? 0 }),
           modelOverride: undefined,
           completedAt: undefined,
+          // A manual retry is a new budget window. Carrying the previous
+          // attempt's usage makes a focused retry stop before its first step.
+          tokenUsage: undefined,
           resultSummary: undefined,
           verification: undefined,
           notes: notes || undefined,
@@ -1923,6 +1952,7 @@ export async function runProjectLoop(
     costBudgetUsd: number;
     forceWrite: boolean;
     inspection: boolean;
+    runKey: string;
     targets: string[];
     promise: Promise<AiAgentResult | null>;
   }
@@ -1933,20 +1963,24 @@ export async function runProjectLoop(
     parallel: boolean,
   ): Promise<PreparedTaskRun> {
     if (!queue) throw new Error("No task queue is available.");
-    const defaultBudget = taskBudgetForEffort(task.effort);
-    const tokenBudget = options.tokenBudget ?? task.tokenBudget ?? defaultBudget.tokens;
-    const costBudgetUsd =
-      options.costBudgetUsd ?? task.costBudgetUsd ?? defaultBudget.costUsd;
+    const runKey = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+    const budgetEffort = taskBudgetEffort(task);
+    const defaultBudget = taskBudgetForEffort(budgetEffort);
+    const tokenBudget = options.tokenBudget ?? defaultBudget.tokens;
+    const costBudgetUsd = options.costBudgetUsd ?? defaultBudget.costUsd;
     queue = markTask(queue, task.id, {
       status: "in_progress",
       startedAt: nowIso(),
       attempts: task.attempts + 1,
+      effort: budgetEffort,
       tokenBudget,
       costBudgetUsd,
     });
     const current = queue.tasks.find((item) => item.id === task.id);
     if (!current) throw new Error(`Task ${task.id} disappeared from the queue.`);
-    await startAgentRunLive(analysis.rootPath, task.id, current.attempts).catch(() => {});
+    await startAgentRunLive(analysis.rootPath, task.id, current.attempts, runKey).catch(
+      () => {},
+    );
     emit({ type: "task", queue, task: current });
 
     let taskConfig: ResolvedAgentConfig = current.modelOverride
@@ -1957,7 +1991,7 @@ export async function runProjectLoop(
           provider: options.provider,
           model: options.model,
         }).catch(() => main);
-    if (!current.modelOverride && current.effort === "simple" && current.role !== "fast") {
+    if (!current.modelOverride && budgetEffort === "simple" && current.role !== "fast") {
       taskConfig = await resolveAgentRole("fast", {
         provider: options.provider,
         model: options.model,
@@ -2041,25 +2075,29 @@ export async function runProjectLoop(
         allowCommands: options.allowCommands === true && !inspectionRun && !extractionTask,
         language: options.language,
         interactive: true,
-        forceFast: current.effort === "simple",
+        forceFast: budgetEffort === "simple",
         forceWrite,
-        maxSteps: taskStepBudget(current.effort),
+        maxSteps: taskStepBudget(budgetEffort),
         tokenBudget,
-        softTokenBudget: softTaskTokenBudget(current.effort),
+        softTokenBudget: softTaskTokenBudget(budgetEffort),
         costBudgetUsd,
         budgetMode: settings?.taskBudgetMode ?? "off",
         maxOutputTokens: settings?.agentMaxOutputTokens ?? 16_000,
         startingUsage: current.tokenUsage,
         intent: options.intent,
-        workBriefText: current.title,
+        workBriefText: cleanTaskDetail(current.detail) || current.title,
         history: options.history?.slice(-8),
         liveBrowser: options.liveBrowser === true,
       },
       (event) => {
         if (event.type === "done") return;
-        void appendAgentRunEvent(analysis.rootPath, task.id, current.attempts, event).catch(
-          () => {},
-        );
+        void appendAgentRunEvent(
+          analysis.rootPath,
+          task.id,
+          current.attempts,
+          event,
+          runKey,
+        ).catch(() => {});
         emit(event);
       },
       signal,
@@ -2080,6 +2118,7 @@ export async function runProjectLoop(
       costBudgetUsd,
       forceWrite,
       inspection: inspectionRun,
+      runKey,
       targets,
       promise,
     };
@@ -2207,6 +2246,7 @@ export async function runProjectLoop(
       tokenBudget,
       costBudgetUsd,
       forceWrite,
+      runKey,
     } = completed.prepared;
     const result = completed.result;
 
@@ -2229,6 +2269,7 @@ export async function runProjectLoop(
     const runLogPath = await saveAgentRun(analysis.rootPath, {
       taskId: task.id,
       attempt: current.attempts,
+      runKey,
       goal: queue.goal,
       stoppedReason: result.stoppedReason,
       summary: result.summary,

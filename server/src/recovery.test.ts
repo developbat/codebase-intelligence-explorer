@@ -6,6 +6,7 @@ import {
   environmentRepairNote,
   isEnvironmentFailure,
   isReadLoopFailure,
+  cleanTaskDetail,
   narrowTaskForEditFirst,
 } from "./ai/recovery";
 
@@ -61,8 +62,9 @@ test("narrowTaskForEditFirst keeps identity, files and completed work", () => {
   assert.equal(narrowed.repairAttempts, 1);
   assert.equal(narrowed.tokenUsage, undefined);
   assert.match(narrowed.detail, /analytics\.py/);
-  assert.match(narrowed.detail, /Read at most 2 files/u);
-  assert.match(narrowed.detail, /Do not restart/u);
+  assert.doesNotMatch(narrowed.detail, /Narrow auto-repair|Read at most 2 files/);
+  assert.match(narrowed.notes ?? "", /Read at most 2 files/u);
+  assert.match(narrowed.notes ?? "", /Do not restart/u);
 });
 
 test("buildResumeContract lists done tasks and changed files", () => {
@@ -78,4 +80,11 @@ test("buildResumeContract lists done tasks and changed files", () => {
   assert.match(contract, /data_generator\.py/u);
   assert.match(contract, /analytics\.py/u);
   assert.match(contract, /do not redo/i);
+});
+
+
+test("cleanTaskDetail removes stale recovery text and internal intent noise", () => {
+  const detail =
+    "Hedef sayı turunu doğrula.\n\nAssumptions: Intent analyst could not parse its reply; proceeding with one focused task.\n\nNarrow auto-repair #2: kept reading instead of editing.\nTarget file(s): game.js.\nRead at most 2 files.";
+  assert.equal(cleanTaskDetail(detail), "Hedef sayı turunu doğrula.");
 });

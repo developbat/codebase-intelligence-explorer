@@ -240,6 +240,8 @@ export interface AgentRunRecord {
   version: 1;
   taskId: string;
   attempt: number;
+  /** Unique per execution, so a retry with the same attempt number does not overwrite evidence. */
+  runKey?: string;
   goal: string;
   stoppedReason: string;
   summary: string;
@@ -258,8 +260,23 @@ function safeTaskId(value: string): string {
   return value.replace(/[^\w.-]+/g, "-").slice(0, 60) || "task";
 }
 
-function runFilePath(rootPath: string, taskId: string, attempt: number, extension: string): string {
-  return path.join(agentDir(rootPath), "runs", `${safeTaskId(taskId)}-a${attempt}.${extension}`);
+function safeRunKey(value: string | undefined): string {
+  return value ? value.replace(/[^\w.-]+/g, "-").slice(0, 40) : "";
+}
+
+function runFilePath(
+  rootPath: string,
+  taskId: string,
+  attempt: number,
+  extension: string,
+  runKey?: string,
+): string {
+  const suffix = runKey ? `-${safeRunKey(runKey)}` : "";
+  return path.join(
+    agentDir(rootPath),
+    "runs",
+    `${safeTaskId(taskId)}-a${attempt}${suffix}.${extension}`,
+  );
 }
 
 /** Start a per-attempt live log so an aborted or killed run still leaves evidence. */
@@ -267,10 +284,11 @@ export async function startAgentRunLive(
   rootPath: string,
   taskId: string,
   attempt: number,
+  runKey?: string,
 ): Promise<void> {
   const directory = path.join(agentDir(rootPath), "runs");
   await fs.mkdir(directory, { recursive: true, mode: 0o700 });
-  const file = runFilePath(rootPath, taskId, attempt, "live.jsonl");
+  const file = runFilePath(rootPath, taskId, attempt, "live.jsonl", runKey);
   await fs.writeFile(
     file,
     `${JSON.stringify({ at: nowIso(), type: "start", taskId, attempt })}\n`,
@@ -284,6 +302,7 @@ export async function appendAgentRunEvent(
   taskId: string,
   attempt: number,
   event: AiAgentEvent,
+  runKey?: string,
 ): Promise<void> {
   if (event.type === "token" || event.type === "done") return;
   const entry: Record<string, unknown> = { at: nowIso(), type: event.type };
@@ -312,7 +331,7 @@ export async function appendAgentRunEvent(
     entry.scope = event.intent.scope;
     entry.kind = event.intent.kind;
   }
-  const file = runFilePath(rootPath, taskId, attempt, "live.jsonl");
+  const file = runFilePath(rootPath, taskId, attempt, "live.jsonl", runKey);
   await fs.appendFile(file, `${JSON.stringify(entry)}\n`, { mode: 0o600 });
 }
 
@@ -342,7 +361,13 @@ export async function saveAgentRun(
   };
   const directory = path.join(agentDir(rootPath), "runs");
   await fs.mkdir(directory, { recursive: true, mode: 0o700 });
-  const file = path.join(directory, `${safeTaskId(record.taskId)}-a${record.attempt}.json`);
+  const file = runFilePath(
+    rootPath,
+    record.taskId,
+    record.attempt,
+    "json",
+    record.runKey,
+  );
   await writeTextAtomic(file, JSON.stringify(data, null, 2));
   // Keep diagnostics bounded: retain the newest 40 run records.
   try {

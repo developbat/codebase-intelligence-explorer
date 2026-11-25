@@ -726,8 +726,12 @@ export async function analyzeIntent(
         );
         intent = parseIntentResponse(minimal, analysis, instruction, options.clarified);
       } catch {
+        const questionFallback = /\?|^(ne|neden|nasıl|niçin|ne zaman|nerede|kim|what|why|how|where|when|who)\b/i.test(
+          instruction.trim(),
+        );
         intent = {
-          kind: "edit",
+          // A parse failure must not turn a question into an edit request.
+          kind: questionFallback ? "question" : "edit",
           understanding: instruction.trim().slice(0, 500),
           language: options.language ?? "unknown",
           needsClarification: false,

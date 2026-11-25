@@ -52,6 +52,19 @@ function targetFiles(task: ProjectTask): string[] {
   return [...new Set(matches.map((match) => match.trim().replace(/^\.\//, "")))].slice(0, 4);
 }
 
+
+/**
+ * Remove recovery instructions from the durable task description. They belong
+ * in notes, where they can be replaced on the next retry instead of making an
+ * inspection task look like a permanent edit request.
+ */
+export function cleanTaskDetail(detail: string): string {
+  return detail
+    .replace(/\n{2,}Narrow auto-repair #\d+:[\s\S]*?(?=\n{2,}|$)/g, "")
+    .replace(/\n?Assumptions: [^\n]*Intent analyst could not parse[^\n]*/gi, "")
+    .trim();
+}
+
 /**
  * Turn a task that burned its budget by reading into one small, edit-first
  * task. It keeps the original id and changed files so dependent tasks and
@@ -77,17 +90,15 @@ export function narrowTaskForEditFirst(
     tokenUsage: undefined,
     resultSummary: undefined,
     verification: undefined,
-    detail: [
-      task.detail,
-      "",
-      `Narrow auto-repair #${repairs}: ${reason}.`,
-      fileHint,
-      `Read at most ${RECOVERY_POLICY.maxFilesForNarrowRetry} files (or read no file at all if the content is already in context), then apply the smallest edit with replace_in_file or write_file.`,
+    detail: cleanTaskDetail(task.detail),
+    acceptance: task.acceptance ?? task.title,
+    notes: [
+      task.notes,
+      `Narrow repair #${repairs}: ${reason}. ${fileHint}`,
+      `Read at most ${RECOVERY_POLICY.maxFilesForNarrowRetry} files (or read no file at all if the content is already in context), then apply only the smallest missing edit with replace_in_file or write_file.`,
       "Do not re-read a file or range you already saw. Do not restart the task, do not recreate existing files and do not revert completed work.",
       "If the requested behavior already exists, verify it and finish with evidence instead of rewriting it.",
-    ].join("\n"),
-    acceptance: `${task.acceptance ?? task.title} Only the missing change is required; existing work must remain intact.`,
-    notes: [task.notes, "Narrow edit-first retry: read little, edit now, verify."]
+    ]
       .filter(Boolean)
       .join("\n"),
     updatedAt: new Date().toISOString(),

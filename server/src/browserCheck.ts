@@ -2,12 +2,13 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { chromium, type Browser, type BrowserContext, type Page } from "playwright-core";
 import { attachLivePage, startLiveSession, stopLiveSession } from "./liveBrowser";
-import type {
-  BrowserCheckMetrics,
-  BrowserCheckOptions,
-  BrowserCheckResult,
-  BrowserCheckStep,
-  BrowserCheckStepResult,
+import {
+  normalizeBrowserSteps,
+  type BrowserCheckMetrics,
+  type BrowserCheckOptions,
+  type BrowserCheckResult,
+  type BrowserCheckStep,
+  type BrowserCheckStepResult,
 } from "../../shared/browserCheck";
 
 const MAX_STEPS = 30;
@@ -294,7 +295,7 @@ async function runStep(page: Page, step: BrowserCheckStep): Promise<string> {
         `${selector} changed ${changes} times in ${duration}ms (allowed ${maxChanges}). Values: ${values
           .slice(0, 6)
           .map((item) => `"${item.slice(0, 80)}"`)
-          .join(" → ")}`,
+          .join(" → ")}. If this is a countdown/timer, use expectText for stable labels and eval for numeric values instead of expectStable.`,
       );
     }
     return `${selector} stayed stable for ${duration}ms${maxChanges > 0 ? ` (${changes} changes)` : ""}`;
@@ -319,7 +320,7 @@ async function runStep(page: Page, step: BrowserCheckStep): Promise<string> {
     return "Reloaded page";
   }
   if (step.action === "eval") {
-    const code = (step.value ?? step.text ?? "").trim();
+    const code = (step.value ?? step.expression ?? step.code ?? step.script ?? step.text ?? "").trim();
     if (!code) throw new Error("value is required for eval.");
     if (code.length > 8_000) throw new Error("eval code is limited to 8000 characters.");
     const result = await page.evaluate(code).catch((error: unknown) => {
@@ -398,7 +399,7 @@ export async function runBrowserCheck(
   if (options.signal?.aborted) throw aborted();
   const executablePath = await browserExecutable();
   const timeoutMs = Math.max(5_000, Math.min(30_000, options.timeoutMs ?? 15_000));
-  const steps = (options.steps ?? []).slice(0, MAX_STEPS);
+  const steps = normalizeBrowserSteps(options.steps ?? []).slice(0, MAX_STEPS);
   let requestedPath = options.path?.trim() || "index.html";
   if (path.isAbsolute(requestedPath)) {
     const relative = path.relative(rootPath, requestedPath).replace(/\\/g, "/");

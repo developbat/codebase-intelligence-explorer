@@ -226,7 +226,12 @@ export function TaskQueueCard({
                       </summary>
                       <ul>
                         {task.toolIssues.map((issue, issueIndex) => (
-                          <li key={issueIndex}>{issue}</li>
+                          <li
+                            key={issueIndex}
+                            className={issue.startsWith("recovered ") ? "is-recovered" : undefined}
+                          >
+                            {issue}
+                          </li>
                         ))}
                       </ul>
                     </details>

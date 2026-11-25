@@ -169,7 +169,12 @@ export function ReportsPanel({ projectId }: { projectId: string }) {
                       <strong>{t("Tool issues")}</strong>
                       <ul>
                         {task.toolIssues.map((issue, issueIndex) => (
-                          <li key={issueIndex}>{issue}</li>
+                          <li
+                            key={issueIndex}
+                            className={issue.startsWith("recovered ") ? "is-recovered" : undefined}
+                          >
+                            {issue}
+                          </li>
                         ))}
                       </ul>
                     </div>

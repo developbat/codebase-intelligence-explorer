@@ -49,7 +49,10 @@ import { checkFileSyntax } from "../syntax";
 import { lspCompletion, lspDiagnostics, lspHover } from "../lsp";
 import { queryCsvFile, querySqliteFile } from "../dataQuery";
 import { runBrowserCheck } from "../browserCheck";
-import type { BrowserCheckStep } from "../../../shared/browserCheck";
+import {
+  normalizeBrowserSteps,
+  type BrowserCheckStep,
+} from "../../../shared/browserCheck";
 import {
   createProjectTool,
   findProjectTool,
@@ -2154,6 +2157,10 @@ const TOOL_ARG_TEMPLATES: Record<string, string> = {
   find_in_file: '{"action":"find_in_file","args":{"path":"relative/file.ext","query":"text"}}',
   delete_file: '{"action":"delete_file","args":{"path":"relative/file.ext"}}',
   rename_path: '{"action":"rename_path","args":{"path":"old/path","to":"new/path"}}',
+  browser_check:
+    '{"action":"browser_check","args":{"path":"index.html","steps":[{"action":"click","selector":"#play"},{"action":"eval","value":"document.querySelector(\"#score\").textContent","expectText":"0"}]}}',
+  game_check:
+    '{"action":"game_check","args":{"path":"index.html","steps":[{"action":"expectVisible","selector":"canvas"},{"action":"eval","value":"window.score ?? 0"}]}}',
 };
 
 export const VERIFICATION_ACTIONS = new Set([
@@ -4106,6 +4113,11 @@ export async function runAgentTask(
               { label: "Verify the result" },
             ],
     };
+  } else if (!readOnlyMode && options.forceWrite === false) {
+    // The task loop already classified this task as inspection/verification.
+    // Intent-level "edit" wording must not start a write spiral when the
+    // requested behavior is already implemented. Writes stay available.
+    plan = { ...plan, needsWrite: false };
   }
   activePlan = plan;
   const siteInspection = !plan.needsWrite && isSiteInspection(actionPlanSource);
@@ -4531,6 +4543,7 @@ ${lessons}` : "",
   let syntheticBrowserChecks = 0;
   let realScenarioRuns = 0;
   let realCheckAssertions = 0;
+  let verificationPassed = false;
   let verifyNudges = 0;
   let claimNudges = 0;
   let claimAuditNudges = 0;
@@ -4543,6 +4556,7 @@ ${lessons}` : "",
   let readOnlyStepsSinceChange = 0;
   let readDecisionNudged = false;
   let inspectionNudged = false;
+  let verificationNudged = false;
   let inspectionReadRejections = 0;
   let colorNudges = 0;
   let completeColorList: ColorList | null = null;
@@ -4558,7 +4572,32 @@ ${lessons}` : "",
   let codeChangeCount = 0;
   let tokensAtLastCodeChange = 0;
   let postChangeNudged = false;
-  let lastToolFailure: { action: string; observation: string; index: number } | null = null;
+  type ToolFailure = { action: string; observation: string; index: number };
+  const unresolvedToolFailures = new Map<string, ToolFailure>();
+  const toolFailureKey = (action: string, args: Record<string, unknown>): string => {
+    const target =
+      args.path ?? args.file ?? args.filePath ?? args.filename ?? args.target ?? args.url;
+    if (typeof target === "string" && target.trim()) {
+      return `${action}:${target.trim().slice(0, 200)}`;
+    }
+    if (typeof args.command === "string" && args.command.trim()) {
+      return `${action}:${args.command.trim().slice(0, 160)}`;
+    }
+    if (typeof args.name === "string" && args.name.trim()) {
+      return `${action}:${args.name.trim().slice(0, 160)}`;
+    }
+    if (typeof args.query === "string" && args.query.trim()) {
+      return `${action}:${args.query.trim().slice(0, 160)}`;
+    }
+    return action;
+  };
+  const latestToolFailure = (): ToolFailure | null => {
+    let latest: ToolFailure | null = null;
+    for (const failure of unresolvedToolFailures.values()) {
+      if (!latest || failure.index > latest.index) latest = failure;
+    }
+    return latest;
+  };
   let toolFailureNudges = 0;
   let transientRetries = 0;
   let budgetWarned = false;
@@ -4577,12 +4616,16 @@ ${lessons}` : "",
       outputTokens: tokenTotal.outputTokens + startingUsage.outputTokens,
       totalTokens: tokenTotal.totalTokens + startingUsage.totalTokens,
     };
-    if (
-      options.softTokenBudget &&
-      cumulativeUsage.totalTokens >= options.softTokenBudget
-    ) {
+    // The soft guard is per attempt. startingUsage belongs to earlier attempts
+    // and must not make a focused retry stop before its first model turn.
+    const softUsage = tokenTotal.totalTokens;
+    if (options.softTokenBudget && softUsage >= options.softTokenBudget) {
       stoppedReason = "budget";
-      summary = `Soft task budget reached: ${cumulativeUsage.totalTokens.toLocaleString()} of ${options.softTokenBudget.toLocaleString()} tokens. The task loop will continue with a focused retry.`;
+      summary = `Soft task budget reached: ${softUsage.toLocaleString()} of ${options.softTokenBudget.toLocaleString()} tokens in this attempt${
+        startingUsage.totalTokens > 0
+          ? ` (${cumulativeUsage.totalTokens.toLocaleString()} total across attempts)`
+          : ""
+      }. The task loop will continue with a focused retry.`;
       log("warn", "Soft task budget reached", summary.slice(0, 180));
       break;
     }
@@ -4633,7 +4676,7 @@ ${lessons}` : "",
         `${next.action}${agentActionTarget(next.args) ? ` · ${agentActionTarget(next.args)}` : ""}`,
       );
     } else {
-    if (!readOnlyMode && plan.needsWrite && changedFiles.length === 0) {
+    if (!readOnlyMode && plan.needsWrite && changedFiles.length === 0 && !verificationPassed) {
       if (continuationMode && modelTurns >= 2 && writeNudges === 0) {
         writeNudges = 1;
         transcript.push({
@@ -5150,6 +5193,7 @@ ${lessons}` : "",
       !askMode &&
       plan.needsWrite &&
       changedFiles.length === 0 &&
+      !verificationPassed &&
       writeNudges >= 2 &&
       READ_ONLY_ACTIONS.has(action) &&
       !VERIFICATION_ACTIONS.has(action)
@@ -5549,12 +5593,13 @@ ${lessons}` : "",
         continue;
       }
 
+      const toolFailure = latestToolFailure();
       if (
         !readOnlyMode &&
-        lastToolFailure &&
-        !(browserCheckBlocked && lastToolFailure.action === "browser_check") &&
+        toolFailure &&
+        !(browserCheckBlocked && toolFailure.action === "browser_check") &&
         !/Project tool .* was not found|No saved project tools exist/i.test(
-          lastToolFailure.observation,
+          toolFailure.observation,
         ) &&
         toolFailureNudges < 2 &&
         modelTurns < maxSteps &&
@@ -5564,13 +5609,13 @@ ${lessons}` : "",
           ))
       ) {
         toolFailureNudges += 1;
-        const observation = `Finish rejected: your last ${lastToolFailure.action} call failed and was not resolved. Fix the call and complete the work yourself instead of stopping.\nError: ${lastToolFailure.observation.slice(0, 700)}${toolArgHint(
-          lastToolFailure.action,
+        const observation = `Finish rejected: your last ${toolFailure.action} call failed and was not resolved. Fix the call and complete the work yourself instead of stopping.\nError: ${toolFailure.observation.slice(0, 700)}${toolArgHint(
+          toolFailure.action,
         )}`;
         log(
           "warn",
           "Finish rejected: unresolved tool error",
-          `${lastToolFailure.action} · ${lastToolFailure.observation.slice(0, 140)}`,
+          `${toolFailure.action} · ${toolFailure.observation.slice(0, 140)}`,
         );
         recordStep({
           index,
@@ -6107,7 +6152,7 @@ ${lessons}` : "",
           observation =
             `Cached read: ${filePath}${
               wholeFile ? " (whole file)" : `:${requestedStart}-${requestedEnd}`
-            } from step ${coveredEntry.step}. Do not request this range again; make the edit now.` +
+            } from step ${coveredEntry.step}. Do not request this range again; use this evidence for the answer or make only the smallest missing edit.` +
             (cachedContent ? `\n\n${cachedContent}` : " Reuse the earlier observation.");
           log("info", "Read served from context cache", `${filePath} · step ${coveredEntry.step}`);
           ok = true;
@@ -6122,26 +6167,31 @@ ${lessons}` : "",
           const requestedSpan = openEnd
             ? Number.POSITIVE_INFINITY
             : requestedEnd - requestedStart + 1;
-          if (
+          // A focused read that is one line over the limit should be clamped,
+          // not rejected: the rejection stays "unresolved" and blocks finish.
+          const narrowClipped =
             narrowEditActive &&
             lines.length > NARROW_EDIT_MAX_READ_LINES &&
-            requestedSpan > NARROW_EDIT_MAX_READ_LINES
-          ) {
-            throw new Error(
-              `Narrow edit: ${file.filePath} has ${lines.length} lines and the requested range is ${requestedSpan === Number.POSITIVE_INFINITY ? "open-ended" : `${requestedSpan} lines`}. Read at most ${NARROW_EDIT_MAX_READ_LINES} lines. Use project_search or find_in_file to locate the selector/property/symbol, call read_symbol for a function/class, then read_file with startLine/endLine around the match.`,
-            );
-          }
+            requestedSpan > NARROW_EDIT_MAX_READ_LINES;
           const startLine = requestedStart;
           const endLine = Math.max(
             startLine,
             Math.min(
               lines.length,
-              openEnd ? startLine + 260 : requestedEnd,
+              openEnd
+                ? startLine + (narrowClipped ? NARROW_EDIT_MAX_READ_LINES - 1 : 260)
+                : narrowClipped
+                  ? startLine + NARROW_EDIT_MAX_READ_LINES - 1
+                  : requestedEnd,
             ),
           );
           const window = lines.slice(startLine - 1, endLine).join("\n");
           const clipped = window.length > AGENT_READ_CHARS ? `${window.slice(0, AGENT_READ_CHARS)}\n… file window truncated; continue with startLine=${endLine + 1} …` : window;
-          observation = `File: ${file.filePath} (${lines.length} lines, showing ${startLine}-${Math.min(endLine, lines.length)})\n${numberedContent(clipped, startLine)}`;
+          observation = `File: ${file.filePath} (${lines.length} lines, showing ${startLine}-${Math.min(endLine, lines.length)})${
+            narrowClipped
+              ? `\n(Focused read limited to ${NARROW_EDIT_MAX_READ_LINES} lines; continue with startLine=${Math.min(endLine + 1, lines.length)} if needed.)`
+              : ""
+          }\n${numberedContent(clipped, startLine)}`;
           evidence.push({ path: file.filePath, label: "Read by agent", startLine });
           ranges.push({
             start: startLine,
@@ -6236,11 +6286,7 @@ ${lessons}` : "",
         if (isSecretAgentPath(filePath)) throw new Error("Reading environment, key or Git internals files is denied.");
         const fullRead = (readCoverage.get(filePath) ?? []).find((entry) => entry.wholeFile);
         const previousFindCount = findCounts.get(filePath) ?? 0;
-        if (fullRead) {
-          observation = `File ${filePath} was already read fully in step ${fullRead.step}. Use that earlier observation instead of searching it again.`;
-          log("info", "Find skipped (file already in context)", filePath);
-          ok = true;
-        } else if (previousFindCount >= 3) {
+        if (previousFindCount >= 3) {
           observation = `You already searched ${filePath} ${previousFindCount} times. Read the relevant range once, or make the edit using the evidence you have. Do not search this file again.`;
           log("warn", "Repeated file search skipped", `${filePath} · ${previousFindCount} searches`);
           ok = true;
@@ -6262,9 +6308,10 @@ ${lessons}` : "",
               .join("\n");
             hits.push(snippet);
           }
+          const matches = `Matches for "${query}" in ${file.filePath} (${lines.length} lines):\n${hits.join("\n---\n")}`;
           observation =
             hits.length > 0
-              ? `Matches for "${query}" in ${file.filePath} (${lines.length} lines):\n${hits.join("\n---\n")}`
+              ? `${fullRead ? `File was already read fully in step ${fullRead.step}; this is a compact match list.\n` : ""}${matches}`
               : `No matches for "${query}" in ${file.filePath}.`;
           evidence.push({ path: file.filePath, label: "Search in file" });
           recordRead(file.filePath, undefined, undefined, false, "find_in_file");
@@ -6733,6 +6780,7 @@ ${lessons}` : "",
         }
         observation = result.summary;
         ok = result.check.ok && result.check.metrics.canvases > 0;
+        if (ok) verificationPassed = true;
         log(result.check.ok ? "success" : "error", "Game check complete", `${result.engine} · ${result.check.metrics.fps ?? "—"} fps`);
       } else if (action === "run_test_scenario") {
         const rawName = String(args.name ?? args.path ?? "").trim();
@@ -6786,6 +6834,7 @@ ${lessons}` : "",
         evidence.push({ path: relative, label: "Test scenario" });
         log(result.ok ? "success" : "warn", "Test scenario finished", result.summary.slice(0, 160));
         ok = result.ok;
+        if (ok && !scenarioSynthetic) verificationPassed = true;
       } else if (action === "browser_check") {
         if (browserCheckCalls >= maxBrowserChecks) {
           browserCheckBlocked = true;
@@ -6793,9 +6842,11 @@ ${lessons}` : "",
             `Browser check budget exhausted for this task (${maxBrowserChecks} calls). Do not call browser_check again; report the exact blocker or finish with the evidence you already have.`,
           );
         }
-        browserCheckCalls += 1;
         const browserPath = typeof args.path === "string" ? args.path : "index.html";
-        const rawSteps = Array.isArray(args.steps) ? args.steps : [];
+        // Validate and normalize before consuming the per-task browser budget.
+        // A bad step shape is a retryable argument error, not a spent check.
+        const rawSteps = normalizeBrowserSteps(args.steps);
+        browserCheckCalls += 1;
         const liveBrowser = options.liveBrowser === true || args.visible === true;
         if (liveBrowser) {
           log("info", "Live browser opened", `${browserPath} · ${rawSteps.length} steps`);
@@ -6805,7 +6856,7 @@ ${lessons}` : "",
         const result = await runBrowserCheck(analysis.id, analysis.rootPath, {
           path: browserPath,
           url: typeof args.url === "string" ? args.url : undefined,
-          steps: rawSteps as BrowserCheckStep[],
+          steps: rawSteps,
           mobile: args.mobile === true,
           screenshot: args.screenshot === true,
           live: options.liveBrowser === true,
@@ -6815,10 +6866,11 @@ ${lessons}` : "",
         if (syntheticCheck) syntheticBrowserChecks += 1;
         else {
           realBrowserChecks += 1;
-          realCheckAssertions += countCheckAssertions(rawSteps as { action: string }[]);
+          realCheckAssertions += countCheckAssertions(rawSteps);
         }
         if (result.ok) {
           browserFailureRepeat = 0;
+          if (!syntheticCheck) verificationPassed = true;
         } else if (browserKey === lastBrowserKey) {
           browserFailureRepeat += 1;
         } else {
@@ -7242,6 +7294,13 @@ ${lessons}` : "",
           };
         }
         ok = result.exitCode === 0;
+        if (
+          ok &&
+          (command === verificationCommand ||
+            /\b(?:test|tests|pytest|build|typecheck|lint|verify|doğrula|derle)\b/i.test(command))
+        ) {
+          verificationPassed = true;
+        }
       }
       }
       if (actionCacheKeyValue && !cachedAction && ok) {
@@ -7252,20 +7311,44 @@ ${lessons}` : "",
       if (/required|must be a string|limit reached|too large|outside the project|denied/i.test(observation)) {
         observation += `\n\nFix the arguments and retry the same tool now. Do not finish while this call is failing.${toolArgHint(action)}`;
       }
-      lastToolFailure = { action, observation, index };
+      unresolvedToolFailures.set(toolFailureKey(action, args), { action, observation, index });
       ok = false;
     }
-    if (ok && ["write_file", "append_text", "replace_in_file", "replace_many", "rename_path", "delete_file"].includes(action)) {
-      lastToolFailure = null;
-    }
-    // A hallucinated project-tool name is a tool-choice mistake, not a project
-    // defect. Do not let it block finish after a successful verification.
-    if (
-      ok &&
-      lastToolFailure &&
-      /Project tool .* was not found|No saved project tools exist/i.test(lastToolFailure.observation)
-    ) {
-      lastToolFailure = null;
+    if (ok) {
+      // A later successful call resolves the earlier failure for the same tool
+      // and target. This is what lets a corrected read range or browser step
+      // stop blocking finish.
+      unresolvedToolFailures.delete(toolFailureKey(action, args));
+      for (const [key, failure] of unresolvedToolFailures) {
+        if (
+          failure.action === action &&
+          (["browser_check", "game_check", "run_test_scenario"].includes(action) ||
+            /required|must be a string|limit reached|too large|outside the project|denied|narrow edit|read at most|read budget exhausted|unknown .*action|selector is required|value is required/i.test(
+              failure.observation,
+            ))
+        ) {
+          unresolvedToolFailures.delete(key);
+        }
+      }
+      // Editing invalidates page evidence collected before the edit.
+      if (
+        ["write_file", "append_text", "replace_in_file", "replace_many", "rename_path", "delete_file"].includes(
+          action,
+        )
+      ) {
+        for (const [key, failure] of unresolvedToolFailures) {
+          if (["browser_check", "game_check", "run_test_scenario"].includes(failure.action)) {
+            unresolvedToolFailures.delete(key);
+          }
+        }
+      }
+      // A hallucinated project-tool name is a tool-choice mistake, not a
+      // project defect. Do not let it block finish after a successful check.
+      for (const [key, failure] of unresolvedToolFailures) {
+        if (/Project tool .* was not found|No saved project tools exist/i.test(failure.observation)) {
+          unresolvedToolFailures.delete(key);
+        }
+      }
     }
 
     if (actionCount > 1) {
@@ -7390,6 +7473,7 @@ ${lessons}` : "",
       !readOnlyMode &&
       plan.needsWrite &&
       changedFiles.length === 0 &&
+      !verificationPassed &&
       readOnlyStepsSinceChange >= 8 &&
       !readDecisionNudged
     ) {
@@ -7403,6 +7487,21 @@ ${lessons}` : "",
           "Decision point: you have made 8+ read-only calls without changing a file. Stop reading. If the requested behavior already exists, verify it and call finish with file:line evidence and no edit. Otherwise make the smallest edit now with replace_in_file or write_file. Further file-reading/search calls are blocked, but browser_check, run_test_scenario and game_check remain available for verification. Then finish.",
       });
       log("warn", "Decision point: edit or finish", `${readOnlyStepsSinceChange} read-only calls · no edit`);
+    }
+    if (
+      !readOnlyMode &&
+      verificationPassed &&
+      changedFiles.length === 0 &&
+      readOnlyStepsSinceChange >= 8 &&
+      !verificationNudged
+    ) {
+      verificationNudged = true;
+      transcript.push({
+        role: "system",
+        content:
+          "A real verification already passed and no edit is needed. Finish now with the evidence: file:line references, the verification result, and why no change is required. Do not read more files.",
+      });
+      log("warn", "Verification decision point", "verification passed; finish with evidence");
     }
     if (step.action === "invalid") {
       protocolFailures += 1;

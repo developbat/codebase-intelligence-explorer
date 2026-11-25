@@ -24638,6 +24638,11 @@ button.canvas-stat {
   line-height: 1.45;
 }
 
+.task-queue-tool-issues li.is-recovered,
+.reports-tool-issues li.is-recovered {
+  color: #8ed4a8;
+}
+
 .task-queue-tool-issues li,
 .reports-tool-issues li {
   margin: 2px 0;
