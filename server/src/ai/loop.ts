@@ -2051,7 +2051,10 @@ export async function runProjectLoop(
     const budgetEffort = taskBudgetEffort(task);
     const forceWrite = workspaceMode === "build" && taskLooksLikeWrite(task);
     const scenarioMatch = await findTaskScenario(analysis.rootPath, task).catch(() => null);
-    const scenarioText = `${task.title}\n${task.detail}\n${task.acceptance ?? ""}`.toLowerCase();
+    // The title alone is not enough: a partial task can mention the scenario
+    // name without being responsible for the whole scenario. Require it only
+    // when the task detail or acceptance explicitly asks for it.
+    const scenarioText = `${task.detail}\n${task.acceptance ?? ""}`.toLowerCase();
     const requiredScenario =
       scenarioMatch && scenarioText.includes(scenarioMatch.name.toLowerCase())
         ? scenarioMatch
