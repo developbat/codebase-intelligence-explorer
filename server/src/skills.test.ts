@@ -324,3 +324,25 @@ test("prompt rendering enforces skill count and character limits", () => {
   assert.doesNotMatch(prompt, /Skill 5/);
   assert.ok(prompt.length < 21_500, `prompt too large: ${prompt.length}`);
 });
+
+test("auto-matches a relevant skill from the request text", async () => {
+  const { project, dataDir, homeDir, cleanup } = await roots();
+  try {
+    await writeSkill(
+      path.join(project, ".cie", "skills"),
+      "ui-review",
+      "name: Runtime UI Debugging\ndescription: Diagnose invisible icons, HUD contrast and layout.",
+      "CHECK UI",
+    );
+    const result = await loadSkillsForPrompt(
+      project,
+      "project-auto",
+      "HUD ikonları görünmez, kontrast ve hizalama bozuk",
+      { dataDir, homeDir },
+    );
+    assert.ok(result.relevant.includes("Runtime UI Debugging"));
+    assert.ok(result.skills.some((skill) => skill.record.name === "Runtime UI Debugging"));
+  } finally {
+    await fs.rm(cleanup, { recursive: true, force: true });
+  }
+});

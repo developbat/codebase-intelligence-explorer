@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import type { IntentAnalysis } from "../../shared/intent";
 import {
   blockDependentsOf,
   intentTask,
@@ -339,4 +340,27 @@ test("impact context includes callers and callees", () => {
   const lines = impactContext(analysis, new Set(["target"]));
   assert.ok(lines.some((line) => line.includes("callerFn") && line.includes("targetFn")));
   assert.ok(lines.some((line) => line.includes("targetFn") && line.includes("calleeFn")));
+});
+
+test("intentTask adds conventional UI checks for a terse prompt", () => {
+  const intent: IntentAnalysis = {
+    kind: "edit" as const,
+    understanding: "make the buttons blue",
+    language: "tr",
+    needsClarification: false,
+    scope: "small" as const,
+    mode: "single" as const,
+    areas: ["index.html"],
+    verification: "browser" as const,
+    context: "focused" as const,
+    history: "none" as const,
+    toolGroups: ["edit", "browser"],
+    approach: "",
+    needsExhaustiveEvidence: false,
+    assumptions: [],
+  };
+  const task = intentTask("butonları koyu mavi yap", intent, "npm run build", "build");
+  assert.match(task.detail, /UI quality/i);
+  assert.match(task.detail, /Preserve existing behavior/i);
+  assert.match(task.detail, /Verification:/i);
 });

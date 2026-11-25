@@ -19,6 +19,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { getDataDir, loadAnalysis } from "../store";
 import { readSourceFile } from "../editor";
+import { loadSkillsForPrompt } from "../skills";
 import { ensureDevServerForRequest } from "../processes";
 import { checkFileSyntax } from "../syntax";
 import { runBrowserCheck } from "../browserCheck";
@@ -488,9 +489,12 @@ export async function planProjectTasks(
   const analysis = await loadAnalysis(projectId);
   const verification = preferredVerificationCommand(analysis.tooling);
   const config = await resolveAgentRole("planner");
-  const [projectMap, preflightHints] = await Promise.all([
+  const [projectMap, preflightHints, skillLoad] = await Promise.all([
     ensureProjectMap(analysis).catch(() => ""),
     featurePreflightHints(analysis, goal).catch(() => []),
+    loadSkillsForPrompt(analysis.rootPath, projectId, goal).catch(() => ({
+      relevant: [] as string[],
+    })),
   ]);
   const goalTokens = [...new Set((goal.toLowerCase().match(/[a-z0-9_]{3,}/g) ?? []))].filter(
     (token) => !["the", "and", "for", "with", "add", "fix", "make", "get", "set", "use", "from", "this", "that", "var", "let", "const"].includes(token),
@@ -519,6 +523,9 @@ export async function planProjectTasks(
           : "",
         preflightHints.length > 0
           ? `Existing-code preflight (the requested behavior may already exist; verify before planning and never create an edit task that re-adds it):\n${preflightHints.join("\n")}`
+          : "",
+        skillLoad.relevant.length > 0
+          ? `Relevant skills (reference only; fold their guidance into task details/acceptance when useful): ${skillLoad.relevant.join(", ")}`
           : "",
         projectMap ? `Project map (use it for file and symbol ownership):\n${projectMap.slice(0, 14_000)}` : "",
         "Write task titles, details and acceptance in English. Keep quoted user text, file paths and code identifiers unchanged.",
@@ -1662,6 +1669,40 @@ function aggregateResult(
   };
 }
 
+function conventionalGuidance(
+  goal: string,
+  intent: IntentAnalysis,
+  verification?: string,
+): string {
+  const text = `${goal}\n${intent.understanding}\n${intent.areas.join(" ")}`.toLowerCase();
+  const ui =
+    /\b(ui|hud|icon|ikon|button|buton|css|style|stil|layout|düzen|duzen|color|renk|canvas|ekran|page|sayfa|responsive|mobil|görsel|gorsel)\b|\.(?:html?|css|jsx?|tsx?|vue|svelte)/i.test(
+      text,
+    );
+  const lines: string[] = [];
+  if (ui) {
+    lines.push(
+      "UI quality: give icons explicit size/color with contrast; keep icon and value on one row; distribute HUD items; check horizontal overflow; verify on the real page with a browser check or screenshot.",
+    );
+  }
+  if (intent.kind === "edit" || intent.kind === "scaffold") {
+    lines.push(
+      "Preserve existing behavior and scenarios; edit the existing structure instead of rewriting unrelated files.",
+    );
+  }
+  if (verification) lines.push(`Verification: ${verification} must pass.`);
+  if (intent.kind === "question" || intent.kind === "analyze") {
+    lines.push("Answer with file:line evidence; change no project files.");
+  }
+  if (intent.kind === "run") {
+    lines.push("Report the real command output and exit status.");
+  }
+  if (intent.needsExhaustiveEvidence) {
+    lines.push("Collect every requested item and verify the total count before finishing.");
+  }
+  return lines.join("\n");
+}
+
 export function intentTask(
   goal: string,
   intent: IntentAnalysis,
@@ -1697,6 +1738,9 @@ export function intentTask(
       intent.approach ? `Approach: ${intent.approach}` : "",
       intent.areas.length > 0 ? `Likely areas: ${intent.areas.join(", ")}` : "",
       assumptions.length > 0 ? `Assumptions: ${assumptions.join("; ")}` : intent.understanding ? "" : goal,
+      conventionalGuidance(goal, intent, verification)
+        ? `Conventional checks:\n${conventionalGuidance(goal, intent, verification)}`
+        : "",
     ]
       .filter(Boolean)
       .join("\n"),

@@ -591,12 +591,74 @@ export async function loadSkillForRun(
   return { record, content: await readSkillContent(record) };
 }
 
+const SKILL_SIGNALS: Record<string, { strong: string[]; weak: string[] }> = {
+  "code-review": {
+    strong: ["code review", "diff review", "kod incele", "inceleme"],
+    weak: ["review", "diff", "pull request", "pr"],
+  },
+  "security-audit": {
+    strong: ["security", "güvenlik", "guvenlik", "vulnerability", "zafiyet"],
+    weak: ["auth", "token", "secret", "injection", "xss", "csrf", "permission", "izin"],
+  },
+  "test-writer": {
+    strong: ["test yaz", "write test", "unit test", "pytest", "vitest", "jest"],
+    weak: ["test", "spec", "coverage", "mock", "assert"],
+  },
+  "accessibility-audit": {
+    strong: ["accessibility", "erişilebilirlik", "erisilebilirlik", "aria"],
+    weak: ["keyboard", "klavye", "screen reader", "contrast", "kontrast", "focus", "odak"],
+  },
+  "runtime-ui-debugging": {
+    strong: ["ui", "arayüz", "arayuz", "icon", "ikon", "hud", "css", "layout"],
+    weak: ["button", "buton", "ekran", "visual", "görsel", "gorsel", "alignment", "hizalama",
+      "contrast", "kontrast", "overflow", "taşma", "tas ma", "invisible", "görünmez", "gorunmez",
+      "renk", "color", "mavi", "kırmızı", "kirmizi", "yeşil", "yesil", "sarı", "sari",
+      "boyut", "size", "style", "stil", "canvas", "timer", "sayaç", "sayac"],
+  },
+  "refactor-guard": {
+    strong: ["refactor", "refaktör", "refaktor"],
+    weak: ["cleanup", "temizle", "duplicate", "tekrar", "sadeleştir", "sadelestir"],
+  },
+  "requirements-first": {
+    strong: ["requirements", "gereksinim", "acceptance criteria", "kabul kriteri"],
+    weak: ["acceptance", "kabul", "spec", "netleştir", "netlestir", "belirsiz", "ambiguous"],
+  },
+  "canvas-game-verification": {
+    strong: ["canvas", "oyun", "game", "fps"],
+    weak: ["sprite", "score", "puan", "timer", "sayaç", "sayac", "frame", "render"],
+  },
+};
+
+function autoMatchedSkills(records: SkillRecord[], instruction: string): SkillRecord[] {
+  const text = instruction.toLowerCase();
+  const requestTokens = new Set(
+    (text.match(/[a-z0-9çğıöşü_-]{3,}/g) ?? []).filter(
+      (token) => !["the", "and", "for", "with", "bir", "için", "ile", "olan", "daha", "çok"].includes(token),
+    ),
+  );
+  const scored = records
+    .filter((record) => record.enabled)
+    .map((record) => {
+      const slug = skillMentionSlug(record.name);
+      const signals = SKILL_SIGNALS[slug] ?? { strong: [], weak: [] };
+      const description = `${record.name} ${record.description}`.toLowerCase();
+      let score = 0;
+      for (const signal of signals.strong) if (text.includes(signal)) score += 2;
+      for (const signal of signals.weak) if (text.includes(signal)) score += 1;
+      for (const token of requestTokens) if (description.includes(token)) score += 1;
+      return { record, score };
+    })
+    .filter((entry) => entry.score >= 2)
+    .sort((left, right) => right.score - left.score);
+  return scored.slice(0, 1).map((entry) => entry.record);
+}
+
 export async function loadSkillsForPrompt(
   projectRoot: string,
   projectId: string,
   instruction: string,
   options: SkillsOptions = {},
-): Promise<{ skills: EnabledSkill[]; mentions: string[]; index: string }> {
+): Promise<{ skills: EnabledSkill[]; mentions: string[]; relevant: string[]; index: string }> {
   const { records } = await scanSkills(projectRoot, projectId, options);
   const tokens = [...instruction.matchAll(/@([a-zA-Z0-9][\w.-]*)/g)].map((match) =>
     match[1].toLowerCase(),
@@ -605,7 +667,11 @@ export async function loadSkillsForPrompt(
     const slug = skillMentionSlug(record.name);
     return tokens.includes(slug) || tokens.includes(record.name.toLowerCase().replace(/\s+/g, "-"));
   });
-  const ordered = [...mentioned, ...records.filter((record) => record.enabled)];
+  const relevant = autoMatchedSkills(
+    records.filter((record) => !mentioned.includes(record)),
+    instruction,
+  );
+  const ordered = [...mentioned, ...relevant, ...records.filter((record) => record.enabled)];
   const seen = new Set<string>();
   const skills: EnabledSkill[] = [];
   for (const record of ordered) {
@@ -622,6 +688,7 @@ export async function loadSkillsForPrompt(
   return {
     skills,
     mentions: mentioned.map((record) => record.name),
+    relevant: relevant.map((record) => record.name),
     index: renderSkillIndex(records),
   };
 }

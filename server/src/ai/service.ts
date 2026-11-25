@@ -4433,21 +4433,26 @@ ${lessons}` : "",
       ? "\n\nInspection profile: this task is read-only. Read at most 6 files, never re-read the same range, and finish with a compact report. Do not propose a large next-step list."
       : "";
   const skillLoad = await loadSkillsForPrompt(analysis.rootPath, projectId, instruction).catch(
-    () => ({ skills: [] as never[], mentions: [] as string[], index: "" }),
+    () => ({ skills: [] as never[], mentions: [] as string[], relevant: [] as string[], index: "" }),
   );
   const enabledSkills = skillLoad.skills;
   const mentionedSkill = skillLoad.mentions.length > 0;
+  const relevantSkill = skillLoad.relevant.length > 0;
   const includeSkills =
     !testTask &&
     options.microEdit !== true &&
     (!options.intent ||
       contextMode === "project" ||
       toolGroups.includes("skills") ||
-      mentionedSkill);
+      mentionedSkill ||
+      relevantSkill);
   const skillsPrompt = includeSkills ? renderSkillsForPrompt(enabledSkills) : "";
   const capabilityIndex = options.microEdit === true ? "" : skillLoad.index || "";
   if (skillLoad.mentions.length > 0) {
     log("info", "Skill mention", `${skillLoad.mentions.join(", ")} · used for this run only`);
+  }
+  if (skillLoad.relevant.length > 0) {
+    log("info", "Skill auto-match", `${skillLoad.relevant.join(", ")} · matched from the request`);
   }
   if (enabledSkills.length > 0) {
     log(
