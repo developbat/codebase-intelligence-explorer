@@ -705,16 +705,22 @@ const TASK_WRITE_VERBS =
 const TASK_INSPECTION_VERBS =
   /\b(inspect|read|review|verify|check|analy[sz]e|research|understand|plan|list|show|explain|find|enumerate|count)\b|incele|oku|gözden geçir|doğrula|kontrol et|araştır|listele|listeler|listeleme|liste|göster|açıkla|(?<![a-zçğıöşü])say(?![a-zçğıöşü])/i;
 
+// Turkish goals often describe the desired end state instead of using an
+// imperative verb ("işlem gösterilmeyecek", "buton aktif olacak"). Treat those
+// state-change phrases as edits; otherwise they look like read-only inspection.
+const TASK_CHANGE_PHRASES =
+  /(gösterilmeyecek|gösterilecek|gösterilmesin|olacak|olcak|olmalı|olması|olmasın|olmayacak|değişecek|değiştirilecek|kaldırılacak|eklenecek|yapılacak|birleştirilecek|taşınacak|gizlenecek|gizle|aktif olacak|pasif olacak|aktif olsun|pasif olsun|tek bir|sadece[^.]{0,40}aktif|buton[^.]{0,40}aktif)/i;
+
 export function taskLooksLikeWrite(task: ProjectTask): boolean {
   const title = task.title;
-  const titleWrite = TASK_WRITE_VERBS.test(title);
+  const titleWrite = TASK_WRITE_VERBS.test(title) || TASK_CHANGE_PHRASES.test(title);
   // The title is the user's actual goal. The detail is model-generated planning
   // text and often says "create a list", "report" or "build an inventory" even
   // for a read-only question. Never let that wording turn a list/question into
   // a project edit.
   if (TASK_INSPECTION_VERBS.test(title) && !titleWrite) return false;
   if (titleWrite) return true;
-  return TASK_WRITE_VERBS.test(task.detail);
+  return TASK_WRITE_VERBS.test(task.detail) || TASK_CHANGE_PHRASES.test(task.detail);
 }
 
 export function blockDependentsOf(
@@ -1242,7 +1248,7 @@ export function taskBudgetEffort(task: ProjectTask): ProjectTaskEffort {
   const text = `${task.title}\n${cleanTaskDetail(task.detail)}`;
   const uiOrVerification =
     taskLooksLikeVerification(task) ||
-    /\b(?:browser|ui|ux|arayüz|arayuz|canvas|game|oyun|ekran|page|sayfa|html|css|screenshot|responsive|mobil)\b|\.(?:html?|css|jsx?|tsx?|vue|svelte)\b/i.test(
+    /\b(?:browser|ui|ux|arayüz|arayuz|canvas|game|oyun|ekran|page|sayfa|html|css|screenshot|responsive|mobil|buton|button|aktif|pasif|hud|bar|göster|gizle|hesap|menü|menu|layout|düzen|renk|color)\b|\.(?:html?|css|jsx?|tsx?|vue|svelte)\b/i.test(
       text,
     );
   return uiOrVerification ? "standard" : "simple";
@@ -1910,7 +1916,8 @@ export async function runProjectLoop(
             : {}),
           status: "pending",
           attempts: 0,
-          ...(narrow ? {} : { repairAttempts: task.repairAttempts ?? 0 }),
+          // A manual retry starts a fresh recovery budget as well.
+          repairAttempts: 0,
           modelOverride: undefined,
           completedAt: undefined,
           // A manual retry is a new budget window. Carrying the previous
@@ -2077,6 +2084,7 @@ export async function runProjectLoop(
         interactive: true,
         forceFast: budgetEffort === "simple",
         forceWrite,
+        inspection: inspectionRun,
         maxSteps: taskStepBudget(budgetEffort),
         tokenBudget,
         softTokenBudget: softTaskTokenBudget(budgetEffort),

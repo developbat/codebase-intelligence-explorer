@@ -1914,6 +1914,9 @@ const WORKING_TOKEN_LIMIT = 900_000;
 const AGENT_MAX_COMMANDS = 5;
 const AGENT_READ_CHARS = 18_000;
 const NARROW_EDIT_MAX_READ_LINES = 160;
+// A 500-800 line source file is small enough to read once. Chunking it into
+// 160-line slices makes the model reconstruct it across turns and burn budget.
+const FULL_READ_MAX_LINES = 800;
 const AGENT_OBSERVATION_CHARS = 3_000;
 
 const AGENT_BLOCKED_COMMANDS: RegExp[] = [
@@ -3775,6 +3778,8 @@ export async function runAgentTask(
     interactive?: boolean;
     forceFast?: boolean;
     forceWrite?: boolean;
+    /** The loop already decided this is a read-only inspection task. */
+    inspection?: boolean;
     /** Original user goal when `instruction` is wrapped task-loop boilerplate. */
     workBriefText?: string;
     tokenBudget?: number;
@@ -4113,10 +4118,10 @@ export async function runAgentTask(
               { label: "Verify the result" },
             ],
     };
-  } else if (!readOnlyMode && options.forceWrite === false) {
-    // The task loop already classified this task as inspection/verification.
-    // Intent-level "edit" wording must not start a write spiral when the
-    // requested behavior is already implemented. Writes stay available.
+  } else if (!readOnlyMode && options.inspection === true) {
+    // The loop already classified this task as read-only inspection. Do not
+    // let intent-level "edit" wording start a write spiral. Writes stay
+    // available so a real missing change can still be applied.
     plan = { ...plan, needsWrite: false };
   }
   activePlan = plan;
@@ -4830,14 +4835,25 @@ ${lessons}` : "",
     transientRetries = 0;
     log("info", "Plan received", `${reply.length} characters`);
 
-    // Some providers occasionally emit a native/DSML tool-call block instead of
-    // the JSON action protocol. Never turn that placeholder into a "finish";
-    // retry immediately with a strict protocol correction.
-    if (
+    // Some providers emit a native/DSML tool-call block instead of JSON. If it
+    // is parseable, accept it; otherwise retry with a strict protocol note.
+    const nativeMarkup =
       /provider-native tool call omitted|<\|[^|]*\|>|DSML|<\/?tool_call|<function=|antml:/i.test(
         reply,
-      )
-    ) {
+      );
+    let recoveredNative: Record<string, unknown> | null = null;
+    if (nativeMarkup) {
+      try {
+        const candidate = parseAgentReply(reply);
+        if (typeof candidate.action === "string" && candidate.action !== "invalid") {
+          recoveredNative = candidate;
+          log("info", "Recovered provider-native tool call", candidate.action);
+        }
+      } catch {
+        recoveredNative = null;
+      }
+    }
+    if (nativeMarkup && !recoveredNative) {
       protocolRetries += 1;
       const observation =
         "Your reply used a provider-native tool call instead of the JSON action protocol. Reply again with exactly one complete JSON object using action and args. Do not emit <|...|>, DSML, <tool_call>, <function> or commentary.";
@@ -4867,11 +4883,13 @@ ${lessons}` : "",
     const cleanReply = stripCommentaryTags(stripToolCallMarkup(reply));
     transcript.push({
       role: "assistant",
-      content: cleanReply || "[provider-native tool call omitted; use the JSON action protocol]",
+      content: recoveredNative
+        ? JSON.stringify(recoveredNative)
+        : cleanReply || "[provider-native tool call omitted; use the JSON action protocol]",
     });
 
     try {
-      parsed = parseAgentReply(cleanReply || reply);
+      parsed = recoveredNative ?? parseAgentReply(cleanReply || reply);
     } catch {
       log("error", "Response was not valid tool JSON", reply.replace(/\s+/g, " ").slice(0, 180));
       const commentaryOnly = /<commentary\b|<analysis\b|<thinking\b/i.test(reply);
@@ -6169,8 +6187,10 @@ ${lessons}` : "",
             : requestedEnd - requestedStart + 1;
           // A focused read that is one line over the limit should be clamped,
           // not rejected: the rejection stays "unresolved" and blocks finish.
+          const fullReadFriendly = lines.length <= FULL_READ_MAX_LINES;
           const narrowClipped =
             narrowEditActive &&
+            !fullReadFriendly &&
             lines.length > NARROW_EDIT_MAX_READ_LINES &&
             requestedSpan > NARROW_EDIT_MAX_READ_LINES;
           const startLine = requestedStart;
@@ -6179,7 +6199,9 @@ ${lessons}` : "",
             Math.min(
               lines.length,
               openEnd
-                ? startLine + (narrowClipped ? NARROW_EDIT_MAX_READ_LINES - 1 : 260)
+                ? fullReadFriendly
+                  ? lines.length
+                  : startLine + (narrowClipped ? NARROW_EDIT_MAX_READ_LINES - 1 : 260)
                 : narrowClipped
                   ? startLine + NARROW_EDIT_MAX_READ_LINES - 1
                   : requestedEnd,

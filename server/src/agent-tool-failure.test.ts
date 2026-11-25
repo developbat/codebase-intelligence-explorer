@@ -112,7 +112,7 @@ test("a corrected tool call clears the earlier failure and allows finish", async
       const result = await runAgentTask(
         projectId,
         "Review src/app.ts. This is a read-only inspection; do not edit.",
-        { ...baseOptions, forceWrite: false },
+        { ...baseOptions, forceWrite: false, inspection: true },
         () => undefined,
       );
       assert.equal(result.stoppedReason, "finished", result.summary);
@@ -133,7 +133,7 @@ test("a corrected tool call clears the earlier failure and allows finish", async
 });
 
 test("focused reads clamp the range instead of failing over one line", async () => {
-  const source = Array.from({ length: 300 }, (_, index) => `export const line${index + 1} = ${index + 1};`).join("\n");
+  const source = Array.from({ length: 1_100 }, (_, index) => `export const line${index + 1} = ${index + 1};`).join("\n");
   await withAgentProject(
     { "src/large.ts": `${source}\n`, "tsconfig.json": "{}" },
     [
@@ -176,6 +176,84 @@ test("focused reads clamp the range instead of failing over one line", async () 
       assert.ok(read?.ok, read?.observation);
       assert.match(read?.observation ?? "", /Focused read limited to 160 lines/);
       assert.match(read?.observation ?? "", /showing 1-160/);
+    },
+  );
+});
+
+
+test("parseable DSML tool calls are executed instead of stopping the run", async () => {
+  await withAgentProject(
+    { "src/app.ts": "export const value = 1;\n", "tsconfig.json": "{}" },
+    [
+      '<｜｜DSML｜｜tool_calls>\n<｜｜DSML｜｜invoke name="read_file">\n<｜｜DSML｜｜parameter name="args" string="false">{"path": "src/app.ts"}</｜｜DSML｜｜parameter>\n</｜｜DSML｜｜invoke>\n</｜｜DSML｜｜tool_calls>',
+      JSON.stringify({
+        action: "finish",
+        args: { summary: "Read src/app.ts; no changes are needed." },
+      }),
+    ],
+    async (projectId) => {
+      const result = await runAgentTask(
+        projectId,
+        "Review src/app.ts. This is a read-only inspection; do not edit.",
+        { ...baseOptions, forceWrite: false, inspection: true },
+        () => undefined,
+      );
+      assert.equal(result.stoppedReason, "finished", result.summary);
+      assert.ok(
+        result.steps.some((step) => step.action === "read_file" && step.ok),
+        "the DSML read should have been parsed and executed",
+      );
+      assert.ok(
+        !result.steps.some(
+          (step) => step.action === "invalid" && /provider-native/i.test(step.observation),
+        ),
+      );
+    },
+  );
+});
+
+
+test("a 500-line source file can be read fully in one call", async () => {
+  const source = Array.from({ length: 574 }, (_, index) => `export const line${index + 1} = ${index + 1};`).join("\n");
+  await withAgentProject(
+    { "src/game.js": source, "tsconfig.json": "{}" },
+    [
+      JSON.stringify({ action: "read_file", args: { path: "src/game.js" } }),
+      JSON.stringify({
+        action: "finish",
+        args: { summary: "The requested behavior is already present; no edit is needed." },
+      }),
+    ],
+    async (projectId) => {
+      const result = await runAgentTask(
+        projectId,
+        "Inspect src/game.js and apply the smallest change if needed.",
+        {
+          ...baseOptions,
+          forceWrite: true,
+          intent: {
+            kind: "edit",
+            scope: "small",
+            understanding: "Inspect the game file.",
+            language: "en",
+            needsClarification: false,
+            mode: "single",
+            areas: ["src/game.js"],
+            verification: "none",
+            context: "focused",
+            history: "recent",
+            toolGroups: [],
+            approach: "",
+            needsExhaustiveEvidence: false,
+            assumptions: [],
+          },
+        },
+        () => undefined,
+      );
+      const read = result.steps.find((step) => step.action === "read_file");
+      assert.ok(read?.ok, read?.observation);
+      assert.match(read?.observation ?? "", /showing 1-574/);
+      assert.doesNotMatch(read?.observation ?? "", /Focused read limited/);
     },
   );
 });

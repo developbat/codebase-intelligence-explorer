@@ -276,3 +276,24 @@ test("summarizeToolIssues marks recovered failures separately", () => {
   assert.ok(issues.some((issue) => /recovered read_file ×1/.test(issue)));
   assert.ok(issues.some((issue) => /^browser_check ×1/.test(issue)));
 });
+
+
+test("turkish end-state goals are classified as edits, not inspection", () => {
+  const task = {
+    id: "task-1",
+    title: "işlem yukarda gösterilmeyecek, sadece çarpma butonu aktif olacak",
+    detail: "hedef ve puan tek bir barda olacak.",
+    acceptance: "The requested change is implemented and verified.",
+    status: "pending",
+    effort: "simple",
+    role: "main",
+    dependsOn: [],
+    attempts: 0,
+    changedFiles: [],
+    commands: [],
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  } as unknown as Parameters<typeof taskLooksLikeWrite>[0];
+  assert.equal(taskLooksLikeWrite(task), true);
+  assert.equal(taskBudgetEffort(task), "standard");
+});
