@@ -95,6 +95,8 @@ export interface ProjectTaskLoopOptions {
   history?: { role: "user" | "assistant"; content: string }[];
   /** Show the local browser window while a verification check runs. */
   liveBrowser?: boolean;
+  /** Maximum independent tasks to run at once (default 2 in build mode). */
+  parallelTasks?: number;
 }
 
 export interface ProjectTaskLoopResult {

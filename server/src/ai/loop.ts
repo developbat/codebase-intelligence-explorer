@@ -828,6 +828,45 @@ function featureExistenceHints(analysis: AnalysisResult, task: ProjectTask): str
   return [...hints.values()];
 }
 
+const CODE_FILE_PATTERN =
+  /[A-Za-z0-9_./-]+\.(?:py|js|mjs|cjs|jsx|ts|tsx|vue|svelte|html?|css|scss|sass|less|php|go|rs|java|kt|kts|cs|rb|swift|dart|ex|exs|json|ya?ml|toml|md|sql|sh|bash)/gi;
+
+/**
+ * Best-effort file ownership for a task. Used by the parallel scheduler to
+ * avoid running two agents that may edit the same file at the same time.
+ */
+export function taskTargetFiles(
+  analysis: AnalysisResult,
+  task: ProjectTask,
+): string[] {
+  const found = new Set<string>();
+  const add = (value: string) => {
+    const normalized = value.replace(/^[\s`"'(]+|[`"'(),.;:]+$/g, "").replace(/^\.\//, "");
+    if (!normalized || normalized.startsWith(".cie/")) return;
+    found.add(normalized);
+  };
+  for (const file of task.changedFiles) add(file);
+  const text = `${task.title}\n${task.detail}\n${task.acceptance ?? ""}`;
+  for (const match of text.match(CODE_FILE_PATTERN) ?? []) add(match);
+  // Symbol hints catch a feature mentioned only by name (e.g. monthly chart).
+  for (const hint of featureExistenceHints(analysis, task)) {
+    const path = hint.split(":")[0];
+    if (path && CODE_FILE_EXTENSION.test(path)) add(path);
+  }
+  return [...found].slice(0, 8);
+}
+
+function lockKey(file: string): string {
+  return file.replace(/\\/g, "/").replace(/^\.?\//, "").toLowerCase();
+}
+
+export function tasksOverlap(left: string[], right: Set<string>): boolean {
+  return left.some((file) => right.has(lockKey(file)));
+}
+
+const CODE_FILE_EXTENSION =
+  /\.(?:py|js|mjs|cjs|jsx|ts|tsx|vue|svelte|html?|css|scss|sass|less|php|go|rs|java|kt|kts|cs|rb|swift|dart|ex|exs|json|ya?ml|toml|md|sql|sh|bash)$/i;
+
 const PREFLIGHT_STOP = new Set([
   "ekle", "ekley", "eklen", "oluştur", "olustur", "güncelle", "guncelle",
   "değiştir", "degistir", "göster", "goster", "yap", "olsun", "için", "icin",
@@ -1068,6 +1107,7 @@ function taskInstruction(
   existingCode: string[] = [],
   inspection = false,
   runPreviewUrl?: string,
+  parallelNote?: string,
 ): string {
   const brief = resolveWorkBrief(task.title);
   const extractionTask = brief?.mode === "extract";
@@ -1095,6 +1135,7 @@ function taskInstruction(
     runPreviewUrl
       ? `The active project's dev server is already running at ${runPreviewUrl}. Open this URL in the preview; do not start a second server, do not ask which project, and do not switch projects. Use browser_check on this URL when you need UI evidence.`
       : "",
+    parallelNote ?? "",
     prior ? `Previous task summaries (use this before reading context.md):\n${prior}` : "",
     extractionTask
       ? "This is a read-only complete-list task. Do not read .cie/agent context files, do not run grep/shell commands, do not use list_items or browser_check. Call extract_entities with the matching kind once, then finish with every item in the user's language."
@@ -1869,19 +1910,29 @@ export async function runProjectLoop(
   const avoidModels = new Set<string>();
   let executedCount = 0;
   let autoRepairs = 0;
+  const maxParallel = Math.max(
+    1,
+    Math.min(3, options.parallelTasks ?? (workspaceMode === "build" ? 2 : 1)),
+  );
+  type ResolvedAgentConfig = Awaited<ReturnType<typeof resolveProvider>>;
+  interface PreparedTaskRun {
+    task: ProjectTask;
+    current: ProjectTask;
+    taskConfig: ResolvedAgentConfig;
+    tokenBudget: number;
+    costBudgetUsd: number;
+    forceWrite: boolean;
+    inspection: boolean;
+    targets: string[];
+    promise: Promise<AiAgentResult | null>;
+  }
 
-  while (executedCount < maxTasks && Date.now() - startedAt < maxMs) {
-    if (signal?.aborted) {
-      queue = await saveQueue(analysis.rootPath, { ...queue, status: "stopped" });
-      emit({ type: "task", queue });
-      break;
-    }
-    const task = nextPendingTask(queue);
-    if (!task) break;
-    if (!seenTasks.has(task.id)) {
-      seenTasks.add(task.id);
-      executedCount += 1;
-    }
+  async function prepareTaskRun(
+    task: ProjectTask,
+    targets: string[],
+    parallel: boolean,
+  ): Promise<PreparedTaskRun> {
+    if (!queue) throw new Error("No task queue is available.");
     const defaultBudget = taskBudgetForEffort(task.effort);
     const tokenBudget = options.tokenBudget ?? task.tokenBudget ?? defaultBudget.tokens;
     const costBudgetUsd =
@@ -1894,11 +1945,11 @@ export async function runProjectLoop(
       costBudgetUsd,
     });
     const current = queue.tasks.find((item) => item.id === task.id);
-    if (!current) break;
+    if (!current) throw new Error(`Task ${task.id} disappeared from the queue.`);
     await startAgentRunLive(analysis.rootPath, task.id, current.attempts).catch(() => {});
     emit({ type: "task", queue, task: current });
 
-    let taskConfig = current.modelOverride
+    let taskConfig: ResolvedAgentConfig = current.modelOverride
       ? await resolveProvider(current.modelOverride.provider, current.modelOverride.model).catch(
           () => main,
         )
@@ -1958,64 +2009,206 @@ export async function runProjectLoop(
         },
       });
     }
-    let result: AiAgentResult | null = null;
-    try {
-      result = await runAgentTask(
-        projectId,
-        taskInstruction(
-          current,
-          queue.tasks.length,
-          verification,
-          queue.tasks,
-          Boolean(continuationFindings(options.history, goal)),
-          changedSinceGoal,
-          existingCode,
-          inspectionRun,
-          runPreviewUrl ?? undefined,
-        ),
-        {
-          activeFile: options.activeFile,
-          provider: taskConfig.id,
-          model: taskConfig.model,
-          workspaceMode: inspectionRun ? "ask" : workspaceMode,
-          mode: inspectionRun ? "ask" : "auto",
-          allowWrite: options.allowWrite === true && !inspectionRun && !extractionTask,
-          allowCommands: options.allowCommands === true && !inspectionRun && !extractionTask,
-          language: options.language,
-          interactive: true,
-          forceFast: current.effort === "simple",
-          forceWrite,
-          maxSteps: taskStepBudget(current.effort),
-          tokenBudget,
-          softTokenBudget: softTaskTokenBudget(current.effort),
-          costBudgetUsd,
-          budgetMode: settings?.taskBudgetMode ?? "off",
-          maxOutputTokens: settings?.agentMaxOutputTokens ?? 16_000,
-          startingUsage: current.tokenUsage,
-          intent: options.intent,
-          workBriefText: current.title,
-          history: options.history?.slice(-8),
-          liveBrowser: options.liveBrowser === true,
-        },
-        (event) => {
-          if (event.type === "done") {
-            result = event.result;
-            return;
-          }
-          void appendAgentRunEvent(analysis.rootPath, task.id, current.attempts, event).catch(
-            () => {},
-          );
-          emit(event);
-        },
-        signal,
-      );
-    } catch (error) {
-      result = null;
-      emit({
-        type: "error",
-        message: error instanceof Error ? error.message : "Task execution failed.",
+    const parallelNote =
+      parallel && forceWrite
+        ? targets.length > 0
+          ? `Parallel execution: other tasks may run at the same time. Only modify these files: ${targets.join(
+              ", ",
+            )}. Do not delete or rename unrelated files and do not run project-wide rewrites.`
+          : "Parallel execution: other tasks may run at the same time. Do not rewrite unrelated files; this task has no declared file target."
+        : "";
+    const promise = runAgentTask(
+      projectId,
+      taskInstruction(
+        current,
+        queue.tasks.length,
+        verification,
+        queue.tasks,
+        Boolean(continuationFindings(options.history, goal)),
+        changedSinceGoal,
+        existingCode,
+        inspectionRun,
+        runPreviewUrl ?? undefined,
+        parallelNote,
+      ),
+      {
+        activeFile: options.activeFile,
+        provider: taskConfig.id,
+        model: taskConfig.model,
+        workspaceMode: inspectionRun ? "ask" : workspaceMode,
+        mode: inspectionRun ? "ask" : "auto",
+        allowWrite: options.allowWrite === true && !inspectionRun && !extractionTask,
+        allowCommands: options.allowCommands === true && !inspectionRun && !extractionTask,
+        language: options.language,
+        interactive: true,
+        forceFast: current.effort === "simple",
+        forceWrite,
+        maxSteps: taskStepBudget(current.effort),
+        tokenBudget,
+        softTokenBudget: softTaskTokenBudget(current.effort),
+        costBudgetUsd,
+        budgetMode: settings?.taskBudgetMode ?? "off",
+        maxOutputTokens: settings?.agentMaxOutputTokens ?? 16_000,
+        startingUsage: current.tokenUsage,
+        intent: options.intent,
+        workBriefText: current.title,
+        history: options.history?.slice(-8),
+        liveBrowser: options.liveBrowser === true,
+      },
+      (event) => {
+        if (event.type === "done") return;
+        void appendAgentRunEvent(analysis.rootPath, task.id, current.attempts, event).catch(
+          () => {},
+        );
+        emit(event);
+      },
+      signal,
+    )
+      .then((value) => value as AiAgentResult | null)
+      .catch((error: unknown) => {
+        emit({
+          type: "error",
+          message: error instanceof Error ? error.message : "Task execution failed.",
+        });
+        return null;
       });
+    return {
+      task,
+      current: queue.tasks.find((item) => item.id === task.id) ?? current,
+      taskConfig,
+      tokenBudget,
+      costBudgetUsd,
+      forceWrite,
+      inspection: inspectionRun,
+      targets,
+      promise,
+    };
+  }
+
+  const activeRuns = new Map<string, PreparedTaskRun>();
+  const activeLocks = new Set<string>();
+  const doneForScheduling = () =>
+    new Set(
+      (queue?.tasks ?? [])
+        .filter((item) => item.status === "done")
+        .map((item) => item.id),
+    );
+
+  function nextSchedulableTask(): ProjectTask | undefined {
+    const done = doneForScheduling();
+    const running = [...activeRuns.values()];
+    const activeWrites = running.some(
+      (prepared) => prepared.forceWrite && options.allowWrite === true,
+    );
+    const activeReads = running.some(
+      (prepared) =>
+        !(prepared.forceWrite && options.allowWrite === true) && prepared.inspection,
+    );
+    // Tasks that are neither a clear edit nor a clear inspection may still
+    // write, so they only run when nothing else is in flight. The same applies
+    // to a write task that does not declare which files it will touch.
+    const activeExclusive = running.some(
+      (prepared) =>
+        (prepared.forceWrite &&
+          options.allowWrite === true &&
+          prepared.targets.length === 0) ||
+        (!(prepared.forceWrite && options.allowWrite === true) && !prepared.inspection),
+    );
+    return queue?.tasks.find((task) => {
+      if (task.status !== "pending" || activeRuns.has(task.id)) return false;
+      if (!task.dependsOn.every((dependency) => done.has(dependency))) return false;
+      if (activeExclusive) return false;
+      const wouldWrite =
+        workspaceMode === "build" && options.allowWrite === true && taskLooksLikeWrite(task);
+      const wouldInspect = !wouldWrite && taskLooksLikeInspection(task);
+      if (!wouldWrite && !wouldInspect) return activeRuns.size === 0;
+      // Never mix read-only inspection/verification with a running writer:
+      // tests would see half-updated files. Writers can run together only when
+      // their claimed file targets are disjoint.
+      if (!wouldWrite && activeWrites) return false;
+      if (wouldWrite && activeReads) return false;
+      if (!wouldWrite) return true;
+      const targets = taskTargetFiles(analysis, task);
+      if (targets.length === 0) return activeRuns.size === 0;
+      return !tasksOverlap(targets, activeLocks);
+    });
+  }
+
+  while (
+    activeRuns.size > 0 ||
+    (executedCount < maxTasks && Date.now() - startedAt < maxMs)
+  ) {
+    if (signal?.aborted) {
+      queue = await saveQueue(analysis.rootPath, { ...queue, status: "stopped" });
+      emit({ type: "task", queue });
+      break;
     }
+
+    // Start up to maxParallel independent tasks. Write tasks with known file
+    // targets are serialized when their targets overlap; read-only tasks and
+    // disjoint files can proceed together.
+    if (executedCount < maxTasks && Date.now() - startedAt < maxMs) {
+      while (
+        activeRuns.size < maxParallel &&
+        executedCount < maxTasks &&
+        Date.now() - startedAt < maxMs
+      ) {
+        const nextTask = nextSchedulableTask();
+        if (!nextTask) break;
+        if (!seenTasks.has(nextTask.id)) {
+          seenTasks.add(nextTask.id);
+          executedCount += 1;
+        }
+        const wouldWrite =
+          workspaceMode === "build" &&
+          options.allowWrite === true &&
+          taskLooksLikeWrite(nextTask);
+        const targets = wouldWrite ? taskTargetFiles(analysis, nextTask) : [];
+        if (wouldWrite && targets.length === 0 && activeRuns.size > 0) break;
+        let prepared: PreparedTaskRun;
+        try {
+          prepared = await prepareTaskRun(nextTask, targets, maxParallel > 1);
+        } catch (error) {
+          queue = markTask(queue, nextTask.id, {
+            status: "failed",
+            completedAt: nowIso(),
+            resultSummary:
+              error instanceof Error ? error.message : "Task setup failed before execution.",
+          });
+          queue = await saveQueue(analysis.rootPath, queue);
+          emit({ type: "task", queue, task: queue.tasks.find((item) => item.id === nextTask.id) });
+          continue;
+        }
+        if (wouldWrite) {
+          for (const target of targets) activeLocks.add(lockKey(target));
+        }
+        activeRuns.set(nextTask.id, prepared);
+      }
+      if (activeRuns.size > 0) {
+        queue = await saveQueue(analysis.rootPath, queue);
+        emit({ type: "task", queue });
+      }
+    }
+    if (activeRuns.size === 0) break;
+
+    const completed = await Promise.race(
+      [...activeRuns.values()].map((prepared) =>
+        prepared.promise.then((result) => ({ prepared, result })),
+      ),
+    );
+    activeRuns.delete(completed.prepared.task.id);
+    if (completed.prepared.forceWrite && options.allowWrite === true) {
+      for (const target of completed.prepared.targets) activeLocks.delete(lockKey(target));
+    }
+    const {
+      task,
+      current,
+      taskConfig,
+      tokenBudget,
+      costBudgetUsd,
+      forceWrite,
+    } = completed.prepared;
+    const result = completed.result;
 
     if (!result) {
       queue = markTask(queue, task.id, {
@@ -2702,6 +2895,10 @@ export async function runProjectLoop(
       emit({ type: "task", queue });
     }
     if (result.stoppedReason === "aborted") break;
+  }
+
+  if (activeRuns.size > 0) {
+    await Promise.allSettled([...activeRuns.values()].map((prepared) => prepared.promise));
   }
 
   const unresolved = queue.tasks.some((task) => task.status === "pending" || task.status === "in_progress");

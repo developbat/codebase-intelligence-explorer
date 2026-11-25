@@ -11,7 +11,10 @@ import {
   isInteractiveUiCheck,
   softTaskTokenBudget,
   summarizeToolIssues,
+  taskTargetFiles,
+  tasksOverlap,
 } from "./ai/loop";
+import { withCommandLock } from "./ai/commandLock";
 
 function step(overrides: Partial<AiAgentStep>): AiAgentStep {
   return {
@@ -149,4 +152,57 @@ test("summarizeToolIssues groups failed tools for the task card", () => {
   assert.ok(issues.some((issue) => /browser_check ×1/.test(issue)));
   assert.ok(issues.some((issue) => /protocol ×1/.test(issue)));
   assert.ok(issues.some((issue) => /run_command ×1/.test(issue)));
+});
+
+
+test("taskTargetFiles claims files mentioned in a task", () => {
+  const analysis = {
+    files: [
+      { path: "app.py" },
+      { path: "analytics.py" },
+      { path: "tests/test_analytics.py" },
+    ],
+    symbols: [],
+  } as unknown as Parameters<typeof taskTargetFiles>[0];
+  const task = {
+    id: "task-1",
+    title: "Add JSON export",
+    detail: "Update app.py and tests/test_analytics.py; do not touch analytics.py.",
+    acceptance: "The export works.",
+    status: "pending",
+    effort: "standard",
+    role: "main",
+    dependsOn: [],
+    attempts: 0,
+    changedFiles: ["analytics.py"],
+    commands: [],
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  } as unknown as Parameters<typeof taskTargetFiles>[1];
+  const targets = taskTargetFiles(analysis, task);
+  assert.ok(targets.includes("app.py"));
+  assert.ok(targets.includes("tests/test_analytics.py"));
+  assert.ok(targets.includes("analytics.py"));
+});
+
+test("agent commands are serialized per project", async () => {
+  const order: string[] = [];
+  await Promise.all([
+    withCommandLock("project-a", async () => {
+      order.push("one-start");
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      order.push("one-end");
+    }),
+    withCommandLock("project-a", async () => {
+      order.push("two-start");
+      order.push("two-end");
+    }),
+  ]);
+  assert.deepEqual(order, ["one-start", "one-end", "two-start", "two-end"]);
+});
+
+test("task locks match case-insensitively across separators", () => {
+  const locks = new Set(["src/app.tsx"]);
+  assert.equal(tasksOverlap(["SRC\\App.tsx"], locks), true);
+  assert.equal(tasksOverlap(["./src/other.ts"], locks), false);
 });

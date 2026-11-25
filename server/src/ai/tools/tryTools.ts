@@ -12,6 +12,7 @@ import {
 } from "../../editor";
 import { formatProjectFile } from "../../formatter";
 import { pythonEnvironmentHint } from "../pythonHints";
+import { withCommandLock } from "../commandLock";
 import { searchCode } from "../../search";
 import {
   applyMappingsToContent,
@@ -765,11 +766,13 @@ const runCommandHandler: AgentToolHandler = async (context): Promise<AgentToolRe
     { preview: command },
   );
   if (!allowed) throw new Error("The user denied permission to run the command.");
-  const result = await runProjectCommand(
-    context.analysis.rootPath,
-    command,
-    typeof context.args.cwd === "string" ? context.args.cwd : undefined,
-    { timeoutMs: 120_000, signal: context.signal },
+  const result = await withCommandLock(context.projectId, () =>
+    runProjectCommand(
+      context.analysis.rootPath,
+      command,
+      typeof context.args.cwd === "string" ? context.args.cwd : undefined,
+      { timeoutMs: 120_000, signal: context.signal },
+    ),
   );
   context.ranCommands.push(command);
   const output = `${result.stdout}${result.stderr ? `\n${result.stderr}` : ""}`.trim();

@@ -903,6 +903,7 @@ export const api = {
         language?: string;
         maxTasks?: number;
         maxMinutes?: number;
+        parallelTasks?: number;
         replan?: boolean;
         retryFailed?: boolean;
         clarified?: boolean;

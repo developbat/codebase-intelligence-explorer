@@ -2396,6 +2396,7 @@ app.post("/api/projects/:id/ai/loop/stream", async (req, res) => {
         language: typeof req.body?.language === "string" ? req.body.language : undefined,
         maxTasks: Number(req.body?.maxTasks) || undefined,
         maxMinutes: Number(req.body?.maxMinutes) || undefined,
+        parallelTasks: Number(req.body?.parallelTasks) || undefined,
         replan: req.body?.replan === true,
         retryFailed: req.body?.retryFailed === true,
         workspaceMode: ["ask", "plan", "build", "research"].includes(req.body?.workspaceMode)

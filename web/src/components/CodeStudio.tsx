@@ -2957,6 +2957,7 @@ export function CodeStudio({
             language: locale,
             maxTasks: modeForRun === "build" ? 12 : 1,
             maxMinutes: modeForRun === "build" ? 45 : 15,
+            parallelTasks: modeForRun === "build" ? 2 : 1,
             workspaceMode: modeForRun,
             retryFailed: runOptions.retryFailed === true,
             clarified: runOptions.skipClarify === true,

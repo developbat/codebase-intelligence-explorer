@@ -43,6 +43,7 @@ import { analyzeProject } from "../analyzer";
 import { isWithin } from "../scanner";
 import { formatProjectFile } from "../formatter";
 import { pythonEnvironmentHint } from "./pythonHints";
+import { withCommandLock } from "./commandLock";
 import { detectProjectProfile } from "../projectProfile";
 import { checkFileSyntax } from "../syntax";
 import { lspCompletion, lspDiagnostics, lspHover } from "../lsp";
@@ -7212,7 +7213,9 @@ ${lessons}` : "",
           { preview: command },
         );
         if (!commandAllowed) throw new Error("The user denied permission to run this command.");
-        const result = await runProjectCommand(analysis.rootPath, command, cwd, { signal });
+        const result = await withCommandLock(projectId, () =>
+          runProjectCommand(analysis.rootPath, command, cwd, { signal }),
+        );
         ranCommands.push(command);
         log(result.exitCode === 0 ? "success" : "error", "Command finished", `exit ${result.exitCode ?? "—"} · ${result.durationMs} ms`);
         const output = `${result.stdout}${result.stderr ? `\n${result.stderr}` : ""}`.trim();

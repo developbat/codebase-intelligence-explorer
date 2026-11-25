@@ -40,3 +40,4 @@ yarn-error.log*
 # Agent-generated project state and evaluation reports
 .cie/
 fixtures/agent-eval/reports/
+fixtures/template-e2e/reports/
