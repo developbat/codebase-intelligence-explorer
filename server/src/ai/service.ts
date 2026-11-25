@@ -4632,6 +4632,23 @@ ${lessons}` : "",
     entry.tools.add(tool);
     if (symbol) entry.symbols.add(symbol);
     readMap.set(filePath, entry);
+    // Keep one compact ledger message instead of letting the model re-read
+    // ranges it already inspected. It is replaced in place each turn.
+    const entries = [...readMap.values()]
+      .flatMap((item) =>
+        item.ranges.slice(-6).map((range) =>
+          range.wholeFile ? `${item.path} (whole)` : `${item.path}:${range.start}-${range.end}`,
+        ),
+      )
+      .slice(-20);
+    if (entries.length > 0) {
+      const content = `Read ledger (already inspected; do not re-read unless the file changed): ${entries.join(", ")}`;
+      const existing = transcript.findIndex(
+        (message) => message.role === "system" && message.content.startsWith("Read ledger"),
+      );
+      if (existing >= 0) transcript[existing] = { role: "system", content };
+      else transcript.push({ role: "system", content });
+    }
   };
   const readOnlyCache = new Map<string, { step: number; ok: boolean }>();
   const findCounts = new Map<string, number>();
@@ -4639,6 +4656,15 @@ ${lessons}` : "",
     readCoverage.clear();
     readOnlyCache.clear();
     findCounts.clear();
+    const ledgerIndex = transcript.findIndex(
+      (message) => message.role === "system" && message.content.startsWith("Read ledger"),
+    );
+    if (ledgerIndex >= 0) {
+      transcript[ledgerIndex] = {
+        role: "system",
+        content: "Read ledger cleared because project files changed; re-read only the exact range you need.",
+      };
+    }
     invalidateExtractionCache(projectId, changedPaths);
   };
   let modelTurns = 0;
