@@ -2042,6 +2042,9 @@ export async function runProjectLoop(
       scenarioMatch && scenarioText.includes(scenarioMatch.name.toLowerCase())
         ? scenarioMatch
         : null;
+    const microEdit = /one-line|only that line|change only that line|sadece .*satır|tek satır/i.test(
+      `${task.title}\n${task.detail}`,
+    );
     const defaultBudget = taskBudgetForEffort(budgetEffort);
     const tokenBudget = options.tokenBudget ?? defaultBudget.tokens;
     const costBudgetUsd = options.costBudgetUsd ?? defaultBudget.costUsd;
@@ -2205,6 +2208,7 @@ export async function runProjectLoop(
         workBriefText: cleanTaskDetail(current.detail) || current.title,
         history: options.history?.slice(-8),
         liveBrowser: options.liveBrowser === true,
+        microEdit,
         requiredScenario: requiredScenario
           ? {
               name: requiredScenario.name,

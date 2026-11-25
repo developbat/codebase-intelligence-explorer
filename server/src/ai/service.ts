@@ -3891,6 +3891,8 @@ export async function runAgentTask(
     intent?: IntentAnalysis;
     /** Show the local browser window while browser checks run. */
     liveBrowser?: boolean;
+    /** A mechanical one-line/small edit; skip global wiring/pending heuristics. */
+    microEdit?: boolean;
     /** A saved deterministic scenario that must pass before finish is accepted. */
     requiredScenario?: {
       name: string;
@@ -5558,6 +5560,7 @@ ${lessons}` : "",
       if (
         !readOnlyMode &&
         !testTask &&
+        !options.microEdit &&
         modelTurns < maxSteps &&
         wiringNudges < 2 &&
         !(mappedChangeVerified && workBrief?.mode === "change" && workBrief.kind === "color" && !compoundChange) &&
@@ -5703,6 +5706,7 @@ ${lessons}` : "",
       if (
         !readOnlyMode &&
         !testTask &&
+        !options.microEdit &&
         modelTurns < maxSteps &&
         !remainingWorkRejected &&
         reportsRemainingWork(rawSummary)
