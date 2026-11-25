@@ -28,7 +28,7 @@ import { estimateUsageCost, getPricingReport, refreshPricing } from "./ai/pricin
 import { recordUsage } from "./ai/usage";
 import { saveResearchNote, webFetch } from "./webResearch";
 import { chatCapabilityBrief, isCapabilityQuestion } from "./chatCapabilities";
-import { renderWebSearchResults, webSearch } from "./webSearch";
+import { refineSearchQuery, renderWebSearchResults, shouldSearchWeb, webSearch } from "./webSearch";
 import { isBrowserCheckAvailable, runBrowserCheck } from "./browserCheck";
 import { liveSessionStatus, streamLiveSession } from "./liveBrowser";
 import {
@@ -589,20 +589,17 @@ app.post("/api/ai/studio/chat", async (req, res) => {
     }
 
     const searchText = lastUser?.content.trim() ?? "";
-    const searchIntent =
-      /(?:haber|haberler|news|güncel|guncel|son dakika|bugün|bugun|manşet|manset|latest|today|headline|search|araştır|arastir|ara\b|bul\b|fiyat|hava|kim|nedir|ne zaman|nerede|latest|release|sürüm|surum|duyuru)/i.test(
-        searchText,
-      );
-    const shouldSearch =
-      useWeb &&
-      !capabilityQuestion &&
-      urls.length === 0 &&
-      searchText.length >= 8 &&
-      !/^(?:merhaba|selam|hi|hello|hey|teşekkür|tesekkur|sağol|sagol|thanks)\b/i.test(searchText) &&
-      (searchIntent || searchText.includes("?"));
+    const shouldSearch = shouldSearchWeb(searchText, {
+      useWeb,
+      capabilityQuestion,
+      hasUrls: urls.length > 0,
+    });
     if (shouldSearch) {
       try {
-        const search = await webSearch(searchText, { limit: 6, language });
+        const search = await webSearch(refineSearchQuery(searchText, language), {
+          limit: 6,
+          language,
+        });
         searchProvider =
           search.provider === "google-news"
             ? "Google News"
@@ -619,6 +616,29 @@ app.post("/api/ai/studio/chat", async (req, res) => {
         }
         const block = renderWebSearchResults(search);
         if (block) webBlocks.push(block);
+        // Model/release questions need page text, not just result snippets.
+        const deepRead =
+          /(?:model|yapay\s+zeka|yapay\s+zekâ|\bllm\b|\bai\b|release|sürüm|surum|benchmark|leaderboard)/i.test(
+            searchText,
+          );
+        if (deepRead) {
+          for (const result of search.results.slice(0, 2)) {
+            try {
+              // eslint-disable-next-line no-await-in-loop
+              const page = await webFetch(result.url, 6_000);
+              const existing = sources.find((source) => source.url === result.url);
+              if (existing) {
+                existing.title = existing.title || page.title;
+                existing.status = page.status;
+              }
+              webBlocks.push(
+                `URL: ${page.finalUrl || result.url}\nTitle: ${page.title ?? result.title ?? "(no title)"}\n${page.text.slice(0, 6_000)}`,
+              );
+            } catch {
+              // Keep the snippet when a result page blocks fetching.
+            }
+          }
+        }
       } catch {
         // search is best-effort; the model can still answer from knowledge
       }

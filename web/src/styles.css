@@ -24576,3 +24576,23 @@ button.canvas-stat {
     min-width: 90px;
   }
 }
+
+/* The index badge must fit both its icon and the document count. */
+.topbar-index {
+  width: auto;
+  min-width: 28px;
+}
+
+.chat-studio-search-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 6px;
+  border: 1px solid rgba(52, 211, 153, 0.24);
+  border-radius: 999px;
+  background: rgba(16, 185, 129, 0.06);
+  color: #86efac;
+  font-family: var(--mono);
+  font-size: 7px;
+  white-space: nowrap;
+}

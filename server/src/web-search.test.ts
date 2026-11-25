@@ -4,6 +4,8 @@ import {
   isNewsQuery,
   parseDuckDuckGoHtml,
   parseGoogleNewsRss,
+  refineSearchQuery,
+  shouldSearchWeb,
 } from "./webSearch";
 
 test("parses Google News RSS items and entities", () => {
@@ -47,4 +49,40 @@ test("detects news intent in Turkish and English", () => {
   assert.equal(isNewsQuery("bugün en güncel haberler"), true);
   assert.equal(isNewsQuery("latest AI news"), true);
   assert.equal(isNewsQuery("rename the button"), false);
+});
+
+
+test("routes explicit and recent AI-model searches to web search", () => {
+  assert.equal(shouldSearchWeb("son çıkan yapay zeka modeli araması yaparmısın"), true);
+  assert.equal(shouldSearchWeb("son çıkan yapay zeka modeli"), true);
+  assert.equal(shouldSearchWeb("bu hafta çıkan yapay zeka modelleri"), true);
+  assert.equal(shouldSearchWeb("bugün hava nasıl?"), true);
+  assert.equal(shouldSearchWeb("merhaba"), false);
+  assert.equal(
+    shouldSearchWeb("neler yapabilirsin", { capabilityQuestion: true }),
+    false,
+  );
+  assert.equal(shouldSearchWeb("src/app.ts dosyasını oku"), false);
+  assert.equal(shouldSearchWeb("son çıkan yapay zeka modeli", { useWeb: false }), false);
+  assert.equal(shouldSearchWeb("https://example.com/foo", { hasUrls: true }), false);
+});
+
+
+test("refines vague latest-model requests into a dated search query", () => {
+  const tr = refineSearchQuery(
+    "son çıkan yapay zeka modeli araması yaparmısın",
+    "tr",
+    new Date("2026-11-25T00:00:00Z"),
+  );
+  assert.match(tr, /2026/);
+  assert.match(tr, /yapay zeka/i);
+  assert.match(tr, /duyuru|sürüm/i);
+  const en = refineSearchQuery(
+    "latest AI model release",
+    "en",
+    new Date("2026-11-25T00:00:00Z"),
+  );
+  assert.match(en, /2026/);
+  assert.match(en, /AI models/i);
+  assert.equal(refineSearchQuery("rename the button", "en"), "rename the button");
 });

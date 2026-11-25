@@ -348,6 +348,14 @@ export function ChatStudio({
                       {message.costUsd ? ` · ${formatUsd(message.costUsd)}` : ""}
                     </small>
                   ) : null}
+                  {message.role === "assistant" && message.searchProvider ? (
+                    <small className="chat-studio-search-badge">
+                      <Globe2 size={9} /> {message.searchProvider}
+                      {message.sources?.length
+                        ? ` · ${t("{count} sources", { count: message.sources.length })}`
+                        : ""}
+                    </small>
+                  ) : null}
                   {message.role === "assistant" ? (
                     <button
                       className={`chat-studio-copy ${copiedId === message.id ? "is-copied" : ""}`}
@@ -376,7 +384,10 @@ export function ChatStudio({
                   )}
                 </div>
                 {message.sources && message.sources.length > 0 ? (
-                  <details className="chat-studio-sources">
+                  <details
+                    className="chat-studio-sources"
+                    open={Boolean(message.searchProvider)}
+                  >
                     <summary>
                       {message.searchProvider ? (
                         <span className="chat-studio-source-provider">{message.searchProvider}</span>

@@ -242,3 +242,72 @@ export function renderWebSearchResults(response: WebSearchResponse): string {
     ),
   ].join("\n");
 }
+
+/**
+ * Decide whether a chat request needs live web results. An explicit search
+ * request ("… araması yap"), a recency request ("son çıkan", "bu hafta") or a
+ * high-signal current topic (AI model, release, price, news) must search even
+ * without a question mark. Capability questions, greetings and URL fetches are
+ * handled separately.
+ */
+export function shouldSearchWeb(
+  text: string,
+  options: { useWeb?: boolean; capabilityQuestion?: boolean; hasUrls?: boolean } = {},
+): boolean {
+  if (options.useWeb === false) return false;
+  if (options.capabilityQuestion) return false;
+  if (options.hasUrls) return false;
+  const query = text.trim();
+  if (query.length < 6) return false;
+  if (/^(?:merhaba|selam|hi|hello|hey|teşekkür|tesekkur|sağol|sagol|thanks)\b/i.test(query)) {
+    return false;
+  }
+  const explicitSearch =
+    /(?:web\s*arama|arama\s*yap|arama\w*|araştır\w*|arastir\w*|internette\s+ara|google'?da\s+ara|search\s+(?:the\s+)?web|look\s+up|kontrol\s+et|kontrol\s+edin|doğrula|dogrula|teyit\s+et)/i.test(
+      query,
+    );
+  if (explicitSearch) return true;
+  const recency =
+    /(?:son\s+çıkan|son\s+cikan|en\s+yeni|en\s+son|son\s+\d+\s*(?:gün|gun|hafta|ay|yıl|yil)|bu\s+hafta|geçen\s+hafta|gecen\s+hafta|güncel|guncel|bugün|bugun|şu\s+an|su\s+an|latest|newest|most\s+recent|this\s+week|last\s+week|today|current|release[ds]?|just\s+released)/i.test(
+      query,
+    );
+  const highSignalTopic =
+    /(?:haber|haberler|news|manşet|manset|fiyat|hava|benchmark|leaderboard|sıralama|siralama|trend|trending|sürüm|surum|versiyon|duyuru|yapay\s+zeka|yapay\s+zekâ|llm|\bai\b|openai|anthropic|deepmind|deepseek|qwen|mistral|\bxai\b|hugging\s*face)/i.test(
+      query,
+    );
+  const question =
+    /\?|^(?:kim|ne|neden|niçin|nicin|nasıl|nasil|ne\s+zaman|nerede|hangi|kaç|kac|what|why|how|when|where|which|who)\b/i.test(
+      query,
+    );
+  const genericTopic =
+    /(?:model|ai|teknoloji|technology|ürün|urun|product|şirket|sirket|company)/i.test(query);
+  return recency || highSignalTopic || (genericTopic && question);
+}
+
+/** Turn a natural-language "latest model" request into a focused query. */
+export function refineSearchQuery(
+  query: string,
+  language = "en",
+  now = new Date(),
+): string {
+  const text = query.trim();
+  const aiModel = /(?:yapay\s+zeka|yapay\s+zekâ|\bai\b|\bllm\b|model)/i.test(text);
+  const recent =
+    /(?:son\s+çıkan|son\s+cikan|en\s+yeni|en\s+son|son\s+\d+\s*(?:gün|gun|hafta|ay)|bu\s+hafta|geçen\s+hafta|gecen\s+hafta|güncel|guncel|latest|newest|most\s+recent|this\s+week|last\s+week|release[ds]?|just\s+released)/i.test(
+      text,
+    );
+  if (!aiModel || !recent) return text;
+  const year = now.getFullYear();
+  const week = /(?:son\s+\d+\s*(?:gün|gun|hafta)|bu\s+hafta|geçen\s+hafta|gecen\s+hafta|this\s+week|last\s+week)/i.test(
+    text,
+  );
+  const turkish = language === "tr" || /[çğıöşü]/i.test(text);
+  if (turkish) {
+    return week
+      ? `son 1 haftada çıkan yapay zeka modelleri ${year} sürüm duyuru`
+      : `son çıkan yapay zeka modelleri ${year} sürüm duyuru`;
+  }
+  return week
+    ? `latest AI models released this week ${year} new model announcement`
+    : `latest AI models released ${year} new model announcement`;
+}
