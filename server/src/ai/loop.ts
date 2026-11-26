@@ -2067,7 +2067,7 @@ export function intentTask(
   const action =
     behavior?.action ??
     (intent.kind === "question" || intent.kind === "analyze"
-      ? "verify"
+      ? "other"
       : intent.kind === "run"
         ? "run"
         : "update");
@@ -2124,9 +2124,10 @@ export function intentTask(
     action,
     surface,
     readOnly: readOnlyTask,
-    verificationOnly: action === "verify",
+    verificationOnly: !readOnlyTask && action === "verify",
     microEdit:
       !readOnlyTask &&
+      action !== "run" &&
       intent.scope === "trivial" &&
       (intent.behaviors?.length ?? 0) <= 1 &&
       intent.areas.length === 1,
