@@ -7,6 +7,7 @@ import {
   Circle,
   ListChecks,
   Loader2,
+  RefreshCw,
   MinusCircle,
   Pencil,
   Save,
@@ -21,6 +22,7 @@ interface TaskQueueCardProps {
   queue: ProjectTaskQueue;
   defaultOpen?: boolean;
   onRetryFailed?: () => void;
+  onReplan?: () => void;
   onOpenFile?: (path: string) => void;
   onUpdateTask?: (taskId: string, patch: Partial<ProjectTask>) => void | Promise<void>;
   onDeleteTask?: (taskId: string) => void | Promise<void>;
@@ -52,6 +54,7 @@ export function TaskQueueCard({
   queue,
   defaultOpen = false,
   onRetryFailed,
+  onReplan,
   onOpenFile,
   onUpdateTask,
   onDeleteTask,
@@ -348,6 +351,19 @@ export function TaskQueueCard({
             disabled={queue.status === "running"}
           >
             {t(queue.status === "stopped" ? "Continue remaining tasks" : "Retry failed tasks")}
+          </button>
+        ) : null}
+        {failed > 0 && onReplan ? (
+          <button
+            className="task-queue-retry"
+            onClick={(event) => {
+              event.preventDefault();
+              onReplan();
+            }}
+            disabled={queue.status === "running"}
+            title={t("Create a fresh plan instead of resuming the old tasks")}
+          >
+            <RefreshCw size={9} /> {t("Replan")}
           </button>
         ) : null}
       </div>

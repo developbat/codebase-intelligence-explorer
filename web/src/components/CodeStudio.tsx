@@ -2928,6 +2928,7 @@ export function CodeStudio({
     appendUser = true,
     runOptions: {
       retryFailed?: boolean;
+      replan?: boolean;
       skipClarify?: boolean;
       workspaceMode?: AiWorkspaceMode;
       provider?: AiProviderId;
@@ -3055,6 +3056,7 @@ export function CodeStudio({
             parallelTasks: modeForRun === "build" ? 2 : 1,
             workspaceMode: modeForRun,
             retryFailed: runOptions.retryFailed === true,
+            replan: runOptions.replan === true,
             clarified: runOptions.skipClarify === true,
             history: history.slice(-8),
             liveBrowser,
@@ -4392,6 +4394,10 @@ export function CodeStudio({
                   onRetryFailed={() => {
                     if (chatBusy || !taskQueue) return;
                     void askProject(taskQueue.goal, false, { retryFailed: true, skipClarify: true });
+                  }}
+                  onReplan={() => {
+                    if (chatBusy || !taskQueue) return;
+                    void askProject(taskQueue.goal, false, { replan: true, skipClarify: true });
                   }}
                   onUpdateTask={updateQueueTask}
                   onDeleteTask={deleteQueueTask}
@@ -5775,6 +5781,14 @@ export function CodeStudio({
                       if (!taskQueue) return;
                       void askProject(taskQueue.goal, false, {
                         retryFailed: true,
+                        skipClarify: true,
+                        workspaceMode: "build",
+                      });
+                    }}
+                    onReplan={() => {
+                      if (!taskQueue) return;
+                      void askProject(taskQueue.goal, false, {
+                        replan: true,
                         skipClarify: true,
                         workspaceMode: "build",
                       });
