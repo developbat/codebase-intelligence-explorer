@@ -10,6 +10,7 @@ import {
   shouldRetryWithEditFirst,
   summarizeVerificationSteps,
   taskBudgetForEffort,
+  taskBudgetEffort,
   taskStepBudget,
   taskLooksLikeInspection,
   taskLooksLikeVerification,
@@ -19,6 +20,7 @@ import {
   splitGoalSections,
   collapseToBuildSession,
   isSmallProjectForBuildSession,
+  compactRetryContext,
 } from "./ai/loop";
 import {
   budgetExceeded,
@@ -29,6 +31,27 @@ import {
   reportsIncompleteWiring,
   reportsRemainingWork,
 } from "./ai/service";
+
+test("retry context carries the failure evidence and changed files", () => {
+  const context = compactRetryContext({
+    summary: "The replacement snippet was not found.",
+    changedFiles: ["styles.css"],
+    error: "",
+    steps: [
+      {
+        index: 1,
+        action: "replace_in_file",
+        args: {},
+        observation: "The find snippet was not found in the file.",
+        ok: false,
+        durationMs: 10,
+      },
+    ],
+  } as unknown as Parameters<typeof compactRetryContext>[0]);
+  assert.match(context, /Previous attempt failed/);
+  assert.match(context, /styles\.css/);
+  assert.match(context, /replace_in_file/);
+});
 
 test("small builds collapse plan tasks into one build session with a checklist", () => {
   const analysis = {
@@ -507,6 +530,10 @@ test("intentTask adds conventional UI checks for a terse prompt", () => {
   assert.equal(task.action, "update");
   assert.equal(task.surface, "ui");
   assert.equal(task.readOnly, false);
+  assert.equal(task.patch, true);
+  assert.equal(task.stepBudget, 8);
+  assert.equal(task.effort, "simple");
+  assert.equal(taskBudgetEffort(task), "simple");
   assert.match(task.detail, /Behaviors:/i);
   assert.match(task.detail, /do not change scoring/i);
   assert.match(task.acceptance ?? "", /buttons are dark blue/i);

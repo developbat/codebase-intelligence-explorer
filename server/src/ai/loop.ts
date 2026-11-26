@@ -966,6 +966,24 @@ export function summaryAllowsNoChanges(summary: string): boolean {
   );
 }
 
+export function compactRetryContext(result: AiAgentResult): string {
+  const failed = result.steps
+    .filter((step) => !step.ok)
+    .slice(-3)
+    .map((step) => `${step.action}: ${(step.observation ?? "").replace(/\s+/g, " ").slice(0, 300)}`)
+    .join("\n");
+  return [
+    "Previous attempt failed; do not repeat it. The current code is included below.",
+    `Summary: ${(result.summary ?? "").replace(/\s+/g, " ").slice(0, 1_200)}`,
+    result.changedFiles.length > 0 ? `Changed: ${result.changedFiles.join(", ")}` : "",
+    failed ? `Failed steps:\n${failed}` : "",
+    result.error ? `Error: ${result.error.replace(/\s+/g, " ").slice(0, 500)}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n")
+    .slice(0, 3_000);
+}
+
 export function reviewFileExcerpt(content: string, max = 3_000): string {
   if (content.length <= max) return content;
   return `${content.slice(0, max)}\n… [excerpt truncated; the file continues] …`;
@@ -1439,6 +1457,9 @@ function taskInstruction(
     cleanTaskDetail(task.detail),
     task.acceptance ? `Acceptance: ${task.acceptance}` : "",
     task.notes ? `Retry note: ${task.notes}` : "",
+    task.retryContext
+      ? `Previous attempt evidence (do not repeat; fix only this):\n${task.retryContext}`
+      : "",
     resumeContract,
     runPreviewUrl
       ? `The active project's dev server is already running at ${runPreviewUrl}. The active project is already open in this workspace: use its files, the task notes and .cie/agent context instead of asking the user to choose a project or repeat information. Open this URL in the preview; do not start a second server and do not switch projects. Use browser_check on this URL when you need UI evidence.`
@@ -1558,6 +1579,7 @@ export function softTaskTokenBudget(effort: ProjectTaskEffort): number {
  * burn a whole retry on a short verification.
  */
 export function taskBudgetEffort(task: ProjectTask): ProjectTaskEffort {
+  if (task.patch === true) return "simple";
   if (task.effort !== "simple") return task.effort;
   if (task.surface === "ui" || task.surface === "game" || task.verificationOnly === true) {
     return "standard";
@@ -2119,6 +2141,60 @@ export function collapseToBuildSession(
   };
 }
 
+const CODE_CONTEXT_MAX_CHARS = 8_000;
+const CODE_CONTEXT_FILE_MAX = 4_000;
+
+/**
+ * Phase 2 context: pass the relevant real code instead of making the agent
+ * re-read files every turn. Small builds get template/module files; patches
+ * get their target files.
+ */
+async function buildTaskCodeContext(
+  analysis: AnalysisResult,
+  task: ProjectTask,
+  activeFile?: string,
+): Promise<string> {
+  const paths = new Set<string>();
+  const add = (value: string | undefined) => {
+    if (!value) return;
+    const clean = value.replace(/^[\s`"'(]+|[`"'(),.;:]+$/g, "").replace(/^\.\//, "");
+    if (!clean || clean.startsWith(".cie/") || clean.startsWith(".git/")) return;
+    paths.add(clean);
+  };
+  if (task.buildSession === true) {
+    analysis.files
+      .filter((file) => !file.path.startsWith(".cie/") && !file.path.startsWith(".git/"))
+      .slice(0, 12)
+      .forEach((file) => add(file.path));
+  } else {
+    taskTargetFiles(analysis, task)
+      .slice(0, 4)
+      .forEach((file) => add(file));
+    add(activeFile);
+  }
+  if (paths.size === 0) return "";
+  const blocks: string[] = [];
+  let used = 0;
+  for (const filePath of paths) {
+    // eslint-disable-next-line no-await-in-loop
+    const file = await readSourceFile(analysis.rootPath, filePath).catch(() => null);
+    if (!file) continue;
+    const truncated =
+      file.content.length > CODE_CONTEXT_FILE_MAX
+        ? `${file.content.slice(0, CODE_CONTEXT_FILE_MAX)}\n… [file excerpt truncated]`
+        : file.content;
+    const block = `--- ${filePath} (${file.content.length} chars) ---\n${truncated}`;
+    if (used + block.length > CODE_CONTEXT_MAX_CHARS) break;
+    blocks.push(block);
+    used += block.length;
+  }
+  if (blocks.length === 0) return "";
+  return [
+    "Current code (authoritative; use it instead of re-reading these files. Read only an exact line after you edit it.):",
+    ...blocks,
+  ].join("\n\n");
+}
+
 function isUiIntent(goal: string, intent: IntentAnalysis): boolean {
   if (intent.behaviors?.some((behavior) => behavior.surface === "ui" || behavior.surface === "game")) {
     return true;
@@ -2218,10 +2294,21 @@ export function intentTask(
     (intent.behaviors?.length ?? 0) > 1 ||
     goal.trim().length >= 800 ||
     intent.scope === "large";
-  const effort: ProjectTaskEffort =
+  const plannedEffort: ProjectTaskEffort =
     workspaceMode === "build" && !readOnly && multiFeatureGoal && baseEffort === "simple"
       ? "standard"
       : baseEffort;
+  // A short single-behavior edit on an existing project is a patch, not a
+  // project build: no planner/review, a small turn budget and the target code
+  // in context.
+  const patch =
+    workspaceMode === "build" &&
+    !readOnly &&
+    intent.kind === "edit" &&
+    (intent.scope === "trivial" || intent.scope === "small") &&
+    (intent.behaviors?.length ?? 0) <= 1 &&
+    goal.trim().length < 400;
+  const effort: ProjectTaskEffort = patch ? "simple" : plannedEffort;
   const assumptions = intent.assumptions.filter(
     (item) => !/Intent analyst could not parse|Intent analysis could not run/i.test(item),
   );
@@ -2293,6 +2380,8 @@ export function intentTask(
       intent.scope === "trivial" &&
       (intent.behaviors?.length ?? 0) <= 1 &&
       intent.areas.length === 1,
+    patch: patch || undefined,
+    stepBudget: patch ? 8 : undefined,
     dependsOn: [],
     attempts: 0,
     changedFiles: [],
@@ -2451,8 +2540,15 @@ export async function runProjectLoop(
   // spending the whole budget on one monolithic task.
   const lowConfidenceLargeGoal =
     goal.trim().length >= 800 && (intent?.confidence ?? 1) < 0.8;
+  const patchGoal =
+    workspaceMode === "build" &&
+    intent?.kind === "edit" &&
+    (intent?.scope === "trivial" || intent?.scope === "small") &&
+    (intent?.behaviors?.length ?? 0) <= 1 &&
+    goal.trim().length < 400;
   const intentSingle =
     workspaceMode !== "build" ||
+    patchGoal ||
     (intent?.mode === "single" && !multiPartGoal && !lowConfidenceLargeGoal);
   let plannedNow = false;
   if (
@@ -2909,6 +3005,9 @@ ${collapsed.tasks[0].checklist
             )}. Do not delete or rename unrelated files and do not run project-wide rewrites.`
           : "Parallel execution: other tasks may run at the same time. Do not rewrite unrelated files; this task has no declared file target."
         : "";
+    const codeContext = await buildTaskCodeContext(analysis, current, options.activeFile).catch(
+      () => "",
+    );
     const promise = runAgentTask(
       projectId,
       taskInstruction(
@@ -2951,6 +3050,7 @@ ${collapsed.tasks[0].checklist
         acceptance: current.acceptance,
         goalText: queue.goal,
         workBriefText: cleanTaskDetail(current.detail) || current.title,
+        codeContext,
         history: options.history?.slice(-8),
         liveBrowser: options.liveBrowser === true,
         microEdit,
@@ -3713,7 +3813,10 @@ ${collapsed.tasks[0].checklist
       if (
         !softBudgetWithWork &&
         softBudgetRetries < 1 &&
-        repairAttempts < (latestTask.buildSession ? 1 : RECOVERY_POLICY.maxRepairsPerTask) &&
+        repairAttempts <
+          (latestTask.buildSession || latestTask.patch
+            ? 1
+            : RECOVERY_POLICY.maxRepairsPerTask) &&
         autoRepairs < RECOVERY_POLICY.maxRepairsPerRun &&
         lifetimeTokens < hardTaskTokens
       ) {
@@ -3767,6 +3870,7 @@ ${collapsed.tasks[0].checklist
                 );
         queue = markTask(queue, task.id, {
           ...repaired,
+          retryContext: compactRetryContext(result),
           status: "pending",
           completedAt: undefined,
           modelOverride: { provider: main.id, model: main.model },
@@ -3924,6 +4028,7 @@ ${collapsed.tasks[0].checklist
           verification: undefined,
           changedFiles: task.changedFiles ?? [],
           commands: task.commands ?? [],
+          retryContext: compactRetryContext(result),
           notes: `Retry the same model: the provider worked, but the task was incomplete. Continue from the current files, complete the missing work and verify it. Do not restart from scratch.${
             missingUiVerification
               ? ` No interactive real-page check ran after the UI change. Run browser_check or game_check on the actual entry page with a click/fill/press/eval and an assertion; for a canvas game, click a key and check the HUD/status.${uiSmokeSummary ? ` ${uiSmokeSummary}` : ""}`
@@ -3984,7 +4089,8 @@ ${collapsed.tasks[0].checklist
     if (
       finalTask &&
       finalTask.status === "failed" &&
-      (finalTask.repairAttempts ?? 0) < (finalTask.buildSession ? 0 : 2) &&
+      (finalTask.repairAttempts ?? 0) <
+        (finalTask.buildSession || finalTask.patch ? 0 : 2) &&
       result.stoppedReason !== "aborted" &&
       result.stoppedReason !== "budget" &&
       !protocolFailure &&
@@ -4012,6 +4118,7 @@ ${collapsed.tasks[0].checklist
           commands: [
             ...new Set([...(finalTask.commands ?? []), ...(result.ranCommands ?? [])]),
           ],
+          retryContext: compactRetryContext(result),
           notes: `Repair pass — the previous attempt identified a concrete remaining fix. Apply only this fix, verify it, then finish: ${repairInstruction}${runLogNote}`,
         });
         await appendTaskContext(

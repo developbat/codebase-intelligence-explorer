@@ -35,6 +35,10 @@ export interface ProjectTask {
   stepBudget?: number;
   /** One agent session covers all checklist items instead of one task per item. */
   buildSession?: boolean;
+  /** Small existing-project change: one patch session, no planner/review. */
+  patch?: boolean;
+  /** Compact failure evidence carried into a retry. */
+  retryContext?: string;
   /** Behavior checklist executed inside a build session. */
   checklist?: Array<{ id: string; title: string; acceptance: string }>;
   dependsOn: string[];

@@ -3940,6 +3940,8 @@ export async function runAgentTask(
     microEdit?: boolean;
     /** A focused single-file task; use a tighter read budget but keep normal steps. */
     tightReads?: boolean;
+    /** Current relevant code included by the loop so the agent does not re-read it. */
+    codeContext?: string;
     /** A saved deterministic scenario that must pass before finish is accepted. */
     requiredScenario?: {
       name: string;
@@ -4422,6 +4424,7 @@ export async function runAgentTask(
           commandsApproved ? "pre-approved" : "ask the user before running commands"
         }; delete and rename always need confirmation.`,
     seedText,
+    options.codeContext ?? "",
     continuation
       ? `Continuation of your previous answer — implement these findings directly.\nDo not re-research or rescan the project. The findings below are authoritative. Read only the exact lines you will edit or confirm, then make the change and verify it on the real app.\n\n${continuation}`
       : "",
