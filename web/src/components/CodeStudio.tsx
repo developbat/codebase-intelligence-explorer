@@ -4757,11 +4757,19 @@ export function CodeStudio({
               <p className="studio-confirm-request">
                 {confirmation.intent.normalizedRequest || confirmation.intent.understanding}
               </p>
+              {confirmation.intent.confidence !== undefined ? (
+                <p className="studio-confirm-meta">
+                  {t("Confidence")}: {Math.round(confirmation.intent.confidence * 100)}%
+                </p>
+              ) : null}
               {confirmation.intent.behaviors?.length ? (
                 <ul className="studio-confirm-list">
                   {confirmation.intent.behaviors.map((behavior) => (
                     <li key={behavior.id}>
                       <b>{behavior.target}</b>
+                      <span className="studio-confirm-tag">
+                        {behavior.action} · {behavior.surface}
+                      </span>
                       {behavior.details ? ` — ${behavior.details}` : ""}
                       {behavior.acceptance ? ` · ${behavior.acceptance}` : ""}
                     </li>

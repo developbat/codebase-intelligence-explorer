@@ -168,6 +168,13 @@ export async function findTaskScenario(
 
 /** A task that only needs to prove an existing behavior, not change it. */
 export function isScenarioVerificationTask(task: ProjectTask): boolean {
+  if (task.verificationOnly === true || task.action === "verify") return true;
+  if (
+    task.action &&
+    ["create", "update", "remove", "move", "document"].includes(task.action)
+  ) {
+    return false;
+  }
   const title = task.title.trim();
   const verifies =
     /^(?:verify|prove|confirm|check|validate|test|run\b[^\n]{0,80}\bscenario|scenario|doğrula|kontrol|kanıtla|senaryo)/i.test(

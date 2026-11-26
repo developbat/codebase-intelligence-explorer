@@ -11621,6 +11621,23 @@ button.canvas-stat {
   line-height: 1.45;
 }
 
+.studio-confirm-meta {
+  margin: 2px 0 4px;
+  color: #7f9bbd;
+  font-size: 8px;
+}
+
+.studio-confirm-tag {
+  display: inline-block;
+  margin-left: 5px;
+  padding: 0 4px;
+  border: 1px solid #284761;
+  border-radius: 999px;
+  color: #9ed0ff;
+  font-size: 7px;
+  text-transform: uppercase;
+}
+
 .studio-confirm-actions {
   display: flex;
   gap: 6px;

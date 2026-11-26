@@ -169,7 +169,7 @@ function projectFacts(analysis: AnalysisResult): string {
 const PLANNER_SYSTEM = `You are a senior software project planner. Decompose the user's goal into a short, ordered task queue that another coding agent can execute one task at a time.
 Return JSON only. Do not write code. Do not use Markdown fences.
 Schema:
-{"tasks":[{"title":"short imperative title","detail":"exact work, files/areas if known","acceptance":"how to verify this task","effort":"simple|standard|hard"}]}
+{"tasks":[{"title":"short imperative title","detail":"exact work, files/areas if known","acceptance":"how to verify this task","effort":"simple|standard|hard","action":"create|update|remove|move|verify|run|document|other","surface":"ui|api|data|config|docs|game|other"}]}
 Rules:
 - 2-8 tasks. Each task must be independently verifiable.
 - Split multi-feature goals: if the goal asks for several independent changes (add X, replace Y, change Z, check W), return one task per feature. Never put the whole goal in one task.
@@ -189,6 +189,7 @@ Rules:
 - The context notes in .cie/agent/context.md and .cie/agent/TASKS.md are for continuity; you may mention them.
 - Write task titles, details and acceptance in English. Keep quoted user text, file paths, function names and code identifiers unchanged.
 - Never return placeholder tasks such as "...", "TODO", "TBD" or "fill me". Every task must contain a real title, detail and acceptance.
+- When an intent spec with behaviors is provided, create one task per behavior and copy its action/surface. Do not merge independent behaviors.
 - Preserve the user's exact rule and qualifiers (smaller/larger/only/never). Never replace them with an example-specific shortcut: if the user says the smaller of the two operands, write min(a,b), not "the second operand"; examples are illustrations, not the rule.
 - If the preflight code already implements the requested rule, do not create an edit task that claims a flat bonus or missing guard; create a verification-only task or fold the verification into the behavior task.
 - Work in any programming language.`;
@@ -271,6 +272,8 @@ export function splitLargeGoal(goal: string, verification?: string): ProjectTask
     status: "pending",
     effort: "standard",
     role: "main",
+    action: "update",
+    surface: "other",
     dependsOn: index === 0 ? [] : [`task-${index}`],
     attempts: 0,
     changedFiles: [],
@@ -287,6 +290,10 @@ export function splitLargeGoal(goal: string, verification?: string): ProjectTask
       status: "pending",
       effort: "standard",
       role: "main",
+      action: "verify",
+      surface: "other",
+      verificationOnly: true,
+      readOnly: true,
       dependsOn: [tasks[tasks.length - 1].id],
       attempts: 0,
       changedFiles: [],
@@ -328,6 +335,8 @@ function fallbackTasks(
     status: "pending",
     effort: "standard",
     role: "main",
+    action: "update",
+    surface: "other",
     dependsOn: [],
     attempts: 0,
     changedFiles: [],
@@ -345,6 +354,10 @@ function fallbackTasks(
       status: "pending",
       effort: "standard",
       role: "main",
+      action: "verify",
+      surface: "other",
+      verificationOnly: true,
+      readOnly: true,
       dependsOn: ["task-1"],
       attempts: 0,
       changedFiles: [],
@@ -358,6 +371,10 @@ function fallbackTasks(
 }
 
 function isVerificationOnlyTask(task: ProjectTask): boolean {
+  if (task.verificationOnly === true) return true;
+  if (task.action && ["create", "update", "remove", "move", "document"].includes(task.action)) {
+    return false;
+  }
   const text = `${task.title} ${task.detail}`;
   if (
     /^(verify|verify and fix|final verification|run .*verification)/i.test(task.title.trim()) &&
@@ -469,6 +486,30 @@ function usableRawPlannerTasks(raw: unknown): Record<string, unknown>[] | null {
   return usable.length === list.length ? usable : null;
 }
 
+const TASK_ACTIONS = new Set([
+  "create",
+  "update",
+  "remove",
+  "move",
+  "verify",
+  "run",
+  "document",
+  "other",
+]);
+const TASK_SURFACES = new Set(["ui", "api", "data", "config", "docs", "game", "other"]);
+
+function taskAction(value: unknown): ProjectTask["action"] | undefined {
+  return typeof value === "string" && TASK_ACTIONS.has(value)
+    ? (value as ProjectTask["action"])
+    : undefined;
+}
+
+function taskSurface(value: unknown): ProjectTask["surface"] | undefined {
+  return typeof value === "string" && TASK_SURFACES.has(value)
+    ? (value as ProjectTask["surface"])
+    : undefined;
+}
+
 function normalizeTasks(raw: unknown, goal: string, verification?: string): ProjectTask[] {
   const candidate = raw as { tasks?: unknown };
   const list = Array.isArray(candidate?.tasks) ? candidate.tasks : [];
@@ -481,6 +522,8 @@ function normalizeTasks(raw: unknown, goal: string, verification?: string): Proj
     const detail = typeof value.detail === "string" ? value.detail.trim() : "";
     if (!title || !detail) continue;
     const effort = normalizeEffort(value.effort);
+    const action = taskAction(value.action);
+    const surface = taskSurface(value.surface);
     const previous = tasks[tasks.length - 1];
     tasks.push({
       id: `task-${tasks.length + 1}`,
@@ -493,6 +536,11 @@ function normalizeTasks(raw: unknown, goal: string, verification?: string): Proj
       status: "pending",
       effort,
       role: roleForEffort(effort),
+      action,
+      surface,
+      verificationOnly: action === "verify" ? true : undefined,
+      readOnly: action === "verify" ? true : undefined,
+      microEdit: value.microEdit === true ? true : undefined,
       dependsOn: previous ? [previous.id] : [],
       attempts: 0,
       changedFiles: [],
@@ -503,8 +551,11 @@ function normalizeTasks(raw: unknown, goal: string, verification?: string): Proj
     if (tasks.length >= MAX_PLANNED_TASKS) break;
   }
   if (tasks.length === 0) return fallbackTasks(goal, verification);
-  const hasVerification = tasks.some((task) =>
-    /(verif|test|typecheck|build|doğrula|test et|derle)/i.test(`${task.title} ${task.detail}`),
+  const hasVerification = tasks.some(
+    (task) =>
+      task.verificationOnly === true ||
+      task.action === "verify" ||
+      /(verif|test|typecheck|build|doğrula|test et|derle)/i.test(`${task.title} ${task.detail}`),
   );
   if (verification && !hasVerification) {
     tasks.push({
@@ -515,6 +566,10 @@ function normalizeTasks(raw: unknown, goal: string, verification?: string): Proj
       status: "pending",
       effort: "standard",
       role: "main",
+      action: "verify",
+      surface: "other",
+      verificationOnly: true,
+      readOnly: true,
       dependsOn: [tasks[tasks.length - 1].id],
       attempts: 0,
       changedFiles: [],
@@ -847,6 +902,10 @@ const TASK_CHANGE_PHRASES =
   /(gösterilmeyecek|gösterilecek|gösterilmesin|olacak|olcak|olmalı|olması|olmasın|olmayacak|değişecek|değiştirilecek|kaldırılacak|eklenecek|yapılacak|birleştirilecek|taşınacak|gizlenecek|gizle|aktif olacak|pasif olacak|aktif olsun|pasif olsun|tek bir|sadece[^.]{0,40}aktif|buton[^.]{0,40}aktif)/i;
 
 export function taskLooksLikeWrite(task: ProjectTask): boolean {
+  if (task.readOnly === true) return false;
+  if (task.action) {
+    return ["create", "update", "remove", "move", "document"].includes(task.action);
+  }
   const title = task.title;
   const titleWrite = TASK_WRITE_VERBS.test(title) || TASK_CHANGE_PHRASES.test(title);
   // The title is the user's actual goal. The detail is model-generated planning
@@ -890,6 +949,8 @@ export function blockDependentsOf(
 }
 
 export function taskLooksLikeInspection(task: ProjectTask): boolean {
+  if (task.readOnly === true) return true;
+  if (task.action) return task.action === "verify";
   const title = task.title;
   const inspection =
     /\b(inspect|read|review|analy[sz]e|research|understand|explore|audit|list|enumerate|count)\b|incele|oku|gözden geçir|araştır|analiz et|listele|listeler|listeleme|liste|kaç|kontrol et|kontrol/i;
@@ -898,6 +959,8 @@ export function taskLooksLikeInspection(task: ProjectTask): boolean {
 }
 
 export function taskLooksLikeVerification(task: ProjectTask): boolean {
+  if (task.verificationOnly !== undefined) return task.verificationOnly;
+  if (task.action) return task.action === "verify";
   return /\b(verify|verification|check|test|validate|confirm|review)\b|doğrula|kontrol|test et/i.test(
     task.title,
   );
@@ -1500,6 +1563,9 @@ export function softTaskTokenBudget(effort: ProjectTaskEffort): number {
  */
 export function taskBudgetEffort(task: ProjectTask): ProjectTaskEffort {
   if (task.effort !== "simple") return task.effort;
+  if (task.surface === "ui" || task.surface === "game" || task.verificationOnly === true) {
+    return "standard";
+  }
   const text = `${task.title}\n${cleanTaskDetail(task.detail)}`;
   const uiOrVerification =
     taskLooksLikeVerification(task) ||
@@ -1511,6 +1577,7 @@ export function taskBudgetEffort(task: ProjectTask): ProjectTaskEffort {
 
 /** A mechanical edit with an exact file/line target should use a short context budget. */
 export function isMicroEditTask(task: ProjectTask): boolean {
+  if (task.microEdit !== undefined) return task.microEdit;
   const text = `${task.title}\n${task.detail}\n${task.acceptance ?? ""}`;
   if (/one-line|only that line|change only that line|sadece .*satır|tek satır/i.test(text)) {
     return true;
@@ -1996,6 +2063,17 @@ export function intentTask(
   const assumptions = intent.assumptions.filter(
     (item) => !/Intent analyst could not parse|Intent analysis could not run/i.test(item),
   );
+  const behavior = intent.behaviors?.[0];
+  const action =
+    behavior?.action ??
+    (intent.kind === "question" || intent.kind === "analyze"
+      ? "verify"
+      : intent.kind === "run"
+        ? "run"
+        : "update");
+  const surface = behavior?.surface ?? "other";
+  const readOnlyTask =
+    workspaceMode !== "build" || intent.kind === "question" || intent.kind === "analyze";
   return {
     id: "task-1",
     title: goal.length > 90 ? `${goal.slice(0, 87)}…` : goal,
@@ -2043,6 +2121,15 @@ export function intentTask(
       workspaceMode === "ask" || workspaceMode !== "build" || effort !== "simple"
         ? "main"
         : "fast",
+    action,
+    surface,
+    readOnly: readOnlyTask,
+    verificationOnly: action === "verify",
+    microEdit:
+      !readOnlyTask &&
+      intent.scope === "trivial" &&
+      (intent.behaviors?.length ?? 0) <= 1 &&
+      intent.areas.length === 1,
     dependsOn: [],
     attempts: 0,
     changedFiles: [],

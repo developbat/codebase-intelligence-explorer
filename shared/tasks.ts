@@ -1,4 +1,8 @@
-import type { IntentAnalysis } from "./intent";
+import type {
+  IntentAnalysis,
+  IntentBehaviorAction,
+  IntentBehaviorSurface,
+} from "./intent";
 
 export type ProjectTaskStatus = "pending" | "in_progress" | "done" | "failed" | "blocked";
 
@@ -17,6 +21,16 @@ export interface ProjectTask {
   costBudgetUsd?: number;
   effort: ProjectTaskEffort;
   role: ProjectTaskRole;
+  /** Structured action from the intent/planner spec. */
+  action?: IntentBehaviorAction;
+  /** Structured surface from the intent/planner spec. */
+  surface?: IntentBehaviorSurface;
+  /** Read-only inspection/answer task. */
+  readOnly?: boolean;
+  /** Verification-only task (no project writes). */
+  verificationOnly?: boolean;
+  /** Mechanical small edit; use the micro prompt/step budget. */
+  microEdit?: boolean;
   dependsOn: string[];
   provider?: string;
   model?: string;

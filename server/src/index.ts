@@ -2410,8 +2410,9 @@ app.post("/api/projects/:id/ai/loop/stream", async (req, res) => {
         (analyzed.intent.kind === "edit" ||
           analyzed.intent.kind === "scaffold" ||
           analyzed.intent.kind === "run") &&
-        ((analyzed.intent.behaviors?.length ?? 0) > 1 ||
-          (analyzed.intent.confidence ?? 1) < 0.8 ||
+        (analyzed.intent.kind === "scaffold" ||
+          (analyzed.intent.behaviors?.length ?? 0) > 1 ||
+          (analyzed.intent.confidence ?? 1) < 0.85 ||
           (analyzed.intent.constraints?.length ?? 0) > 0);
       if (needsConfirmation) {
         write({ type: "confirm", intent: analyzed.intent });

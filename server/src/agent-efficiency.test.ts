@@ -6,6 +6,7 @@ import {
   blockDependentsOf,
   intentTask,
   isInspectionAnswer,
+  isMicroEditTask,
   shouldRetryWithEditFirst,
   summarizeVerificationSteps,
   taskBudgetForEffort,
@@ -378,6 +379,9 @@ test("intentTask adds conventional UI checks for a terse prompt", () => {
   assert.match(task.detail, /UI quality/i);
   assert.match(task.detail, /Preserve existing behavior/i);
   assert.match(task.detail, /Verification:/i);
+  assert.equal(task.action, "update");
+  assert.equal(task.surface, "ui");
+  assert.equal(task.readOnly, false);
   assert.match(task.detail, /Behaviors:/i);
   assert.match(task.detail, /do not change scoring/i);
   assert.match(task.acceptance ?? "", /buttons are dark blue/i);
@@ -393,4 +397,26 @@ test("summarizes successful verification steps for the stage trace", () => {
     { index: 4, action: "read_file", args: {}, observation: "", ok: true, durationMs: 30 },
   ] as AiAgentStep[];
   assert.deepEqual(summarizeVerificationSteps(steps), { checks: 2, durationMs: 2000 });
+});
+
+test("structured task fields override legacy text heuristics", () => {
+  const base = {
+    id: "task-1",
+    title: "Do the work and report it",
+    detail: "Inspect and create a report",
+    status: "pending" as const,
+    effort: "simple" as const,
+    role: "main" as const,
+    dependsOn: [],
+    attempts: 0,
+    changedFiles: [],
+    commands: [],
+    createdAt: "",
+    updatedAt: "",
+  };
+  assert.equal(taskLooksLikeWrite({ ...base, action: "verify", readOnly: true }), false);
+  assert.equal(taskLooksLikeWrite({ ...base, action: "update" }), true);
+  assert.equal(taskLooksLikeInspection({ ...base, action: "verify", readOnly: true }), true);
+  assert.equal(taskLooksLikeVerification({ ...base, action: "verify", verificationOnly: true }), true);
+  assert.equal(isMicroEditTask({ ...base, microEdit: true, detail: "unrelated" }), true);
 });
