@@ -31,6 +31,44 @@ import {
   reportsIncompleteWiring,
   reportsRemainingWork,
 } from "./ai/service";
+import { extractNumberedListIntent } from "./ai/intent";
+
+test("a numbered list is extracted deterministically without an intent call", () => {
+  const analysis = {
+    projectName: "test-maze3",
+    files: [
+      { path: "game.js", bytes: 9_000 },
+      { path: "index.html", bytes: 2_000 },
+      { path: "styles.css", bytes: 3_000 },
+    ],
+    symbols: [],
+    tooling: { buildCommands: [], testCommands: [], typecheckCommands: [] },
+    languages: { javascript: 1 },
+    stats: { files: 3 },
+  } as unknown as import("../../shared/types").AnalysisResult;
+  const goal = [
+    "oyunda listedeki güncellemelerin yapılmasını istiyorum:",
+    "1. Bölüm sistemi",
+    "Tek labirent yerine 5 farklı bölüm oluştur.",
+    "2. Savaş sistemi",
+    "Space tuşuyla ateş edilsin.",
+    "3. Yeni düşman türleri",
+    "Takipçi, Nöbetçi, Hızlı, Tank ve Boss.",
+    "4. Envanter ve yetenekler",
+    "Toplanan nesneler envantere eklensin.",
+  ].join("\n");
+  const intent = extractNumberedListIntent(goal, analysis, { language: "tr" });
+  assert.ok(intent);
+  const behaviors = intent.behaviors ?? [];
+  assert.equal(behaviors.length, 4);
+  assert.equal(intent.confidence, 0.86);
+  assert.equal(intent.needsClarification, false);
+  assert.equal(intent.mode, "loop");
+  assert.equal(intent.scope, "large");
+  assert.ok(behaviors.every((behavior) => behavior.surface === "game"));
+  assert.match(intent.normalizedRequest ?? "", /Bölüm sistemi/);
+  assert.doesNotMatch(intent.normalizedRequest ?? "", /oyunda listedeki/);
+});
 
 test("retry context carries the failure evidence and changed files", () => {
   const context = compactRetryContext({

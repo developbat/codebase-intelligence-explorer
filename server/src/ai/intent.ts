@@ -40,7 +40,7 @@ import {
 } from "../../../shared/intent";
 import { documentStats, readDocument } from "../documentTools";
 
-const MAX_OUTPUT_TOKENS = 900;
+const MAX_OUTPUT_TOKENS = 1_600;
 const TIMEOUT_MS = 35_000;
 
 interface IntentOptions {
@@ -303,22 +303,23 @@ function fallbackIntentSpec(
   IntentAnalysis,
   "normalizedRequest" | "behaviors" | "constraints" | "ambiguities" | "confidence"
 > {
-  const text = instruction.trim().slice(0, 800);
+  const text = instruction.replace(/\s+/g, " ").trim();
+  const target = text.split(/[.!?\n]/)[0]?.trim().slice(0, 120) || text.slice(0, 120);
   return {
-    normalizedRequest: text,
+    normalizedRequest: text.slice(0, 220),
     behaviors: [
       {
         id: "b1",
         action: kind === "run" ? "run" : kind === "question" ? "verify" : "update",
         surface: "other",
-        target: text.slice(0, 200),
+        target,
         details: "",
         acceptance: "",
       },
     ],
     constraints: [],
     ambiguities: [],
-    confidence: 0.3,
+    confidence: 0.45,
   };
 }
 
@@ -844,6 +845,102 @@ async function applyProjectMismatchGuard(
   return mismatch ?? intent;
 }
 
+export function extractNumberedListIntent(
+  instruction: string,
+  analysis: AnalysisResult,
+  options: IntentOptions,
+): IntentAnalysis | null {
+  const lines = instruction.split(/\r?\n/);
+  const items: { title: string; body: string[] }[] = [];
+  let current: { title: string; body: string[] } | null = null;
+  for (const line of lines) {
+    const match = line.match(/^\s*(\d{1,2})[.)]\s+(.+?)\s*$/);
+    if (match) {
+      if (current) items.push(current);
+      current = { title: match[2].trim(), body: [] };
+    } else if (current) {
+      current.body.push(line);
+    }
+  }
+  if (current) items.push(current);
+  if (items.length < 2 || items.length > 8) return null;
+  if (items.some((item) => item.title.endsWith("?"))) return null;
+  if (!/\b(yap|yapıl|ekle|ekley|oluştur|olustur|güncelle|guncelle|değiştir|degistir|istiyorum|add|implement|update|create|build|make|change)\b/i.test(instruction)) {
+    return null;
+  }
+
+  const gameProject =
+    /game|oyun|canvas|maze|labirent/i.test(
+      `${analysis.projectName} ${instruction} ${analysis.files.map((file) => file.path).join(" ")}`,
+    );
+  const ui = gameProject || analysisHasUi(analysis) || requestMentionsUi(instruction);
+  const surface: IntentBehavior["surface"] = gameProject ? "game" : ui ? "ui" : "other";
+  const newProject =
+    /\b(yeni proje|sıfırdan|sifirdan|from scratch|new project|scaffold|proje oluştur)\b/i.test(
+      instruction,
+    ) && analysis.files.length <= 8;
+  const titles = items.map((item) => item.title.replace(/^#+\s*/, "").slice(0, 120));
+  const behaviors: IntentBehavior[] = items.map((item, index) => ({
+    id: `b${index + 1}`,
+    action: "update",
+    surface,
+    target: item.title.replace(/^#+\s*/, "").slice(0, 120),
+    details: item.body.join(" ").replace(/\s+/g, " ").trim().slice(0, 600),
+    acceptance: `${item.title.slice(0, 80)} is implemented and verified on the real page.`,
+  }));
+  const constraints = instruction
+    .split(/\n/)
+    .map((line) => line.trim())
+    .filter(
+      (line) =>
+        line.length > 0 &&
+        /\b(bozma|bozmay|koru|korun|değiştirme|degistirme|sadece|only|do not|preserve)\b/i.test(line),
+    )
+    .slice(0, 4);
+  const verification: IntentVerification = ui
+    ? "browser"
+    : analysis.tooling?.buildCommands?.length
+      ? "build"
+      : "none";
+  const areas = likelyProjectAreas(analysis, instruction);
+  return {
+    kind: newProject ? "scaffold" : "edit",
+    understanding: `İstenen güncelleme: ${titles.join("; ")}.`.slice(0, 400),
+    language: options.language ?? "unknown",
+    needsClarification: false,
+    question: "",
+    options: [],
+    normalizedRequest: `Apply these updates: ${titles.join("; ")}.`.slice(0, 240),
+    behaviors,
+    constraints,
+    ambiguities: [],
+    confidence: items.length >= 3 ? 0.86 : 0.8,
+    scope: items.length >= 3 ? "large" : "medium",
+    mode: "loop",
+    areas:
+      areas.length > 0
+        ? areas
+        : analysis.files
+            .filter((file) => /\.(?:html?|css|jsx?|tsx?|vue|svelte|php|py)$/i.test(file.path))
+            .slice(0, 6)
+            .map((file) => file.path),
+    verification,
+    context: "project",
+    history: "recent",
+    toolGroups: ["edit", ...(ui ? (["browser", "command"] as AgentToolGroup[]) : [])],
+    skills: [],
+    approach:
+      "Implement the numbered sections as one checklist/build session; verify the main flow on the real page.",
+    needsExhaustiveEvidence: false,
+    assumptions: [
+      "The numbered list was interpreted as independent behaviors.",
+      ...(gameProject
+        ? ["Unspecified game details use the simplest consistent implementation."]
+        : []),
+    ],
+  };
+}
+
 export async function analyzeIntent(
   projectId: string,
   instruction: string,
@@ -858,6 +955,17 @@ export async function analyzeIntent(
 }> {
   const analysis = await loadAnalysis(projectId);
   if (!instruction.trim()) throw new Error("An instruction is required.");
+  const listIntent = extractNumberedListIntent(instruction, analysis, options);
+  if (listIntent) {
+    return {
+      intent: listIntent,
+      provider: "heuristic",
+      model: "list-extractor",
+      totalTokens: 0,
+      tokenUsage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+      costUsd: 0,
+    };
+  }
   const config = await resolveIntentModel(options);
   const skillList = await listSkills(analysis.rootPath, projectId).catch(() => null);
   const skillFeedback = await readSkillFeedback(analysis.rootPath).catch(() => null);
@@ -977,7 +1085,7 @@ export async function analyzeIntent(
             },
           ],
           {
-            maxTokens: 1_400,
+            maxTokens: 2_200,
             temperature: 0,
             timeoutMs: TIMEOUT_MS,
             signal: options.signal,

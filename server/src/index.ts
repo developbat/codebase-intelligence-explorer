@@ -2448,25 +2448,6 @@ app.post("/api/projects/:id/ai/loop/stream", async (req, res) => {
         res.end();
         return;
       }
-      const scopeNeedsConfirmation =
-        analyzed.intent.scope === "medium" || analyzed.intent.scope === "large";
-      const needsConfirmation =
-        req.body?.confirmed !== true &&
-        req.body?.clarified !== true &&
-        (analyzed.intent.kind === "edit" ||
-          analyzed.intent.kind === "scaffold" ||
-          analyzed.intent.kind === "run") &&
-        (analyzed.intent.kind === "scaffold" ||
-          scopeNeedsConfirmation ||
-          goal.trim().length >= 800 ||
-          (analyzed.intent.behaviors?.length ?? 0) > 1 ||
-          (analyzed.intent.confidence ?? 1) < 0.9 ||
-          (analyzed.intent.constraints?.length ?? 0) > 0);
-      if (needsConfirmation) {
-        write({ type: "confirm", intent: analyzed.intent });
-        res.end();
-        return;
-      }
     } catch (error) {
       write({
         type: "error",

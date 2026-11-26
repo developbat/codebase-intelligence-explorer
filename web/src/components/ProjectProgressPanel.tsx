@@ -1,9 +1,10 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
   CheckCircle2,
   Clock,
   FileCode2,
+  FileText,
   History,
   ListChecks,
   Loader2,
@@ -17,7 +18,10 @@ import type {
   ProjectTaskHistoryEntry,
   ProjectTaskQueue,
 } from "../../../shared/tasks";
+import type { AiPlanSummary } from "../../../shared/ai";
+import { api } from "../api";
 import { useI18n } from "../i18n";
+import { MarkdownText } from "./MarkdownText";
 import { TaskQueueCard } from "./TaskQueueCard";
 
 interface ProjectProgressPanelProps {
@@ -169,7 +173,41 @@ export function ProjectProgressPanel({
   liveStepCount = 0,
 }: ProjectProgressPanelProps) {
   const { t, locale } = useI18n();
-  const [tab, setTab] = useState<"overview" | "todos">("overview");
+  const [tab, setTab] = useState<"overview" | "todos" | "plan">("overview");
+  const [plans, setPlans] = useState<AiPlanSummary[]>([]);
+  const [planName, setPlanName] = useState("");
+  const [planContent, setPlanContent] = useState("");
+  const [planBusy, setPlanBusy] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    setPlanBusy(true);
+    void api.plans
+      .list(analysis.id)
+      .then(async (result) => {
+        if (cancelled) return;
+        setPlans(result.plans);
+        const latest = result.plans[0];
+        setPlanName(latest?.name ?? "");
+        if (latest) {
+          const plan = await api.plans.get(analysis.id, latest.name).catch(() => null);
+          if (!cancelled) setPlanContent(plan?.content ?? "");
+        } else {
+          setPlanContent("");
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setPlans([]);
+          setPlanContent("");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setPlanBusy(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [analysis.id]);
   const tasks = queue?.tasks ?? [];
   const { done, active, planned, attention } = useMemo(() => {
     const sortDone = (a: ProjectTask, b: ProjectTask) =>
@@ -229,6 +267,14 @@ export function ProjectProgressPanel({
         >
           <ListChecks size={10} /> {t("Todos")}
           {total > 0 ? <b>{done.length}/{total}</b> : null}
+        </button>
+        <button
+          className={tab === "plan" ? "is-active" : ""}
+          onClick={() => setTab("plan")}
+          role="tab"
+          aria-selected={tab === "plan"}
+        >
+          <FileText size={10} /> {t("Plan")}
         </button>
       </div>
 
@@ -387,7 +433,7 @@ export function ProjectProgressPanel({
         </div>
       ) : null}
         </>
-      ) : (
+      ) : tab === "todos" ? (
         <div className="pp-todos">
           {queue && tasks.length > 0 ? (
             <TaskQueueCard
@@ -405,6 +451,47 @@ export function ProjectProgressPanel({
               <ListChecks size={17} />
               <strong>{t("No AI todos yet")}</strong>
               <span>{t("Start a job in Chat; planned and completed tasks appear here.")}</span>
+            </div>
+          )}
+        </div>
+      ) : (
+        <div className="pp-plan">
+          {plans.length > 0 ? (
+            <>
+              <select
+                value={planName}
+                disabled={planBusy}
+                onChange={(event) => {
+                  const name = event.target.value;
+                  setPlanName(name);
+                  setPlanBusy(true);
+                  void api.plans
+                    .get(analysis.id, name)
+                    .then((plan) => setPlanContent(plan.content))
+                    .catch(() => setPlanContent(""))
+                    .finally(() => setPlanBusy(false));
+                }}
+              >
+                {plans.map((plan) => (
+                  <option key={plan.name} value={plan.name}>
+                    {plan.title}
+                  </option>
+                ))}
+              </select>
+              {planContent ? (
+                <MarkdownText value={planContent} />
+              ) : (
+                <div className="pp-todos-empty">
+                  <FileText size={17} />
+                  <strong>{planBusy ? t("Loading…") : t("No plan content")}</strong>
+                </div>
+              )}
+            </>
+          ) : (
+            <div className="pp-todos-empty">
+              <FileText size={17} />
+              <strong>{t("No saved plan yet")}</strong>
+              <span>{t("Use Plan mode to inspect the project and save a plan.")}</span>
             </div>
           )}
         </div>

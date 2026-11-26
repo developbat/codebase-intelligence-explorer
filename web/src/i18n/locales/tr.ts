@@ -2165,6 +2165,10 @@ export const tr: Dictionary = {
   "Verified": "Doğrulandı",
   "Blocked": "Bloke",
   "More panels": "Diğer paneller",
+  "No saved plan yet": "Henüz kayıtlı plan yok",
+  "Use Plan mode to inspect the project and save a plan.":
+    "Projeyi inceleyip plan kaydetmek için Plan modunu kullan.",
+  "No plan content": "Plan içeriği yok",
   "Overview": "Özet",
   "Todos": "Todolar",
   "Open todos": "Todoları aç",

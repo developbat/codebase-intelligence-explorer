@@ -25732,3 +25732,34 @@ button.canvas-stat {
   font-size: 8.5px;
   line-height: 1.45;
 }
+
+.pp-plan {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+}
+
+.pp-plan > select {
+  height: 26px;
+  max-width: 100%;
+  padding: 0 6px;
+  border: 1px solid rgba(110, 168, 254, 0.22);
+  border-radius: 5px;
+  background: #0b111b;
+  color: #cfe2ff;
+  font-size: 8.5px;
+}
+
+.pp-plan .markdown-body,
+.pp-plan .markdown-text {
+  font-size: 9px;
+  line-height: 1.5;
+  color: #aebfd4;
+}
+
+.pp-plan h1,
+.pp-plan h2,
+.pp-plan h3 {
+  color: #dce9fb;
+}

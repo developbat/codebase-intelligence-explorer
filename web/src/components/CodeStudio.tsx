@@ -831,7 +831,7 @@ export function CodeStudio({
   const agentAbortRef = useRef<AbortController | null>(null);
   const agentStopRequestedRef = useRef(false);
   const [liveBrowser, setLiveBrowser] = useState(
-    () => localStorage.getItem("cie:live-browser") !== "0",
+    () => localStorage.getItem("cie:live-browser") === "1",
   );
   const [liveFrameReady, setLiveFrameReady] = useState(false);
   const [liveFrameKey, setLiveFrameKey] = useState(0);
@@ -850,7 +850,7 @@ export function CodeStudio({
   const [chatInput, setChatInput] = useState("");
   const [studioMode, setStudioMode] = useState<AiWorkspaceMode>(() => {
     const stored = localStorage.getItem(`cie:studio-mode:${analysis.id}`);
-    return stored === "ask" || stored === "plan" || stored === "research" ? stored : "build";
+    return stored === "plan" ? "plan" : "build";
   });
   const [chatBusy, setChatBusy] = useState(false);
   const [chatError, setChatError] = useState<string | null>(null);
@@ -1161,9 +1161,7 @@ export function CodeStudio({
   }, [analysis.id]);
   useEffect(() => {
     const stored = localStorage.getItem(`cie:studio-mode:${analysis.id}`);
-    setStudioMode(
-      stored === "ask" || stored === "plan" || stored === "research" ? stored : "build",
-    );
+    setStudioMode(stored === "plan" ? "plan" : "build");
   }, [analysis.id]);
   useEffect(() => {
     localStorage.setItem(`cie:studio-mode:${analysis.id}`, studioMode);
@@ -1172,13 +1170,9 @@ export function CodeStudio({
   const effectiveAllowWrite = readOnlyMode ? false : agentAllowWrite;
   const effectiveAllowCommands = readOnlyMode ? false : agentAllowCommands;
   const modePlaceholder =
-    studioMode === "ask"
-      ? t("Ask a question about this project…")
-      : studioMode === "plan"
-        ? t("Add a goal or criterion; AI will integrate it into the project plan…")
-        : studioMode === "research"
-          ? t("Research the web, a document, or this project…")
-          : t("Ask, edit, run, or build something in this project…");
+    studioMode === "plan"
+      ? t("Add a goal or criterion; AI will integrate it into the project plan…")
+      : t("Describe the change; the agent plans and builds it…");
   const readOnlyBlocked = Boolean(
     chatError &&
       /READ_ONLY_WRITE_BLOCKED|current workspace mode is read-only|read-only mode only inspects/i.test(
@@ -1788,11 +1782,8 @@ export function CodeStudio({
   }, []);
 
   const hasRunningJobs = jobs.some((job) => job.status === "running");
-  const queueRunning = taskQueue?.status === "running";
   // Right-panel tabs stay hidden until they have something to show; the
   // "more" menu still exposes them on demand.
-  const showLiveTab =
-    rightTab === "live" || liveArmed || hasRunningJobs || queueRunning || Boolean(livePreviewUrl);
   const showRunTab = rightTab === "run" || Boolean(runResult) || hasRunningJobs;
   const showChangesTab =
     rightTab === "changes" || (agentChangeReport?.summary.changedFiles ?? 0) > 0;
@@ -2553,7 +2544,7 @@ export function CodeStudio({
     setLiveArmed(liveBrowser);
     setLiveFrameReady(false);
     setLiveFrameKey((value) => value + 1);
-    setRightTab("live");
+    setRightTab("preview");
     try {
       const result = await api.browserCheck(analysis.id, {
         path: target,
@@ -2581,7 +2572,7 @@ export function CodeStudio({
       setLiveArmed(liveBrowser);
       setLiveFrameReady(false);
       setLiveFrameKey((value) => value + 1);
-      setRightTab("live");
+      setRightTab("preview");
       const result = await api.gameCheck(analysis.id, {
         path: effectivePreviewPath || htmlFiles[0] || "index.html",
         url: livePreviewUrl || undefined,
@@ -2736,7 +2727,11 @@ export function CodeStudio({
     setOpenTabs((current) => [...new Set([...current, ...paths])]);
   }
 
-  async function refreshChangeReport() {
+  function isVisualChange(files: string[]): boolean {
+    return files.some((file) => /\.(?:html?|css|jsx?|tsx?|vue|svelte|php)$/i.test(file));
+  }
+
+  async function refreshChangeReport(openChanges = true) {
     setChangeReportBusy(true);
     setChangeReportError(null);
     try {
@@ -2749,7 +2744,7 @@ export function CodeStudio({
       } else {
         onRescan();
       }
-      setRightTab("changes");
+      if (openChanges) setRightTab("changes");
     } catch (requestError) {
       setChangeReportError(
         requestError instanceof Error ? requestError.message : t("Could not build the change report."),
@@ -3069,7 +3064,6 @@ export function CodeStudio({
           setLiveArmed(true);
           setLiveFrameReady(false);
           setLiveFrameKey((value) => value + 1);
-          setRightTab("live");
         }
       } else if (event.type === "permission") {
         setPermissionQueue((queue) => [...queue, event.request]);
@@ -3218,17 +3212,24 @@ export function CodeStudio({
         },
       ]);
       if (result.changedFiles.length > 0) {
+        const visual = isVisualChange(result.changedFiles);
+        const destination = visual ? "preview" : "progress";
         await refreshAgentFiles(result.changedFiles);
         if (result.changeReport) {
           setAgentChangeReport(result.changeReport);
           setSelectedChangePath(result.changeReport.files[0]?.path ?? "");
-          setRightTab("changes");
+          setRightTab(destination);
+          if (visual) setPreviewKey((value) => value + 1);
           keepRightTabRef.current = true;
           onRescan();
         } else if (onAnalysisLoaded) {
-          await refreshChangeReport();
+          await refreshChangeReport(false);
+          setRightTab(destination);
+          if (visual) setPreviewKey((value) => value + 1);
         } else {
-          setRightTab(result.changedFiles[0]);
+          setRightTab(destination);
+          if (visual) setPreviewKey((value) => value + 1);
+          keepRightTabRef.current = true;
           if (useTaskLoop) {
             window.setTimeout(() => onRescan(), 500);
           }
@@ -4428,31 +4429,6 @@ export function CodeStudio({
 
           {chatBusy ? (
             <div className="studio-workflow-live">
-              {liveBrowser && liveArmed ? (
-                <div className="studio-inline-preview">
-                  <div className="studio-inline-preview-head">
-                    <span>
-                      <Monitor size={10} /> {t("Live preview")}
-                    </span>
-                    <button onClick={() => setRightTab("live")}>{t("Open panel")}</button>
-                  </div>
-                  <div className="studio-inline-preview-stage">
-                    <img
-                      key={`inline-${liveFrameKey}`}
-                      src={`/api/projects/${analysis.id}/live-browser?run=${liveFrameKey}&inline=1`}
-                      alt={t("Live test browser")}
-                      onLoad={() => setLiveFrameReady(true)}
-                      onError={() => setLiveFrameReady(false)}
-                    />
-                    {!liveFrameReady ? (
-                      <div className="studio-inline-preview-empty">
-                        <Monitor size={16} />
-                        <span>{t("Waiting for the live page…")}</span>
-                      </div>
-                    ) : null}
-                  </div>
-                </div>
-              ) : null}
               {chatLiveAnswer ? (
                 <div className="studio-live-answer">
                   <MarkdownText value={chatLiveAnswer} />
@@ -4976,10 +4952,8 @@ export function CodeStudio({
                   disabled={chatBusy}
                   aria-label={t("Mode")}
                 >
-                  <option value="ask">{t("Ask")}</option>
                   <option value="plan">{t("Plan")}</option>
                   <option value="build">{t("Build")}</option>
-                  <option value="research">{t("Research")}</option>
                 </select>
               </label>
             </div>
@@ -5981,14 +5955,6 @@ export function CodeStudio({
               <Network size={11} /> {t("Progress")} <X size={9} />
             </button>
           ) : null}
-          {showLiveTab ? (
-            <button
-              className={rightTab === "live" ? "is-active" : ""}
-              onClick={() => setRightTab("live")}
-            >
-              <Monitor size={11} /> {t("Live test")}
-            </button>
-          ) : null}
           {showRunTab ? (
             <button
               className={rightTab === "run" ? "is-active" : ""}
@@ -6032,22 +5998,12 @@ export function CodeStudio({
               <Library size={11} /> {t("Assets")} <X size={9} />
             </button>
           ) : null}
-          {!showLiveTab || !showRunTab || !showChangesTab || rightTab !== "assets" ? (
+          {!showRunTab || !showChangesTab || rightTab !== "assets" ? (
             <details className="studio-right-more" ref={rightMoreRef}>
               <summary title={t("More panels")}>
                 <MoreHorizontal size={12} />
               </summary>
               <div className="studio-right-more-menu">
-                {!showLiveTab ? (
-                  <button
-                    onClick={(event) => {
-                      setRightTab("live");
-                      event.currentTarget.closest("details")?.removeAttribute("open");
-                    }}
-                  >
-                    <Monitor size={11} /> {t("Live test")}
-                  </button>
-                ) : null}
                 {!showRunTab ? (
                   <button
                     onClick={(event) => {
