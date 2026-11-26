@@ -20,7 +20,12 @@ import path from "node:path";
 import { getDataDir, loadAnalysis } from "../store";
 import { readSourceFile } from "../editor";
 import { loadSkillsForPrompt, recordSkillOutcomes } from "../skills";
-import { createPlanMeta, reviewProjectPlan, shouldReviewPlan } from "./planReview";
+import {
+  createPlanMeta,
+  isLowImpactPlanQuestion,
+  reviewProjectPlan,
+  shouldReviewPlan,
+} from "./planReview";
 import { isContinuationInstruction } from "./intent";
 import { shouldForceRequirementsFirst } from "../skillPolicy";
 import { ensureDevServerForRequest } from "../processes";
@@ -192,6 +197,9 @@ Rules:
 - Never return placeholder tasks such as "...", "TODO", "TBD" or "fill me". Every task must contain a real title, detail and acceptance.
 - When an intent spec with behaviors is provided, create one task per behavior and copy its action/surface. Do not merge independent behaviors.
 - Preserve the user's exact rule and qualifiers (smaller/larger/only/never). Never replace them with an example-specific shortcut: if the user says the smaller of the two operands, write min(a,b), not "the second operand"; examples are illustrations, not the rule.
+- Do not invent a gameplay subsystem that is not in the code (a new pellet spawner, respawn loop, item type or second data table) when the user names an existing object. Fix the existing spawn/placement path and reuse the current item/level data.
+- Distinguish the level data table from the level selection UI. "Remove the level/map list" means remove the selection UI, not the LEVELS/map data needed for random starts.
+- For "random on every start" behavior, the acceptance must start/restart at least 5 times and observe a different level each time; do not require calls to hidden internals such as state or startRound.
 - If the preflight code already implements the requested rule, do not create an edit task that claims a flat bonus or missing guard; create a verification-only task or fold the verification into the behavior task.
 - Work in any programming language.`;
 
@@ -1448,6 +1456,9 @@ function taskInstruction(
     );
   const visualVerification =
     !extractionTask && taskRequestsVisualShapeOrPlacement(task);
+  const spawnPlacementTask = !extractionTask && taskLooksLikeSpawnPlacement(task);
+  const removalTask = !extractionTask && taskLooksLikeRemoval(task);
+  const randomStartTask = !extractionTask && taskLooksLikeRandomStart(task);
   const prior = priorTasks
     .filter((item) => item.status === "done" && item.resultSummary)
     .slice(-8)
@@ -1509,6 +1520,7 @@ function taskInstruction(
     extractionTask ? "" : "Batch up to 4 independent read-only calls in one reply (read_file, find_in_file, search_code, list_files). One context round-trip per batch instead of one per read.",
     extractionTask ? "" : "Put all UI assertions into one browser_check call (up to 6 steps). Run the verification command once after the final edit; do not repeat a successful check unless code changed.",
     extractionTask ? "" : "Do not create .cie/agent/checks or .cie/agent/scenarios files for a one-off verification; use the existing tests and browser_check.",
+    extractionTask ? "" : "Do not add window.__debug/test hooks or test-only globals to runtime code. Verify with browser_check eval on existing state/data or DOM/canvas observations; if a value is not reachable, observe the rendered result instead of changing production code for the test.",
     extractionTask ? "" : "Before the first edit, search for the exact feature name, symbol or label. If it already exists, verify presence + shape + placement + acceptance with file:line and rendered evidence before finishing; a selector, icon constant or element id alone is not proof.",
     extractionTask
       ? ""
@@ -1522,6 +1534,15 @@ function taskInstruction(
       : "",
     visualVerification
       ? `Required visual-verification shape: one browser_check with an eval step that returns the rendered geometry (getBoundingClientRect for DOM placement, or canvas getImageData for a drawn shape) plus an expectText/expectValue assertion. A symbol, icon constant, element id or expectVisible only proves presence; it does not prove shape or placement. Measure each requested item separately (for example, the inventory rect and the key pixels); one item's geometry does not prove another. If the rendered result differs, edit the code.`
+      : "",
+    spawnPlacementTask
+      ? "For a spawn/collectible task, fix the data that positions the OBJECT itself (for example level.rewards or the reward spawn helper), not the player start. Validate the object's cell with the existing walkability helper and relocate it to a reachable floor cell when invalid. Then prove at runtime that the object's RESOLVED cell is walkable and reachable from the player start, and that collecting it changes score/inventory. For a respawn task, run one eval that repeats collection 3 times. In a classic script, top-level state and move/collect functions are reachable from browser_check eval: pick a reward from state.rewards, set state.player = {x: reward.x, y: reward.y}, call the game's move(0,0)/collect path, then read the new state.rewards cell and assert with expectText that every new cell has isWall(x,y)===false, is not the player/exit/key, and that score/inventory increased each time. Return a single distinctive string such as 'respawnOk=true' and put expectText on the eval step itself. Repeat on a second level. Printing a value without an assertion is not evidence. Avoid substring traps: expectText '0' also matches '100'; assert the whole value or a distinctive string. Changing findWalkableStart/state.player for the player without collecting the object is a different concern and does not fix the object. If the user names a drawn object by color/shape (for example a blue small ball), find the drawing branch that uses that color and the data that places it; do not assume the first matching element."
+      : "",
+    removalTask
+      ? "Remove means delete the node from the markup and delete or neutralize its population code and CSS. Setting hidden, display:none or removeAttribute is NOT removal and will be rejected. Then assert the removed selector is absent with expectCount 0 or an eval with its own expectText on the null/length-0 check, and confirm the replacement behavior still works."
+      : "",
+    randomStartTask
+      ? "For random-start behavior, start the game several times and assert the observed level set varies; one start does not prove randomness. Put the expected result on the eval step itself with expectText, not a separate print."
       : "",
     extractionTask
       ? ""
@@ -1899,6 +1920,129 @@ export function needsRenderedGeometryEvidence(
   );
 }
 
+const SPAWN_PLACEMENT_TASK =
+  /respawn|spawn|collectible|pickup|pick up|toplanabilir|alınabilir|mavi top|hareket edilebilir|yürünebilir|geçilebilir|reachable|walkable|item.*(?:position|place|yer)|yerleştir|doğ(?:sun|ar)|çıksın/i;
+const REMOVAL_TASK = /\b(?:remove|delete|hide|drop|kaldır|sil|gizle)\b/i;
+const REMOVAL_UI_TARGET =
+  /\b(?:list|menu|panel|button|section|selector|dropdown|tab|card|overlay|form|input|level-select|harita|liste|menü|düğme|buton|kart|sekme)\b/i;
+const RANDOM_START_TASK =
+  /(?:random|rastgele).*(?:start|başlat|level|bölüm|map|harita)|(?:start|başlat|level|bölüm|map|harita).*(?:random|rastgele)/i;
+
+function taskFocusText(task: ProjectTask): string {
+  // The planner appends the full original request to every detail, so use the
+  // task-specific title/acceptance here. Otherwise one goal keyword would make
+  // every split task demand the same evidence family.
+  return `${task.title}\n${task.acceptance ?? ""}`;
+}
+
+export function taskLooksLikeSpawnPlacement(task: ProjectTask): boolean {
+  return SPAWN_PLACEMENT_TASK.test(taskFocusText(task));
+}
+
+export function taskLooksLikeRemoval(task: ProjectTask): boolean {
+  const text = taskFocusText(task);
+  return REMOVAL_TASK.test(text) && REMOVAL_UI_TARGET.test(text);
+}
+
+export function taskLooksLikeRandomStart(task: ProjectTask): boolean {
+  return RANDOM_START_TASK.test(taskFocusText(task));
+}
+
+function browserCheckSteps(step: AiAgentStep): Record<string, unknown>[] {
+  const raw = step.args?.steps;
+  return Array.isArray(raw)
+    ? raw.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object")
+    : [];
+}
+
+/** The eval step itself must assert its result, not just print it. */
+function evalHasAssertion(item: Record<string, unknown>): boolean {
+  return ["expectText", "expected", "contains"].some(
+    (key) => typeof item[key] === "string" && String(item[key]).trim().length > 0,
+  );
+}
+
+/** Runtime proof that a spawned item is on a walkable/reachable cell or collectible. */
+export function isSpawnPlacementEvidenceCheck(step: AiAgentStep): boolean {
+  if (!step.ok) return false;
+  if (!["browser_check", "game_check", "run_test_scenario"].includes(step.action)) {
+    return false;
+  }
+  const steps = browserCheckSteps(step);
+  const hasProbe = steps.some((item) => {
+    if (String(item.action ?? "") !== "eval") return false;
+    const script = String(item.script ?? "");
+    const objectProbe = /rewards?|collectible|pickup|pellet|gem|blue|ball|mavi|top|item/i.test(
+      script,
+    );
+    const walkability = /isWall|reachable|walkable|BFS|path|duvar|geçilebilir|hareket|map|floor|zemin/i.test(
+      script,
+    );
+    return objectProbe && walkability && evalHasAssertion(item);
+  });
+  if (hasProbe) return true;
+  const observation = step.observation ?? "";
+  return (
+    /rewards?|collectible|pickup|pellet|gem|blue|ball|mavi|top|item/i.test(observation) &&
+    /isWall|reachable|walkable|duvar|geçilebilir|floor|wall|zemin|map/i.test(observation) &&
+    /PASS|expectText|expectValue|expectCount|expectStable/i.test(observation)
+  );
+}
+
+/** Runtime proof that a removed UI element is gone (not merely hidden). */
+export function isRemovalEvidenceCheck(step: AiAgentStep): boolean {
+  if (!step.ok) return false;
+  if (!["browser_check", "game_check", "run_test_scenario"].includes(step.action)) {
+    return false;
+  }
+  const steps = browserCheckSteps(step);
+  const countZero = steps.some(
+    (item) =>
+      String(item.action ?? "") === "expectCount" && Number(item.count) === 0,
+  );
+  const selectorAbsentEval = steps.some((item) => {
+    if (String(item.action ?? "") !== "eval") return false;
+    const script = String(item.script ?? "");
+    const checksAbsence =
+      /querySelector(?:All)?\s*\(|getElementById|getElementsBy/i.test(script) &&
+      /null|undefined|length\s*===?\s*0|!\s*document|===?\s*0/i.test(script);
+    return checksAbsence && evalHasAssertion(item);
+  });
+  const hiddenOnly = steps.some((item) =>
+    /hidden|display\s*:\s*none|visibility\s*:\s*hidden/i.test(
+      `${item.script ?? ""} ${item.expectText ?? ""}`,
+    ),
+  );
+  if ((countZero || selectorAbsentEval) && !hiddenOnly) return true;
+  const observation = step.observation ?? "";
+  if (/hidden|display\s*:\s*none|visibility\s*:\s*hidden/i.test(observation)) return false;
+  return (
+    /count is 0|null|removed|absent|yok|kaldırıldı/i.test(observation) &&
+    /PASS|expectText|expectCount|expectValue/i.test(observation)
+  );
+}
+
+/** Runtime proof that repeated starts yield a varying/random level. */
+export function isRandomStartEvidenceCheck(step: AiAgentStep): boolean {
+  if (!step.ok) return false;
+  if (!["browser_check", "game_check", "run_test_scenario"].includes(step.action)) {
+    return false;
+  }
+  const steps = browserCheckSteps(step);
+  const probe = steps.some(
+    (item) =>
+      String(item.action ?? "") === "eval" &&
+      /LEVELS|level|start|restart|Math\.random|bölüm/i.test(String(item.script ?? "")) &&
+      evalHasAssertion(item),
+  );
+  if (probe) return true;
+  const observation = step.observation ?? "";
+  return (
+    /random|rastgele|levels?\s*[:=]|bölüm|\d+\/\d+/i.test(observation) &&
+    /PASS|expectText|expectValue|expectStable/i.test(observation)
+  );
+}
+
 /**
  * A task may only complete without an edit when it proves the four acceptance
  * dimensions: presence, shape, placement and behavior. This is the deterministic
@@ -2217,7 +2361,7 @@ export function collapseToBuildSession(
         .filter(Boolean)
         .join("\n"),
     ),
-    "After implementing, run ONE end-to-end browser check on the real entry page that covers the main flow (start, movement, key/pickup, win/restart where applicable). Do not run a separate check for every checklist item.",
+    "After implementing, run browser_check on the real entry page. Prefer one end-to-end check, but every checklist item must have its own concrete assertion: the spawned object's resolved cell is walkable/reachable and collectible, the removed selector is absent (querySelector null or expectCount 0, not hidden), and repeated starts yield a different level. Do not run redundant checks.",
     verification ? `Verification command: ${verification}` : "",
   ]
     .filter(Boolean)
@@ -2751,7 +2895,24 @@ export async function runProjectLoop(
           }`,
         },
       });
-      if (review.questions.length > 0 && options.clarified !== true) {
+      const actionableQuestions = review.questions.filter(
+        (question) => !isLowImpactPlanQuestion(question.question),
+      );
+      for (const skipped of review.questions.filter((question) =>
+        isLowImpactPlanQuestion(question.question),
+      )) {
+        emit({
+          type: "log",
+          entry: {
+            id: `log-${Date.now()}-plan-question-skip`,
+            at: nowIso(),
+            level: "info",
+            label: "Plan question auto-resolved",
+            detail: `${skipped.question} → using the literal reading and the review assumption.`,
+          },
+        });
+      }
+      if (actionableQuestions.length > 0 && options.clarified !== true) {
         queue = {
           ...queue,
           status: "idle",
@@ -2759,7 +2920,7 @@ export async function runProjectLoop(
         };
         queue = await saveQueue(analysis.rootPath, queue);
         emit({ type: "task", queue });
-        const question = review.questions[0];
+        const question = actionableQuestions[0];
         emit({
           type: "clarify",
           request: {
@@ -3635,6 +3796,21 @@ ${collapsed.tasks[0].checklist
     const missingVisualVerification =
       !inspectionTask &&
       needsRenderedGeometryEvidence(task, result.steps, projectHasUi);
+    const missingSpawnVerification =
+      !inspectionTask &&
+      taskLooksLikeSpawnPlacement(task) &&
+      projectHasUi &&
+      !result.steps.some(isSpawnPlacementEvidenceCheck);
+    const missingRemovalVerification =
+      !inspectionTask &&
+      taskLooksLikeRemoval(task) &&
+      projectHasUi &&
+      !result.steps.some(isRemovalEvidenceCheck);
+    const missingRandomVerification =
+      !inspectionTask &&
+      taskLooksLikeRandomStart(task) &&
+      projectHasUi &&
+      !result.steps.some(isRandomStartEvidenceCheck);
     let status: ProjectTask["status"] =
       result.stoppedReason === "aborted" || result.stoppedReason === "budget"
         ? "blocked"
@@ -3647,7 +3823,10 @@ ${collapsed.tasks[0].checklist
             verificationBlocker ||
             pendingWork ||
             missingUiVerification ||
-            missingVisualVerification
+            missingVisualVerification ||
+            missingSpawnVerification ||
+            missingRemovalVerification ||
+            missingRandomVerification
           ? "failed"
           : "done";
     const requiredScenarioSatisfied =
@@ -3656,7 +3835,12 @@ ${collapsed.tasks[0].checklist
       result.logs?.some((entry) => entry.label === "Required scenario passed");
     if (
       scenarioRescue?.ok ||
-      (microCompleted && requiredScenarioSatisfied && !missingVisualVerification)
+      (microCompleted &&
+        requiredScenarioSatisfied &&
+        !missingVisualVerification &&
+        !missingSpawnVerification &&
+        !missingRemovalVerification &&
+        !missingRandomVerification)
     ) {
       status = "done";
     }
@@ -4208,6 +4392,18 @@ ${collapsed.tasks[0].checklist
           }${
             missingVisualVerification
               ? " No rendered-geometry check ran for the requested shape/placement. Add one browser_check step that reads getBoundingClientRect (DOM position) or canvas getImageData (drawn shape) and assert it with expectText/expectValue; a symbol, icon constant, element id or expectVisible is not proof."
+              : ""
+          }${
+            missingSpawnVerification
+              ? " No spawn/reachability check ran. Prove at runtime that the item is on a walkable cell reachable from the player start (BFS or equivalent) and that collecting it changes score/inventory; a coordinate edit alone is not proof."
+              : ""
+          }${
+            missingRemovalVerification
+              ? " No removal check ran. Assert the removed selector is absent (expectCount 0 or querySelector null) and the replacement behavior still works."
+              : ""
+          }${
+            missingRandomVerification
+              ? " No random-start check ran. Start the game several times and assert the observed level set varies; one start does not prove randomness."
               : ""
           }${
             missingUiVerification

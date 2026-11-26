@@ -2095,16 +2095,29 @@ export async function verificationCommandsForChanges(
   return commands;
 }
 
-export function reportsIncompleteWiring(summary: string): boolean {
+export function reportsIncompleteWiring(summary: string, removalContext = false): boolean {
   const noMissing =
     /(?:eksik|missing|hatalı|kırık|broken)[^\n.]{0,80}(?:yok|değil|bulunmuyor|none\b|no\b)/i.test(
+      summary,
+    );
+  if (
+    removalContext &&
+    /(?:kaldırıldı|silindi|removed|deleted|absent|null|yok)/i.test(summary)
+  ) {
+    return false;
+  }
+  // A removal task often says "no new form/input/markup is needed" or "the
+  // removed list leaves no control to add". That is a complete removal, not
+  // missing wiring.
+  const notNeeded =
+    /(?:html|markup|template|form|input|kontrol|alan)[^\n]{0,140}(?:gerekmiyor|gerek yok|eklenmesi gerekmiyor|not needed|no new\b|nothing to add)/i.test(
       summary,
     );
   const positive =
     /(?:html|markup|template|form)[^\n]{0,100}(?:yok|tanımlı değil|yer almıyor|missing|not present|does not exist)|(?:eklenmesi|eklenmeli)[^\n]{0,100}gerekiyor|kabul kriteri[^\n]{0,100}tam karşılan|bu adım[^\n]{0,80}yer almıyor/i.test(
       summary,
     );
-  return positive && !noMissing;
+  return positive && !noMissing && !notNeeded;
 }
 
 export function looksLikePlanningText(summary: string): boolean {
@@ -2436,7 +2449,7 @@ async function auditNoChangeAcceptance(
     {
       role: "system",
       content:
-        "You are a strict acceptance reviewer for a coding agent. Return only JSON: {\"ok\":boolean,\"missing\":string[]}. A no-change claim is valid only when the evidence explicitly proves every acceptance clause. Input gating does not prove a visual highlight. A merged/single bar requires proof that duplicate target/score displays were actually removed. Cite concrete file:line or runtime evidence, not intent.",
+        "You are a strict acceptance reviewer for a coding agent. Return only JSON: {\"ok\":boolean,\"missing\":string[]}. A no-change claim is valid only when the evidence explicitly proves every acceptance clause. Input gating does not prove a visual highlight. A merged/single bar requires proof that duplicate target/score displays were actually removed. Cite concrete file:line or runtime evidence, not intent. Judge only the explicit acceptance clauses; do not add new requirements such as git status, console-error checks or hidden-view visibility unless the acceptance asks for them. If the run changed no files, the step list itself is the evidence; do not require a git status/diff. A browser_check eval that sets up the object, repeats collection, reads the resolved cell with isWall/reachability and asserts the result is valid evidence.",
     },
     {
       role: "user",
@@ -4790,6 +4803,8 @@ ${lessons}` : "",
   let largeContextLogged = false;
   let readOnlyStepsSinceChange = 0;
   let readDecisionNudged = false;
+  let postEditReadNudged = false;
+  let postEditReadRejections = 0;
   let inspectionNudged = false;
   let verificationNudged = false;
   let inspectionReadRejections = 0;
@@ -4839,6 +4854,7 @@ ${lessons}` : "",
   let requiredScenarioPassed = false;
   let scenarioCalls = 0;
   let acceptanceAudits = 0;
+  let acceptanceAuditFailed = false;
   let transientRetries = 0;
   let budgetWarned = false;
   let budgetWarning: string | undefined;
@@ -5444,26 +5460,29 @@ ${lessons}` : "",
       continue;
     }
 
+    const readBlockedAfterEdit = changedFiles.length > 0 && postEditReadNudged;
     if (
       !askMode &&
       plan.needsWrite &&
-      changedFiles.length === 0 &&
-      !verificationPassed &&
-      writeNudges >= 2 &&
+      ((!verificationPassed && changedFiles.length === 0 && writeNudges >= 2) ||
+        readBlockedAfterEdit) &&
       READ_ONLY_ACTIONS.has(action) &&
       !VERIFICATION_ACTIONS.has(action)
     ) {
-      readRejections += 1;
+      if (readBlockedAfterEdit) postEditReadRejections += 1;
+      else readRejections += 1;
       step.ok = false;
-      step.observation =
-        "Read budget exhausted. No file has changed yet. If the requested behavior already exists, finish with the verification evidence. Otherwise perform the edit now with replace_in_file or write_file, or finish with the exact blocker.";
+      step.observation = readBlockedAfterEdit
+        ? "Read budget exhausted after the edit. Do not read more files. Run browser_check or game_check on the real entry page now to verify the changed behavior, fix only a concrete failure, then finish."
+        : "Read budget exhausted. No file has changed yet. If the requested behavior already exists, finish with the verification evidence. Otherwise perform the edit now with replace_in_file or write_file, or finish with the exact blocker.";
       step.durationMs = 0;
       recordStep(step);
       log("warn", "Read budget exhausted", action);
-      if (readRejections >= 2) {
+      if (readRejections >= 2 || postEditReadRejections >= 2) {
         stoppedReason = "error";
-        summary =
-          "Stopped after the final warning because the model kept trying to read instead of editing. No further tokens were spent.";
+        summary = readBlockedAfterEdit
+          ? "Stopped after the final warning because the model kept reading after editing without verifying. No further tokens were spent."
+          : "Stopped after the final warning because the model kept trying to read instead of editing. No further tokens were spent.";
       }
       if (stoppedReason === "error") break;
       continue;
@@ -5679,6 +5698,12 @@ ${lessons}` : "",
         continue;
       }
 
+      const taskContextText = `${options.goalText ?? ""}\n${options.acceptance ?? ""}\n${options.workBriefText ?? ""}\n${instruction.slice(0, 4_000)}`;
+      const removalContext =
+        /(?:remove|delete|hide|drop|kaldır|sil|gizle)/i.test(taskContextText) &&
+        /(?:list|menu|panel|button|section|selector|level-select|harita|liste|menü|düğme|buton)/i.test(
+          taskContextText,
+        );
       if (
         !readOnlyMode &&
         !testTask &&
@@ -5686,7 +5711,7 @@ ${lessons}` : "",
         modelTurns < maxSteps &&
         wiringNudges < 2 &&
         !(mappedChangeVerified && workBrief?.mode === "change" && workBrief.kind === "color" && !compoundChange) &&
-        reportsIncompleteWiring(rawSummary)
+        reportsIncompleteWiring(rawSummary, removalContext)
       ) {
         wiringNudges += 1;
         const observation =
@@ -5898,7 +5923,7 @@ ${lessons}` : "",
         plan.needsWrite &&
         acceptanceText &&
         noChangeClaim &&
-        acceptanceAudits < 1 &&
+        acceptanceAudits < (acceptanceAuditFailed ? 2 : 1) &&
         modelTurns < maxSteps
       ) {
         acceptanceAudits += 1;
@@ -5910,6 +5935,7 @@ ${lessons}` : "",
           steps,
         );
         if (audit && !audit.ok) {
+          acceptanceAuditFailed = true;
           const observation = `Finish rejected: the acceptance criteria are not proven.\n- ${audit.missing.length > 0 ? audit.missing.join("\n- ") : "The evidence does not demonstrate the requested end state."}\nDo not claim a visual/layout change from a similar input guard. Implement the missing change or cite exact file:line and runtime evidence for every acceptance item, then finish.`;
           log("warn", "Finish rejected: acceptance not proven", audit.missing.join("; ").slice(0, 200));
           recordStep({
@@ -5925,6 +5951,13 @@ ${lessons}` : "",
             role: "user",
             content: `Observation (step ${index}) [acceptance]: ${observation}`,
           });
+          if (acceptanceAudits >= 2) {
+            stoppedReason = "aborted";
+            summary = `Acceptance audit failed twice with no new evidence: ${
+              audit.missing.join("; ").slice(0, 500) || "the acceptance criteria are not proven"
+            }. Stopped to prevent a retry loop.`;
+            break;
+          }
           continue;
         }
       }
@@ -7860,7 +7893,10 @@ ${lessons}` : "",
       !VERIFICATION_ACTIONS.has(step.action)
     ) {
       // A write (or a mutating command) happened; a repeated browser check is
-      // legitimate again after the code changed.
+      // legitimate again after the code changed. A new write also re-opens a
+      // small read window for line numbers/context.
+      postEditReadNudged = false;
+      postEditReadRejections = 0;
       browserCheckCache.clear();
     }
     if (
@@ -7895,6 +7931,26 @@ ${lessons}` : "",
           "Decision point: you have made 8+ read-only calls without changing a file. Stop reading. If the requested behavior already exists, verify it and call finish with file:line evidence and no edit. Otherwise make the smallest edit now with replace_in_file or write_file. Further file-reading/search calls are blocked, but browser_check, run_test_scenario and game_check remain available for verification. Then finish.",
       });
       log("warn", "Decision point: edit or finish", `${readOnlyStepsSinceChange} read-only calls · no edit`);
+    }
+    if (
+      !readOnlyMode &&
+      plan.needsWrite &&
+      changedFiles.length > 0 &&
+      readOnlyStepsSinceChange >= (microEditMode ? 2 : tightReadsMode ? 3 : 4) &&
+      !postEditReadNudged
+    ) {
+      postEditReadNudged = true;
+      queuedActions.length = 0;
+      transcript.push({
+        role: "system",
+        content:
+          "Code already changed. Stop reading. Run browser_check or game_check on the real entry page now to verify the changed behavior. If it fails, fix only that concrete failure with the smallest edit, then verify again and finish. Further read/search calls are blocked.",
+      });
+      log(
+        "warn",
+        "Post-edit decision point",
+        `${readOnlyStepsSinceChange} read-only calls after a change`,
+      );
     }
     if (
       !readOnlyMode &&

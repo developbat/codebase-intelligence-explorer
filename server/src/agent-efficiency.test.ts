@@ -20,6 +20,12 @@ import {
   reviewFileExcerpt,
   summaryReportsBlocker,
   isGeometryEvidenceCheck,
+  isSpawnPlacementEvidenceCheck,
+  isRemovalEvidenceCheck,
+  isRandomStartEvidenceCheck,
+  taskLooksLikeSpawnPlacement,
+  taskLooksLikeRemoval,
+  taskLooksLikeRandomStart,
   needsRenderedGeometryEvidence,
   noChangeCompletionEvidence,
   summaryCitesFileLines,
@@ -241,6 +247,123 @@ Levels now start at a random level when the game is launched without an explicit
   );
   assert.equal(verdict.ok, false);
   assert.match(verdict.reason, /shape or placement/i);
+});
+
+test("spawn, removal and random-start tasks require the matching runtime proof", () => {
+  const task = {
+    id: "task-1",
+    title: "Respawn the blue ball and remove the map list",
+    detail:
+      "mavi küçük top alınabilir maze in hareket edilebilir yerinde respawn olduğundan emin ol. harita listesini kaldır her start dediğimde farklı haritalardan biri random gelsin.",
+    acceptance: "The blue ball is reachable and collectible; the level list is gone; starts are random.",
+  } as unknown as Parameters<typeof taskLooksLikeSpawnPlacement>[0];
+  assert.equal(taskLooksLikeSpawnPlacement(task), true);
+  assert.equal(taskLooksLikeRemoval(task), true);
+  assert.equal(taskLooksLikeRandomStart(task), true);
+  assert.equal(
+    taskLooksLikeRemoval({
+      ...task,
+      title: "Remove unused import",
+      detail: "Remove the unused import from parser.ts.",
+      acceptance: "",
+    }),
+    false,
+  );
+
+  const weak: AiAgentStep = {
+    index: 1,
+    action: "browser_check",
+    ok: true,
+    observation: "PASS click #menu-start-btn PASS expectVisible #game",
+    args: {
+      steps: [
+        { action: "click", selector: "#menu-start-btn" },
+        { action: "expectVisible", selector: "#game" },
+      ],
+    },
+    durationMs: 10,
+  };
+  assert.equal(isSpawnPlacementEvidenceCheck(weak), false);
+  assert.equal(isRemovalEvidenceCheck(weak), false);
+  assert.equal(isRandomStartEvidenceCheck(weak), false);
+
+  // A level/blue-pixel check is not spawn/reachability evidence.
+  const weakSpawn: AiAgentStep = {
+    ...weak,
+    observation: "PASS eval levels=5/5 PASS eval bluePixels=120 PASS expectText 0",
+    args: {
+      steps: [
+        { action: "eval", script: "document.querySelector('#level').textContent" },
+        {
+          action: "eval",
+          script:
+            "const c=document.querySelector('#game');c.getContext('2d').getImageData(0,0,1,1);",
+        },
+        { action: "expectText", selector: "#score", text: "0" },
+      ],
+    },
+  };
+  assert.equal(isSpawnPlacementEvidenceCheck(weakSpawn), false);
+
+  const spawnCheck: AiAgentStep = {
+    ...weak,
+    observation: "PASS eval rewards PASS expectText true",
+    args: {
+      steps: [
+        {
+          action: "eval",
+          script:
+            "JSON.stringify(LEVELS.map(l => l.rewards.map(r => ({x:r.x,y:r.y,wall:l.map[r.y][r.x]===1}))))",
+          expectText: "wall:false",
+        },
+        { action: "expectText", selector: "#result", text: "wall:false" },
+      ],
+    },
+  };
+  assert.equal(isSpawnPlacementEvidenceCheck(spawnCheck), true);
+
+  const removalCheck: AiAgentStep = {
+    ...weak,
+    observation: "#level-select count is 0 PASS expectCount 0",
+    args: {
+      steps: [
+        { action: "eval", script: "document.querySelectorAll('#level-select').length" },
+        { action: "expectCount", selector: "#level-select", count: 0 },
+      ],
+    },
+  };
+  assert.equal(isRemovalEvidenceCheck(removalCheck), true);
+  const hiddenOnly: AiAgentStep = {
+    ...weak,
+    observation: "PASS hidden PASS expectText true",
+    args: {
+      steps: [
+        {
+          action: "eval",
+          script: "document.querySelector('#level-select').hidden",
+          expectText: "true",
+        },
+      ],
+    },
+  };
+  assert.equal(isRemovalEvidenceCheck(hiddenOnly), false);
+
+  const randomCheck: AiAgentStep = {
+    ...weak,
+    observation: "PASS eval levels PASS expectText 3/5",
+    args: {
+      steps: [
+        {
+          action: "eval",
+          script:
+            "(() => { const out=[]; for(let i=0;i<6;i++){ document.querySelector('#menu-start-btn').click(); out.push(document.querySelector('#level').textContent); } return out; })()",
+          expectText: "3/5",
+        },
+        { action: "expectText", selector: "#result", text: "3/5" },
+      ],
+    },
+  };
+  assert.equal(isRandomStartEvidenceCheck(randomCheck), true);
 });
 
 test("no-change completion requires file:line evidence and a real check", () => {
@@ -513,6 +636,19 @@ test("remaining-work summaries are detected without flagging clean completions",
   assert.equal(reportsRemainingWork("Davranış doğrulandı; testler geçti."), false);
   assert.equal(
     reportsIncompleteWiring("index.html'de eksik kontrol veya bağlantı yok; tümü mevcut."),
+    false,
+  );
+  assert.equal(
+    reportsIncompleteWiring(
+      "İstenen üç davranış da game.js içinde uygulandı. Bu görevde yeni bir form alanı, input veya markup eklenmesi gerekmiyor; harita listesi kaldırıldığı için eklenen kontrol yok, mevcut Start/Restart butonları kullanılıyor.",
+    ),
+    false,
+  );
+  assert.equal(
+    reportsIncompleteWiring(
+      "Harita listesi kaldırıldı; mevcut Start/Restart butonları kullanılıyor, yeni form alanı yok.",
+      true,
+    ),
     false,
   );
 });

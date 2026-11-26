@@ -25,6 +25,7 @@ Rules:
 - Preserve completed work and changed files. A new task must inspect the current files, not undo working changes.
 - Always include action and surface on every task; never omit them.
 - Ask at most ONE question, and only when a wrong guess would implement the wrong product behavior. Provide 2-3 concrete product options with a suffix. Otherwise return an empty questions array and use a safe assumption.
+- For random selection, ordering or repeat policy, do not ask: choose the literal reading and record a safe assumption. "Random" allows repeats; "different/farklı" means pick from the set, and enforce no immediate repeat only when the user explicitly says "never repeat" or "üst üste gelmesin".
 - Do not ask which files to inspect or where the code lives; the executor handles that.
 - Keep the user's exact qualifiers (only, never, smaller/larger, do not change X).
 - Write titles, details and acceptance in English. Keep quoted user text and identifiers unchanged.`;
@@ -81,6 +82,15 @@ export function createPlanMeta(
     assumptions: review?.assumptions ?? [],
     reviewCount,
   };
+}
+
+/**
+ * Random/repeat policy is not a plan-structure decision. Resolve it with the
+ * literal reading and an assumption instead of blocking the user with a
+ * clarification question.
+ */
+export function isLowImpactPlanQuestion(question: string): boolean {
+  return /(?:random|rastgele|repeat(?:ing)?|consecutive|üst üste|tekrar et)/i.test(question);
 }
 
 export function shouldReviewPlan(

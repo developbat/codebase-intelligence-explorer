@@ -5,6 +5,7 @@ import {
   PLAN_VERSION,
   createPlanMeta,
   goalHash,
+  isLowImpactPlanQuestion,
   shouldReviewPlan,
 } from "./ai/planReview";
 import { applyPlanReview } from "./ai/loop";
@@ -156,4 +157,19 @@ test("auto-replan replaces a stale single task and preserves changed files in th
   });
   assert.equal(explicit.tasks[0].action, "update");
   assert.equal(explicit.tasks[0].surface, "game");
+});
+
+test("random/repeat policy questions are auto-resolved instead of blocking", () => {
+  assert.equal(
+    isLowImpactPlanQuestion("Should the random map be allowed to repeat on consecutive starts?"),
+    true,
+  );
+  assert.equal(
+    isLowImpactPlanQuestion("Ardışık start'larda aynı harita tekrar etsin mi?"),
+    true,
+  );
+  assert.equal(
+    isLowImpactPlanQuestion("Should the removed list be deleted from the DOM or only hidden?"),
+    false,
+  );
 });
