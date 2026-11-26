@@ -93,6 +93,12 @@ export function shouldReviewPlan(
   const failed = queue.tasks.some((task) => task.status === "failed" || task.status === "blocked");
   const singleMulti =
     queue.tasks.length <= 1 && (queue.planMeta?.requirements.length ?? 0) > 1;
+  // A fresh, large build plan gets one coverage review before any tokens are
+  // spent on execution. This catches plans that silently omit goal behaviors
+  // (movement, key/win flow, restart, ...).
+  const largeGoal = goal.trim().length >= 800 || queue.tasks.length >= 3;
+  const freshLargePlan = largeGoal && (queue.planMeta?.reviewCount ?? 0) === 0;
+  if (freshLargePlan) return true;
   if (!queue.planMeta) return failed || singleMulti;
   if (queue.planMeta.version !== PLAN_VERSION) return true;
   if (queue.planMeta.goalHash !== goalHash(goal)) return true;

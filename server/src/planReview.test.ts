@@ -50,6 +50,28 @@ test("plan meta records version, goal hash and review count", () => {
   assert.equal(reviewed.reviewCount, 1);
 });
 
+test("a fresh large build plan is reviewed once for coverage", () => {
+  const largeGoal = "NEON MAZE\n" + "Build a playable maze with movement, key, exit and restart.\n".repeat(20);
+  const fresh = queue({
+    goal: largeGoal,
+    planMeta: createPlanMeta(largeGoal),
+    tasks: [
+      { ...queue().tasks[0], id: "task-1", status: "pending" as const },
+      { ...queue().tasks[0], id: "task-2", status: "pending" as const },
+      { ...queue().tasks[0], id: "task-3", status: "pending" as const },
+    ],
+  });
+  assert.equal(shouldReviewPlan(fresh, largeGoal, { workspaceMode: "build" }), true);
+  assert.equal(
+    shouldReviewPlan(
+      { ...fresh, planMeta: createPlanMeta(largeGoal, undefined, 1) },
+      largeGoal,
+      { workspaceMode: "build" },
+    ),
+    false,
+  );
+});
+
 test("stale, failed and multi-behavior queues need a plan review", () => {
   const goal = "HUD ikonlarını 20px yap ve hedefin rengini beyaza çevir";
   assert.equal(shouldReviewPlan(queue(), goal, { workspaceMode: "build" }), true);
