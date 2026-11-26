@@ -4441,6 +4441,121 @@ export function CodeStudio({
             </div>
           ) : null}
 
+          {confirmation ? (
+            <div className="studio-clarify studio-confirm">
+              <div className="studio-clarify-head">
+                <MessageSquare size={11} />
+                <strong>{t("Anladığım")}</strong>
+              </div>
+              <p className="studio-confirm-request">
+                {confirmation.intent.normalizedRequest || confirmation.intent.understanding}
+              </p>
+              {confirmation.intent.confidence !== undefined ? (
+                <p className="studio-confirm-meta">
+                  {t("Confidence")}: {Math.round(confirmation.intent.confidence * 100)}%
+                </p>
+              ) : null}
+              {confirmation.intent.behaviors?.length ? (
+                <ul className="studio-confirm-list">
+                  {confirmation.intent.behaviors.map((behavior) => (
+                    <li key={behavior.id}>
+                      <b>{behavior.target}</b>
+                      <span className="studio-confirm-tag">
+                        {behavior.action} · {behavior.surface}
+                      </span>
+                      {behavior.details ? ` — ${behavior.details}` : ""}
+                      {behavior.acceptance ? ` · ${behavior.acceptance}` : ""}
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+              {confirmation.intent.constraints?.length ? (
+                <p className="studio-confirm-note">
+                  <b>{t("Constraints")}:</b> {confirmation.intent.constraints.join(" · ")}
+                </p>
+              ) : null}
+              {confirmation.intent.assumptions?.length ? (
+                <p className="studio-confirm-note">
+                  <b>{t("Assumptions")}:</b> {confirmation.intent.assumptions.join(" · ")}
+                </p>
+              ) : null}
+              <div className="studio-confirm-actions">
+                <button
+                  className="primary-button"
+                  onClick={() => {
+                    const original = confirmation.original;
+                    setConfirmation(null);
+                    void askProject(original, false, { confirmed: true, skipClarify: true });
+                  }}
+                >
+                  {t("Confirm and start")}
+                </button>
+                <button
+                  className="ghost-button"
+                  onClick={() => {
+                    setConfirmation(null);
+                    setChatInput(confirmation.original);
+                  }}
+                >
+                  {t("Edit")}
+                </button>
+              </div>
+            </div>
+          ) : null}
+          {clarification ? (
+            <div className="studio-clarify">
+              <div className="studio-clarify-head">
+                <MessageSquare size={11} />
+                <strong>{t(clarification.request.question)}</strong>
+              </div>
+              <div className="studio-clarify-options">
+                {clarification.request.options.map((option) => (
+                  <button
+                    key={option.id}
+                    onClick={() => {
+                      const original = clarification.original;
+                      if (option.projectId) {
+                        const project = recent.find((item) => item.id === option.projectId);
+                        if (project && onOpenProjectWithPrompt) {
+                          setClarification(null);
+                          setChatInput("");
+                          onOpenProjectWithPrompt(project, original);
+                          return;
+                        }
+                        setClarification(null);
+                        setChatError(
+                          t(
+                            "That project is no longer in recent projects. Open it from the project switcher and ask again.",
+                          ),
+                        );
+                        return;
+                      }
+                      setClarification(null);
+                      setChatInput("");
+                      void askProject(`${original}\n\n${option.instructionSuffix}`, true, {
+                        skipClarify: true,
+                      });
+                    }}
+                  >
+                    {t(option.label)}
+                  </button>
+                ))}
+              </div>
+              <div className="studio-clarify-foot">
+                <button
+                  onClick={() => {
+                    const original = clarification.original;
+                    setClarification(null);
+                    void askProject(original, true, { skipClarify: true });
+                  }}
+                >
+                  {t("Send as written")}
+                </button>
+                <button onClick={() => setClarification(null)}>{t("Cancel")}</button>
+              </div>
+            </div>
+          ) : null}
+
           {chatError ? (
             <div className="studio-ai-inline-error">
               <AlertTriangle size={12} />
@@ -4747,121 +4862,6 @@ export function CodeStudio({
           <div className="studio-footer-body">
             {footerTab === "chat" ? (
               <div className={`studio-composer is-${studioMode}`}>
-
-          {confirmation ? (
-            <div className="studio-clarify studio-confirm">
-              <div className="studio-clarify-head">
-                <MessageSquare size={11} />
-                <strong>{t("Anladığım")}</strong>
-              </div>
-              <p className="studio-confirm-request">
-                {confirmation.intent.normalizedRequest || confirmation.intent.understanding}
-              </p>
-              {confirmation.intent.confidence !== undefined ? (
-                <p className="studio-confirm-meta">
-                  {t("Confidence")}: {Math.round(confirmation.intent.confidence * 100)}%
-                </p>
-              ) : null}
-              {confirmation.intent.behaviors?.length ? (
-                <ul className="studio-confirm-list">
-                  {confirmation.intent.behaviors.map((behavior) => (
-                    <li key={behavior.id}>
-                      <b>{behavior.target}</b>
-                      <span className="studio-confirm-tag">
-                        {behavior.action} · {behavior.surface}
-                      </span>
-                      {behavior.details ? ` — ${behavior.details}` : ""}
-                      {behavior.acceptance ? ` · ${behavior.acceptance}` : ""}
-                    </li>
-                  ))}
-                </ul>
-              ) : null}
-              {confirmation.intent.constraints?.length ? (
-                <p className="studio-confirm-note">
-                  <b>{t("Constraints")}:</b> {confirmation.intent.constraints.join(" · ")}
-                </p>
-              ) : null}
-              {confirmation.intent.assumptions?.length ? (
-                <p className="studio-confirm-note">
-                  <b>{t("Assumptions")}:</b> {confirmation.intent.assumptions.join(" · ")}
-                </p>
-              ) : null}
-              <div className="studio-confirm-actions">
-                <button
-                  className="primary-button"
-                  onClick={() => {
-                    const original = confirmation.original;
-                    setConfirmation(null);
-                    void askProject(original, false, { confirmed: true, skipClarify: true });
-                  }}
-                >
-                  {t("Confirm and start")}
-                </button>
-                <button
-                  className="ghost-button"
-                  onClick={() => {
-                    setConfirmation(null);
-                    setChatInput(confirmation.original);
-                  }}
-                >
-                  {t("Edit")}
-                </button>
-              </div>
-            </div>
-          ) : null}
-          {clarification ? (
-            <div className="studio-clarify">
-              <div className="studio-clarify-head">
-                <MessageSquare size={11} />
-                <strong>{t(clarification.request.question)}</strong>
-              </div>
-              <div className="studio-clarify-options">
-                {clarification.request.options.map((option) => (
-                  <button
-                    key={option.id}
-                    onClick={() => {
-                      const original = clarification.original;
-                      if (option.projectId) {
-                        const project = recent.find((item) => item.id === option.projectId);
-                        if (project && onOpenProjectWithPrompt) {
-                          setClarification(null);
-                          setChatInput("");
-                          onOpenProjectWithPrompt(project, original);
-                          return;
-                        }
-                        setClarification(null);
-                        setChatError(
-                          t(
-                            "That project is no longer in recent projects. Open it from the project switcher and ask again.",
-                          ),
-                        );
-                        return;
-                      }
-                      setClarification(null);
-                      setChatInput("");
-                      void askProject(`${original}\n\n${option.instructionSuffix}`, true, {
-                        skipClarify: true,
-                      });
-                    }}
-                  >
-                    {t(option.label)}
-                  </button>
-                ))}
-              </div>
-              <div className="studio-clarify-foot">
-                <button
-                  onClick={() => {
-                    const original = clarification.original;
-                    setClarification(null);
-                    void askProject(original, true, { skipClarify: true });
-                  }}
-                >
-                  {t("Send as written")}
-                </button>
-                <button onClick={() => setClarification(null)}>{t("Cancel")}</button>
-              </div>
-            </div>
-          ) : null}
 
           {attachment ? (
             <div className="studio-attachment-chip">
