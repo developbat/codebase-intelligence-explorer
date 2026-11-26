@@ -12,22 +12,29 @@ export const PLAN_VERSION = 2;
 const PLAN_REVIEW_SYSTEM = `You are a strict plan reviewer for a coding agent. Compare the user goal, the existing task queue, the changed files and the last failure. Return JSON only.
 
 Schema:
-{"verdict":"ok"|"replan","requirements":["one per independent behavior"],"missing":["requirement not covered by the current tasks"],"assumptions":["safe assumption used instead of asking"],"tasks":[{"title":"imperative","detail":"exact work, files if known","acceptance":"how to verify","effort":"simple|standard|hard"}]}
+{"verdict":"ok"|"replan","requirements":["one per independent behavior"],"missing":["requirement not covered by the current tasks"],"assumptions":["safe assumption used instead of asking"],"questions":[{"question":"one product decision","options":[{"label":"short option","suffix":"text appended to the user's request if chosen"}]}],"tasks":[{"title":"imperative","detail":"exact work, files if known","acceptance":"how to verify","effort":"simple|standard|hard"}]}
 
 Rules:
 - Return "ok" when the existing tasks still cover every required behavior and a retry of the failed/blocked task is the right next step.
 - Return "replan" when the tasks are stale, merged, missing a behavior, or produced by an older planner. Provide 2-6 tasks, one behavior each, with acceptance criteria.
 - Never split a single behavior into busywork. Never create verification-only or cleanup-only tasks.
 - Preserve completed work and changed files. A new task must inspect the current files, not undo working changes.
-- Ask no questions. Use the smallest safe assumption and list it. Only list an assumption when a wrong guess would change the product behavior.
+- Ask at most ONE question, and only when a wrong guess would implement the wrong product behavior. Provide 2-3 concrete product options with a suffix. Otherwise return an empty questions array and use a safe assumption.
+- Do not ask which files to inspect or where the code lives; the executor handles that.
 - Keep the user's exact qualifiers (only, never, smaller/larger, do not change X).
 - Write titles, details and acceptance in English. Keep quoted user text and identifiers unchanged.`;
+
+export interface PlanReviewQuestion {
+  question: string;
+  options: Array<{ label: string; suffix: string }>;
+}
 
 export interface PlanReviewResult {
   verdict: "ok" | "replan";
   requirements: string[];
   missing: string[];
   assumptions: string[];
+  questions: PlanReviewQuestion[];
   tasks: Array<Pick<ProjectTask, "title" | "detail" | "acceptance" | "effort">>;
   tokenUsage?: AiTokenUsage;
   costUsd?: number;
@@ -107,6 +114,39 @@ function stringList(value: unknown, limit = 8): string[] {
     : [];
 }
 
+function reviewQuestions(value: unknown): PlanReviewQuestion[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object")
+    .map((item) => ({
+      question:
+        typeof item.question === "string" && item.question.trim()
+          ? item.question.trim().slice(0, 300)
+          : "",
+      options: Array.isArray(item.options)
+        ? item.options
+            .filter(
+              (option): option is Record<string, unknown> =>
+                Boolean(option) && typeof option === "object",
+            )
+            .map((option) => ({
+              label:
+                typeof option.label === "string" && option.label.trim()
+                  ? option.label.trim().slice(0, 80)
+                  : "",
+              suffix:
+                typeof option.suffix === "string" && option.suffix.trim()
+                  ? option.suffix.trim().slice(0, 400)
+                  : "",
+            }))
+            .filter((option) => option.label && option.suffix)
+            .slice(0, 3)
+        : [],
+    }))
+    .filter((question) => question.question && question.options.length >= 2)
+    .slice(0, 1);
+}
+
 function reviewTasks(value: unknown): PlanReviewResult["tasks"] {
   if (!Array.isArray(value)) return [];
   return value
@@ -140,6 +180,7 @@ function fallbackReview(goal: string, queue: ProjectTaskQueue): PlanReviewResult
       requirements,
       missing: requirements,
       assumptions: ["The goal contains independent behaviors that need separate tasks."],
+      questions: [],
       tasks: [],
       source: "fallback",
     };
@@ -149,6 +190,7 @@ function fallbackReview(goal: string, queue: ProjectTaskQueue): PlanReviewResult
     requirements,
     missing: [],
     assumptions: [],
+    questions: [],
     tasks: [],
     source: "fallback",
   };
@@ -226,6 +268,7 @@ export async function reviewProjectPlan(
       requirements: stringList(parsed.requirements, 10),
       missing: stringList(parsed.missing, 10),
       assumptions: stringList(parsed.assumptions, 8),
+      questions: reviewQuestions(parsed.questions),
       tasks: reviewTasks(parsed.tasks),
       tokenUsage,
       source: "model",

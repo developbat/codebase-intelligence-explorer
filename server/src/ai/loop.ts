@@ -2245,6 +2245,36 @@ export async function runProjectLoop(
           }`,
         },
       });
+      if (review.questions.length > 0 && options.clarified !== true) {
+        queue = {
+          ...queue,
+          status: "idle",
+          planMeta: createPlanMeta(goal, review, (queue.planMeta?.reviewCount ?? 0) + 1),
+        };
+        queue = await saveQueue(analysis.rootPath, queue);
+        emit({ type: "task", queue });
+        const question = review.questions[0];
+        emit({
+          type: "clarify",
+          request: {
+            question: question.question,
+            options: question.options.map((option, index) => ({
+              id: `opt-${index + 1}`,
+              label: option.label,
+              instructionSuffix: option.suffix,
+            })),
+            original: goal,
+          },
+        });
+        return {
+          queue,
+          summary: "Plan review needs one product decision before execution.",
+          completed: queue.tasks.filter((task) => task.status === "done").length,
+          failed: 0,
+          stopped: true,
+          stages: queue.stageUsage,
+        };
+      }
       if (review.verdict === "replan") {
         queue = applyPlanReview(queue, goal, review);
       } else {

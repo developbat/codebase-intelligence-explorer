@@ -120,6 +120,8 @@ export interface ProjectTaskLoopOptions {
   activeFile?: string;
   replan?: boolean;
   retryFailed?: boolean;
+  /** The user already answered a plan/intent clarification. */
+  clarified?: boolean;
   intent?: IntentAnalysis;
   history?: { role: "user" | "assistant"; content: string }[];
   /** Show the local browser window while a verification check runs. */

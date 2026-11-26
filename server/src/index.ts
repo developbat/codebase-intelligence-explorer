@@ -2445,6 +2445,7 @@ app.post("/api/projects/:id/ai/loop/stream", async (req, res) => {
         parallelTasks: Number(req.body?.parallelTasks) || undefined,
         replan: req.body?.replan === true,
         retryFailed: req.body?.retryFailed === true,
+        clarified: req.body?.clarified === true,
         workspaceMode: ["ask", "plan", "build", "research"].includes(req.body?.workspaceMode)
           ? (req.body.workspaceMode as AiWorkspaceMode)
           : undefined,

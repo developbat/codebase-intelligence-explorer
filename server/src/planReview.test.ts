@@ -108,6 +108,7 @@ test("auto-replan replaces a stale single task and preserves changed files in th
     requirements: ["icon size", "target color"],
     missing: ["target color"],
     assumptions: [],
+    questions: [],
     tasks: [
       { title: "Set HUD icon size", detail: "Make the icons 20px.", acceptance: "20px.", effort: "simple" },
       { title: "Make target white", detail: "Use white for the target.", acceptance: "White.", effort: "simple" },
