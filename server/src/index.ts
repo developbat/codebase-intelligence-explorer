@@ -55,7 +55,14 @@ import { transformVideo } from "./mediaTools";
 import { addLibraryAsset, copyLibraryAssetToProject, listLibrary, removeLibraryAsset } from "./library";
 import { checkGraphic } from "./graphicCheck";
 import { getProjectTaskQueue, planProjectTasks, runProjectLoop } from "./ai/loop";
-import { loadQueue, removeTask, reorderTasks, saveQueue, updateTask } from "./tasks";
+import {
+  loadQueue,
+  loadTaskHistory,
+  removeTask,
+  reorderTasks,
+  saveQueue,
+  updateTask,
+} from "./tasks";
 import type { ProjectTask } from "../../shared/tasks";
 import { getPublicSettings, resolveAgentRole, resolveProvider, updateAiSettings } from "./ai/settings";
 import { allToolSpecs } from "./ai/toolRegistry";
@@ -2192,7 +2199,11 @@ app.get("/api/projects/:id/plans/:name", async (req, res) => {
 
 app.get("/api/projects/:id/tasks", async (req, res) => {
   try {
-    res.json({ queue: await getProjectTaskQueue(req.params.id) });
+    const analysis = await loadAnalysis(req.params.id);
+    res.json({
+      queue: await loadQueue(analysis.rootPath, req.params.id),
+      history: await loadTaskHistory(analysis.rootPath),
+    });
   } catch (error) {
     handleError(res, error, 400);
   }

@@ -13,6 +13,7 @@ import {
   clearQueue,
   createQueue,
   loadQueue,
+  loadTaskHistory,
   markTask,
   nextPendingTask,
   readLessons,
@@ -40,6 +41,24 @@ function task(id: string, dependsOn: string[] = []): ProjectTask {
     updatedAt: new Date().toISOString(),
   };
 }
+
+test("archives the previous goal when a new goal replaces the queue", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "cie-history-"));
+  try {
+    await createQueue(root, "project-1", "First goal", [task("task-1")]);
+    await createQueue(root, "project-1", "Second goal", [task("task-2")]);
+    const history = await loadTaskHistory(root);
+    assert.equal(history.length, 1);
+    assert.equal(history[0].goal, "First goal");
+    assert.equal(history[0].tasks[0]?.id, "task-1");
+
+    // Re-planning the same goal must not archive it again.
+    await createQueue(root, "project-1", "Second goal", [task("task-3")]);
+    assert.equal((await loadTaskHistory(root)).length, 1);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
 
 test("persists a task queue as JSON and human-readable Markdown", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "cie-tasks-"));

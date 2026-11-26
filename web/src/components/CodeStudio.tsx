@@ -116,6 +116,8 @@ import {
   Star,
   Terminal,
   Monitor,
+  MoreHorizontal,
+  Network,
   Trash2,
   Wand2,
   User,
@@ -137,6 +139,7 @@ import type {
 import { providerInfo, type AiAgentEvent, type AiAgentLogEntry, type AiAgentPermissionRequest, type AiAgentPlan, type AiAgentResult, type AiAgentStep, type AiReadMapEntry, type AiPermissionDecision, type AiProviderId, type AiSettingsPublic, type AiTestGenerationResult, type AiTokenUsage, type AiWorkspaceMode } from "../../../shared/ai";
 import { api } from "../api";
 import { ProjectSwitcher } from "./ProjectSwitcher";
+import { ProjectProgressPanel } from "./ProjectProgressPanel";
 import { activeProvider } from "../lib/ai";
 import { buildTree, collectFolderPaths, type TreeNode } from "../lib/tree";
 import { useI18n } from "../i18n";
@@ -157,7 +160,11 @@ import { AgentPlanCard } from "./AgentPlanCard";
 import { ShellTerminalView } from "./ShellTerminalView";
 import { TaskQueueCard } from "./TaskQueueCard";
 import { LibraryPicker } from "./LibraryPicker";
-import type { ProjectTaskQueue, ProjectTaskStageUsage } from "../../../shared/tasks";
+import type {
+  ProjectTaskHistoryEntry,
+  ProjectTaskQueue,
+  ProjectTaskStageUsage,
+} from "../../../shared/tasks";
 import type { ClarificationRequest, IntentAnalysis } from "../../../shared/intent";
 import type { BrowserCheckResult } from "../../../shared/browserCheck";
 import type { ProjectToolList } from "../../../shared/projectTools";
@@ -879,6 +886,9 @@ export function CodeStudio({
   const [chatLivePlan, setChatLivePlan] = useState<AiAgentPlan | null>(null);
   const [chatLiveAnswer, setChatLiveAnswer] = useState("");
   const [taskQueue, setTaskQueue] = useState<ProjectTaskQueue | null>(null);
+  const [taskHistory, setTaskHistory] = useState<ProjectTaskHistoryEntry[]>([]);
+  const [progressRefreshing, setProgressRefreshing] = useState(false);
+  const rightMoreRef = useRef<HTMLDetailsElement | null>(null);
   const [dismissedQueueAt, setDismissedQueueAt] = useState<string | null>(null);
   const [clarification, setClarification] = useState<{
     request: ClarificationRequest;
@@ -1143,7 +1153,10 @@ export function CodeStudio({
   useEffect(() => {
     void api.tasks
       .get(analysis.id)
-      .then((result) => setTaskQueue(result.queue))
+      .then((result) => {
+        setTaskQueue(result.queue);
+        setTaskHistory(result.history ?? []);
+      })
       .catch(() => undefined);
   }, [analysis.id]);
   useEffect(() => {
@@ -1197,10 +1210,16 @@ export function CodeStudio({
     api.tasks
       .get(analysis.id)
       .then((result) => {
-        if (!cancelled) setTaskQueue(result.queue);
+        if (!cancelled) {
+          setTaskQueue(result.queue);
+          setTaskHistory(result.history ?? []);
+        }
       })
       .catch(() => {
-        if (!cancelled) setTaskQueue(null);
+        if (!cancelled) {
+          setTaskQueue(null);
+          setTaskHistory([]);
+        }
       });
     return () => {
       cancelled = true;
@@ -1216,7 +1235,9 @@ export function CodeStudio({
       void api.tasks
         .get(analysis.id)
         .then((result) => {
-          if (!cancelled && result.queue) setTaskQueue(result.queue);
+          if (cancelled) return;
+          if (result.queue) setTaskQueue(result.queue);
+          setTaskHistory(result.history ?? []);
         })
         .catch(() => undefined);
     }, 4000);
@@ -1748,7 +1769,33 @@ export function CodeStudio({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeFile, contents]);
 
+  useEffect(() => {
+    const onPointerDown = (event: MouseEvent) => {
+      const details = rightMoreRef.current;
+      if (details?.open && !details.contains(event.target as Node)) {
+        details.removeAttribute("open");
+      }
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") rightMoreRef.current?.removeAttribute("open");
+    };
+    document.addEventListener("mousedown", onPointerDown);
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, []);
+
   const hasRunningJobs = jobs.some((job) => job.status === "running");
+  const queueRunning = taskQueue?.status === "running";
+  // Right-panel tabs stay hidden until they have something to show; the
+  // "more" menu still exposes them on demand.
+  const showLiveTab =
+    rightTab === "live" || liveArmed || hasRunningJobs || queueRunning || Boolean(livePreviewUrl);
+  const showRunTab = rightTab === "run" || Boolean(runResult) || hasRunningJobs;
+  const showChangesTab =
+    rightTab === "changes" || (agentChangeReport?.summary.changedFiles ?? 0) > 0;
 
   useEffect(() => {
     void refreshJobs();
@@ -1762,6 +1809,7 @@ export function CodeStudio({
       !hasRunningJobs &&
       !chatBusy &&
       rightTab !== "preview" &&
+      rightTab !== "progress" &&
       !livePreviewUrl
     ) {
       return;
@@ -4859,6 +4907,21 @@ export function CodeStudio({
               <GitCompareArrows size={12} /> {t("Git")}
               {footerGit && footerGit.files.length > 0 ? <b>{footerGit.files.length}</b> : null}
             </button>
+            <button
+              className={rightTab === "progress" ? "is-active" : ""}
+              onClick={() =>
+                setRightTab((current) => (current === "progress" ? "preview" : "progress"))
+              }
+              title={t("Project progress")}
+            >
+              <Network size={12} /> {t("Progress")}
+              {taskQueue && taskQueue.tasks.length > 0 ? (
+                <b>
+                  {taskQueue.tasks.filter((task) => task.status === "done").length}/
+                  {taskQueue.tasks.length}
+                </b>
+              ) : null}
+            </button>
             <span className="studio-footer-spacer" />
             <button
               className="studio-footer-collapse"
@@ -5945,31 +6008,40 @@ export function CodeStudio({
           >
             <Eye size={11} /> {t("Preview")}
           </button>
-          <button
-            className={rightTab === "live" ? "is-active" : ""}
-            onClick={() => setRightTab("live")}
-          >
-            <Monitor size={11} /> {t("Live test")}
-          </button>
-          <button
-            className={rightTab === "run" ? "is-active" : ""}
-            onClick={() => setRightTab("run")}
-          >
-            <Terminal size={11} /> {t("Run")}
-          </button>
-          <button
-            className={rightTab === "changes" ? "is-active" : ""}
-            onClick={() => setRightTab("changes")}
-          >
-            <GitCompareArrows size={11} /> {t("Changes")}
-            {agentChangeReport ? <b>{agentChangeReport.summary.changedFiles}</b> : null}
-          </button>
-          <button
-            className={rightTab === "assets" ? "is-active" : ""}
-            onClick={() => setRightTab("assets")}
-          >
-            <Library size={11} /> {t("Assets")}
-          </button>
+          {rightTab === "progress" ? (
+            <button
+              className="is-active"
+              onClick={() => setRightTab("preview")}
+              title={t("Close")}
+            >
+              <Network size={11} /> {t("Progress")} <X size={9} />
+            </button>
+          ) : null}
+          {showLiveTab ? (
+            <button
+              className={rightTab === "live" ? "is-active" : ""}
+              onClick={() => setRightTab("live")}
+            >
+              <Monitor size={11} /> {t("Live test")}
+            </button>
+          ) : null}
+          {showRunTab ? (
+            <button
+              className={rightTab === "run" ? "is-active" : ""}
+              onClick={() => setRightTab("run")}
+            >
+              <Terminal size={11} /> {t("Run")}
+            </button>
+          ) : null}
+          {showChangesTab ? (
+            <button
+              className={rightTab === "changes" ? "is-active" : ""}
+              onClick={() => setRightTab("changes")}
+            >
+              <GitCompareArrows size={11} /> {t("Changes")}
+              {agentChangeReport ? <b>{agentChangeReport.summary.changedFiles}</b> : null}
+            </button>
+          ) : null}
           {openTabs.map((filePath) => (
             <div key={filePath} className={`studio-right-tab ${rightTab === filePath ? "is-active" : ""}`}>
               <button
@@ -5991,7 +6063,61 @@ export function CodeStudio({
               </button>
             </div>
           ))}
-          {rightTab !== "preview" && rightTab !== "live" && rightTab !== "run" && rightTab !== "changes" && rightTab !== "assets" && activeFile ? (
+          {rightTab === "assets" ? (
+            <button className="is-active" onClick={() => setRightTab("preview")}>
+              <Library size={11} /> {t("Assets")} <X size={9} />
+            </button>
+          ) : null}
+          {!showLiveTab || !showRunTab || !showChangesTab || rightTab !== "assets" ? (
+            <details className="studio-right-more" ref={rightMoreRef}>
+              <summary title={t("More panels")}>
+                <MoreHorizontal size={12} />
+              </summary>
+              <div className="studio-right-more-menu">
+                {!showLiveTab ? (
+                  <button
+                    onClick={(event) => {
+                      setRightTab("live");
+                      event.currentTarget.closest("details")?.removeAttribute("open");
+                    }}
+                  >
+                    <Monitor size={11} /> {t("Live test")}
+                  </button>
+                ) : null}
+                {!showRunTab ? (
+                  <button
+                    onClick={(event) => {
+                      setRightTab("run");
+                      event.currentTarget.closest("details")?.removeAttribute("open");
+                    }}
+                  >
+                    <Terminal size={11} /> {t("Run")}
+                  </button>
+                ) : null}
+                {!showChangesTab ? (
+                  <button
+                    onClick={(event) => {
+                      setRightTab("changes");
+                      event.currentTarget.closest("details")?.removeAttribute("open");
+                    }}
+                  >
+                    <GitCompareArrows size={11} /> {t("Changes")}
+                  </button>
+                ) : null}
+                {rightTab !== "assets" ? (
+                  <button
+                    onClick={(event) => {
+                      setRightTab("assets");
+                      event.currentTarget.closest("details")?.removeAttribute("open");
+                    }}
+                  >
+                    <Library size={11} /> {t("Assets")}
+                  </button>
+                ) : null}
+              </div>
+            </details>
+          ) : null}
+          {rightTab !== "preview" && rightTab !== "live" && rightTab !== "run" && rightTab !== "changes" && rightTab !== "assets" && rightTab !== "progress" && activeFile ? (
             <>
               <button
                 className="studio-right-icon"
@@ -6017,7 +6143,7 @@ export function CodeStudio({
               </button>
             </>
           ) : null}
-          {rightTab !== "preview" && rightTab !== "live" && rightTab !== "run" && rightTab !== "changes" && rightTab !== "assets" ? (
+          {rightTab !== "preview" && rightTab !== "live" && rightTab !== "run" && rightTab !== "changes" && rightTab !== "assets" && rightTab !== "progress" ? (
             <button
               className="studio-right-save"
               onClick={() => void saveFile()}
@@ -6030,7 +6156,30 @@ export function CodeStudio({
         </div>
 
         <div className="studio-right-body">
-          {rightTab === "run" ? (
+          {rightTab === "progress" ? (
+            <ProjectProgressPanel
+              analysis={analysis}
+              queue={taskQueue}
+              history={taskHistory}
+              busy={progressRefreshing}
+              onRefresh={() => {
+                setProgressRefreshing(true);
+                void api.tasks
+                  .get(analysis.id)
+                  .then((result) => {
+                    setTaskQueue(result.queue);
+                    setTaskHistory(result.history ?? []);
+                  })
+                  .catch(() => undefined)
+                  .finally(() => setProgressRefreshing(false));
+              }}
+              onClose={() => setRightTab("preview")}
+              onOpenQueue={() => {
+                setFooterTab("tasks");
+                setConsoleOpen(false);
+              }}
+            />
+          ) : rightTab === "run" ? (
             <div className="studio-run-panel">
               <div className="studio-run-head">
                 <span>

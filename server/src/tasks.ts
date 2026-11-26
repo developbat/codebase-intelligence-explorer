@@ -3,6 +3,7 @@ import path from "node:path";
 import type { AiAgentEvent } from "../../shared/ai";
 import type {
   ProjectTask,
+  ProjectTaskHistoryEntry,
   ProjectTaskQueue,
   ProjectTaskStatus,
 } from "../../shared/tasks";
@@ -11,6 +12,7 @@ const AGENT_DIR = "agent";
 const TASKS_FILE = "tasks.json";
 const PLAN_FILE = "TASKS.md";
 const CONTEXT_FILE = "context.md";
+const HISTORY_FILE = "history.json";
 const DIGEST_FILE = "context-digest.md";
 const MAX_CONTEXT_BYTES = 40_000;
 
@@ -20,6 +22,10 @@ function agentDir(rootPath: string): string {
 
 function tasksPath(rootPath: string): string {
   return path.join(agentDir(rootPath), TASKS_FILE);
+}
+
+function historyPath(rootPath: string): string {
+  return path.join(agentDir(rootPath), HISTORY_FILE);
 }
 
 function planPath(rootPath: string): string {
@@ -164,12 +170,55 @@ export async function loadQueue(rootPath: string, projectId: string): Promise<Pr
   }
 }
 
+const MAX_HISTORY_ENTRIES = 20;
+
+export async function loadTaskHistory(rootPath: string): Promise<ProjectTaskHistoryEntry[]> {
+  try {
+    const raw = await fs.readFile(historyPath(rootPath), "utf8");
+    const parsed = JSON.parse(raw) as ProjectTaskHistoryEntry[];
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((entry) => entry && typeof entry.goal === "string" && Array.isArray(entry.tasks))
+      .slice(0, MAX_HISTORY_ENTRIES);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Keeps the previous goal visible after a new goal replaces the task queue.
+ * Cheap: only local JSON, no model calls.
+ */
+async function archiveQueue(rootPath: string, queue: ProjectTaskQueue): Promise<void> {
+  if (queue.tasks.length === 0) return;
+  const history = await loadTaskHistory(rootPath);
+  const entry: ProjectTaskHistoryEntry = {
+    goal: queue.goal,
+    status: queue.status,
+    createdAt: queue.createdAt,
+    updatedAt: queue.updatedAt,
+    tasks: queue.tasks,
+  };
+  const next = [
+    entry,
+    ...history.filter(
+      (item) => !(item.goal === entry.goal && item.updatedAt === entry.updatedAt),
+    ),
+  ].slice(0, MAX_HISTORY_ENTRIES);
+  await fs.mkdir(agentDir(rootPath), { recursive: true });
+  await writeTextAtomic(historyPath(rootPath), JSON.stringify(next, null, 2));
+}
+
 export async function createQueue(
   rootPath: string,
   projectId: string,
   goal: string,
   tasks: ProjectTask[],
 ): Promise<ProjectTaskQueue> {
+  const previous = await loadQueue(rootPath, projectId);
+  if (previous && previous.tasks.length > 0 && previous.goal.trim() !== goal.trim()) {
+    await archiveQueue(rootPath, previous);
+  }
   const queue = { ...emptyQueue(projectId, goal), tasks, status: "idle" as const };
   return saveQueue(rootPath, queue);
 }

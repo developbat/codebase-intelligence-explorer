@@ -120,6 +120,15 @@ export interface ProjectTaskQueue {
   };
 }
 
+/** An earlier goal whose queue was replaced by a newer goal. */
+export interface ProjectTaskHistoryEntry {
+  goal: string;
+  status: ProjectTaskQueue["status"];
+  createdAt: string;
+  updatedAt: string;
+  tasks: ProjectTask[];
+}
+
 export interface ProjectTaskLoopOptions {
   workspaceMode?: "ask" | "plan" | "build" | "research";
   tokenBudget?: number;

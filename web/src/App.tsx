@@ -848,7 +848,7 @@ export default function App() {
             title={t("Code Studio")}
           >
             <Code2 size={13} />
-            <span>{t("Code Studio")}</span>
+            <span>{t("Project")}</span>
           </button>
           <button
             className={product === "chat" ? "is-active" : ""}
@@ -856,7 +856,7 @@ export default function App() {
             title={t("Chat Studio")}
           >
             <MessageSquare size={13} />
-            <span>{t("Chat Studio")}</span>
+            <span>{t("Chat")}</span>
           </button>
           <button
             className={product === "image" ? "is-active" : ""}
@@ -864,7 +864,7 @@ export default function App() {
             title={t("Image Studio")}
           >
             <ImageIcon size={13} />
-            <span>{t("Image Studio")}</span>
+            <span>{t("Image")}</span>
           </button>
           <button
             className={product === "video" ? "is-active" : ""}
@@ -872,7 +872,7 @@ export default function App() {
             title={t("Video Studio")}
           >
             <Clapperboard size={13} />
-            <span>{t("Video Studio")}</span>
+            <span>{t("Video")}</span>
           </button>
         </div>
 

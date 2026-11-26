@@ -2140,5 +2140,31 @@ export const tr: Dictionary = {
   "Git status is unavailable.": "Git durumu kullanılamıyor.",
   "No tasks yet. Send a request in Chat to start a task queue.":
     "Henüz görev yok. Görev kuyruğu başlatmak için Sohbet'ten istek gönder.",
-  "Tool issues": "Araç sorunları"
+  "Tool issues": "Araç sorunları",
+  "Project progress": "Proje ilerlemesi",
+  "Progress": "İlerleme",
+  "No goal recorded for this project yet.": "Bu proje için henüz hedef kaydedilmedi.",
+  "Nothing recorded yet": "Henüz kayıt yok",
+  "Tasks and completed work will show up here.":
+    "Görevler ve tamamlanan işler burada görünecek.",
+  "relationships": "ilişki",
+  "language": "dil",
+  "in progress": "devam eden",
+  "planned": "planlanan",
+  "needs attention": "ilgi bekleyen",
+  "Queue": "Kuyruk",
+  "Planned": "Planlanan",
+  "Next up": "Sıradaki",
+  "In progress": "Devam eden",
+  "Running now": "Şu an çalışıyor",
+  "Completed work": "Biten işler",
+  "Needs attention": "İlgi bekleyen",
+  "Failed or blocked": "Başarısız veya bloke",
+  "Assumptions": "Varsayımlar",
+  "Note": "Not",
+  "Verified": "Doğrulandı",
+  "Blocked": "Bloke",
+  "More panels": "Diğer paneller",
+  "Earlier work": "Önceki çalışmalar",
+  "Untitled goal": "Başlıksız hedef"
 };

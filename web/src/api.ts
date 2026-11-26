@@ -50,7 +50,11 @@ import type {
   AiTestResult,
   AiUnresolvedAnalysis,
 } from "../../shared/ai";
-import type { ProjectTask, ProjectTaskQueue } from "../../shared/tasks";
+import type {
+  ProjectTask,
+  ProjectTaskHistoryEntry,
+  ProjectTaskQueue,
+} from "../../shared/tasks";
 import type { LspCompletionItem, LspDiagnostic, LspHover } from "../../shared/lsp";
 import type {
   CatalogImportResult,
@@ -873,7 +877,9 @@ export const api = {
 
   tasks: {
     get: (projectId: string) =>
-      request<{ queue: ProjectTaskQueue | null }>(`/api/projects/${projectId}/tasks`),
+      request<{ queue: ProjectTaskQueue | null; history?: ProjectTaskHistoryEntry[] }>(
+        `/api/projects/${projectId}/tasks`,
+      ),
     update: (
       projectId: string,
       taskId: string,
