@@ -201,12 +201,12 @@ export function looksMultiBehaviorGoal(goal: string): boolean {
   if (text.length < 20) return false;
   const targets = new Set(
     (text.match(
-      /\b(?:hud|icon|ikon|button|buton|target|hedef|score|puan|streak|seri|timer|saat|color|renk|reng|layout|düzen|duzen|canvas|menu|menü|form|input|modal|toast|toolbar|header|footer|sidebar)\w*/gi,
+      /(?:^|[^a-z0-9çğıöşü])(?:hud|icon|ikon|button|buton|target|hedef|score|puan|streak|seri|timer|saat|color|renk|reng|layout|düzen|duzen|canvas|menu|menü|form|input|modal|toast|toolbar|header|footer|sidebar|boyut)\w*/gi,
     ) ?? []).map((value) => value.toLowerCase()),
   );
   const verbs = new Set(
     (text.match(
-      /\b(?:add|create|change|move|remove|fix|make|update|hide|show|replace|ekle|oluştur|değiştir|degistir|taşı|tasi|kaldır|kaldir|düzelt|duzelt|yap|güncelle|guncelle|gizle|göster|goster|yerleştir|yerlestir)\w*/gi,
+      /(?:^|[^a-z0-9çğıöşü])(?:add|create|change|move|remove|fix|make|update|hide|show|replace|ekle|oluştur|değiştir|degistir|taşı|tasi|kaldır|kaldir|düzelt|duzelt|yap|güncelle|guncelle|gizle|göster|goster|yerleştir|yerlestir|çevir|cevir|boyutlandır|boyutlandir|büyüt|buyut|küçült|kucult)\w*/gi,
     ) ?? []).map((value) => value.toLowerCase()),
   );
   return targets.size >= 2 && verbs.size >= 2;

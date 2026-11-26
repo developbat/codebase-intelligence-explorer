@@ -378,6 +378,10 @@ test("detects short multi-behavior UI goals for the planner", () => {
   );
   assert.equal(looksMultiBehaviorGoal("hedefi sağ üste taşı ve rengini değiştir"), true);
   assert.equal(looksMultiBehaviorGoal("form ekle ve modal göster"), true);
+  assert.equal(
+    looksMultiBehaviorGoal("HUD ikonlarını 20px yap ve hedefin rengini beyaza çevir"),
+    true,
+  );
   assert.equal(looksMultiBehaviorGoal("buton rengini koyu mavi yap"), false);
   assert.equal(looksMultiBehaviorGoal("add a search box"), false);
   assert.equal(looksMultiBehaviorGoal("hedefi taşı"), false);
@@ -390,6 +394,11 @@ test("splits a multi-behavior goal into one task per clause", () => {
   assert.match(tasks[0].detail, /HUD ikonlarını düzelt/);
   assert.match(tasks[1].detail, /hedefi sağ üste taşı/);
   assert.deepEqual(tasks[1].dependsOn, [tasks[0].id]);
+  const sizeAndColor = splitMultiBehaviorGoal(
+    "HUD ikonlarını 20px yap ve hedefin rengini beyaza çevir",
+  );
+  assert.ok(sizeAndColor);
+  assert.equal(sizeAndColor.length, 2);
   assert.equal(splitMultiBehaviorGoal("buton rengini koyu mavi yap"), null);
 });
 
