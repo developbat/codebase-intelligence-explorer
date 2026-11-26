@@ -136,6 +136,7 @@ import type {
 } from "../../../shared/types";
 import { providerInfo, type AiAgentEvent, type AiAgentLogEntry, type AiAgentPermissionRequest, type AiAgentPlan, type AiAgentResult, type AiAgentStep, type AiReadMapEntry, type AiPermissionDecision, type AiProviderId, type AiSettingsPublic, type AiTestGenerationResult, type AiTokenUsage, type AiWorkspaceMode } from "../../../shared/ai";
 import { api } from "../api";
+import { ProjectSwitcher } from "./ProjectSwitcher";
 import { activeProvider } from "../lib/ai";
 import { buildTree, collectFolderPaths, type TreeNode } from "../lib/tree";
 import { useI18n } from "../i18n";
@@ -706,6 +707,8 @@ export function CodeStudio({
   onAnalysisLoaded,
   onOpenProject,
   onOpenSettings,
+  onLoadRecent,
+  onRemoveRecent,
   onOpenProjectWithPrompt,
   initialPrompt,
   autoRunInitialPrompt,
@@ -3390,7 +3393,16 @@ export function CodeStudio({
     >
       <aside className="code-studio-sidebar">
         <div className="code-studio-side-head">
-          <strong>{analysis.projectName}</strong>
+          {recent && onLoadRecent && onRemoveRecent ? (
+            <ProjectSwitcher
+              analysis={analysis}
+              recent={recent}
+              onLoadRecent={onLoadRecent}
+              onRemoveRecent={onRemoveRecent}
+            />
+          ) : (
+            <strong>{analysis.projectName}</strong>
+          )}
         </div>
         {onOpenProject ? (
           <button className="studio-open-project" onClick={onOpenProject}>
