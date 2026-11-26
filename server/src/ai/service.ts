@@ -1688,6 +1688,7 @@ export async function askProject(
     history?: ChatMessage[];
     language?: string;
     intent?: IntentAnalysis;
+    workState?: string;
   } = {},
 ): Promise<AiChatResult> {
   const analysis = await loadAnalysis(projectId);
@@ -1723,6 +1724,7 @@ export async function askProject(
 
   const contextParts: string[] = [
     projectBrief(analysis),
+    options.workState ?? "",
     options.intent?.normalizedRequest ? `Interpreted request: ${options.intent.normalizedRequest}` : "",
     options.intent?.behaviors?.length
       ? `Requested behaviors: ${options.intent.behaviors
@@ -1827,6 +1829,7 @@ export async function answerGeneralChat(
     language?: string;
     history?: { role: "user" | "assistant"; content: string }[];
     intent?: IntentAnalysis;
+    workState?: string;
     onToken?: (chunk: string) => void;
   } = {},
 ): Promise<AiAgentResult> {
@@ -1849,6 +1852,7 @@ export async function answerGeneralChat(
         options.intent?.constraints?.length
           ? `Constraints: ${options.intent.constraints.join("; ")}`
           : "",
+        options.workState ?? "",
         aiLanguageInstruction(options.language ?? "en"),
       ].join("\n"),
     },

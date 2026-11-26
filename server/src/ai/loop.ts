@@ -962,7 +962,7 @@ export function summaryAllowsNoChanges(summary: string): boolean {
   if (/\b(not complete|incomplete|not done|failed|missing|tamamlanmadı|yapılmadı|eksik)\b/i.test(summary)) {
     return false;
   }
-  return /already (?:present|exists|implemented|applied|there|complete|complete and|satisf(?:y|ies|ied)|fits|matches)|no changes? (?:are )?(?:needed|required)|nothing to change|none needed|task[\s-]*\d*\s*(?:is\s*)?complete|görev[\s-]*\d*\s*tamamlandı|created and verified|verified|confirmed|nothing (?:was|is) (?:changed|rewritten)|no (?:changes|modifications) (?:made|required)|zaten (?:var|mevcut|tamam|tam|işlevsel|karşılan|uyumlu|uygulanmış|eklenmiş|yapılmış|mevcutmuş)|değişiklik gerekmiyor|gerek yok/i.test(
+  return /already (?:present|exists|implemented|applied|there|complete|complete and|satisf(?:y|ies|ied)|fits|matches|implemented and verified)|no (?:further )?(?:code )?changes? (?:are |was |were )?(?:needed|required)|nothing needed to change|none needed|task[\s-]*\d*\s*(?:is\s*)?complete|görev[\s-]*\d*\s*tamamlandı|created and verified|verified|confirmed|nothing (?:was|is) (?:changed|rewritten)|no (?:changes|modifications) (?:made|required)|zaten (?:var|mevcut|tamam|tam|işlevsel|karşılan|uyumlu|uygulanmış|eklenmiş|yapılmış|mevcutmuş)|değişiklik gerekmiyor|gerek yok/i.test(
     summary,
   );
 }
@@ -3427,18 +3427,32 @@ ${collapsed.tasks[0].checklist
       inspectionTask && isInspectionAnswer(result.summary);
     const summaryAllowsCompletion =
       summaryAllowsNoChanges(result.summary) && !summaryReportsBlocker(result.summary);
+    const hadPassedRealBrowserCheck = result.steps.some(
+      (step) => step.action === "browser_check" && step.ok,
+    );
+    // A build-session continuation that changed nothing but passed a real
+    // end-to-end browser check is complete: the previous attempt already wrote
+    // the code. Do not fail it for "no file change" alone.
+    const verifiedNoChange =
+      task.buildSession === true &&
+      result.changedFiles.length === 0 &&
+      !mutatingCommand &&
+      hadPassedRealBrowserCheck &&
+      !summaryReportsBlocker(result.summary);
     const writeWithoutChange =
       !inspectionTask &&
       taskLooksLikeWrite(task) &&
       result.changedFiles.length === 0 &&
       !mutatingCommand &&
-      !summaryAllowsCompletion;
+      !summaryAllowsCompletion &&
+      !verifiedNoChange;
     const verificationBlocker =
       !inspectionTask &&
       taskLooksLikeVerification(task) &&
       !taskLooksLikeWrite(task) &&
       summaryReportsBlocker(result.summary) &&
-      !summaryAllowsCompletion;
+      !summaryAllowsCompletion &&
+      !verifiedNoChange;
     const pendingWork = !inspectionTask && reportsRemainingWork(result.summary);
     const projectHasHtml =
       analysis.files.some((file) => /\.html?$/i.test(file.path)) ||
@@ -3948,6 +3962,12 @@ ${collapsed.tasks[0].checklist
       queue = await saveQueue(analysis.rootPath, queue);
       emit({ type: "task", queue, task: queue.tasks.find((item) => item.id === task.id) });
       continue;
+    }
+
+    if (signal?.aborted) {
+      queue = await saveQueue(analysis.rootPath, { ...queue, status: "stopped" });
+      emit({ type: "task", queue, task: queue.tasks.find((item) => item.id === task.id) });
+      break;
     }
 
     if (status !== "done" && result.stoppedReason !== "aborted" && task.attempts === 0) {

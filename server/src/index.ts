@@ -73,6 +73,7 @@ import { getPrompt, getPromptVersion, listPrompts, renderPrompt, resetPrompt, sa
 import { resolvePermission } from "./ai/permissions";
 import { analyzeIntent } from "./ai/intent";
 import { decideTaskRelation } from "./ai/taskRelation";
+import { summarizeWorkState } from "./ai/workState";
 import { listPlans, readPlan } from "./plans";
 import type { IntentAnalysis } from "../../shared/intent";
 import type { AiWorkspaceMode } from "../../shared/ai";
@@ -1832,6 +1833,15 @@ app.post("/api/projects/:id/ai/unresolved", async (req, res) => {
   }
 });
 
+async function projectWorkState(projectId: string): Promise<string> {
+  const queue = await getProjectTaskQueue(projectId).catch(() => null);
+  const analysis = await loadAnalysis(projectId).catch(() => null);
+  const taskHistory = analysis
+    ? await loadTaskHistory(analysis.rootPath).catch(() => [])
+    : [];
+  return summarizeWorkState(queue, taskHistory);
+}
+
 app.post("/api/projects/:id/ai/chat", async (req, res) => {
   try {
     const question = typeof req.body?.question === "string" ? req.body.question.trim() : "";
@@ -1872,6 +1882,7 @@ app.post("/api/projects/:id/ai/chat", async (req, res) => {
       history,
       language: typeof req.body?.language === "string" ? req.body.language : undefined,
       intent: analyzed?.intent,
+      workState: await projectWorkState(req.params.id),
     });
     res.json(result);
   } catch (error) {
@@ -1978,6 +1989,7 @@ app.post("/api/projects/:id/ai/agent", async (req, res) => {
         model: typeof req.body?.model === "string" ? req.body.model : undefined,
         language: typeof req.body?.language === "string" ? req.body.language : undefined,
         intent,
+        workState: await projectWorkState(req.params.id),
         history: Array.isArray(req.body?.history)
           ? req.body.history
               .filter(
@@ -2128,6 +2140,7 @@ app.post("/api/projects/:id/ai/agent/stream", async (req, res) => {
         model: typeof req.body?.model === "string" ? req.body.model : undefined,
         language: typeof req.body?.language === "string" ? req.body.language : undefined,
         intent,
+        workState: await projectWorkState(req.params.id),
         history,
         onToken: (chunk) => write({ type: "token", text: chunk }),
       });
@@ -2491,6 +2504,7 @@ app.post("/api/projects/:id/ai/loop/stream", async (req, res) => {
         model: typeof req.body?.model === "string" ? req.body.model : undefined,
         language: typeof req.body?.language === "string" ? req.body.language : undefined,
         intent,
+        workState: await projectWorkState(req.params.id),
         history,
         onToken: (chunk) => write({ type: "token", text: chunk }),
       });

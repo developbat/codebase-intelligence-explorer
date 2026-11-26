@@ -15,6 +15,7 @@ import {
   taskLooksLikeInspection,
   taskLooksLikeVerification,
   taskLooksLikeWrite,
+  summaryAllowsNoChanges,
   reviewFileExcerpt,
   summaryReportsBlocker,
   splitGoalSections,
@@ -36,6 +37,7 @@ import {
   isContinuationInstruction,
   resolveContinuationGoal,
 } from "./ai/intent";
+import { summarizeWorkState } from "./ai/workState";
 
 test("a short continuation resolves to the previous substantive request", () => {
   assert.equal(isContinuationInstruction("listeyi yap"), true);
@@ -99,6 +101,53 @@ test("a numbered list is extracted deterministically without an intent call", ()
   assert.ok(behaviors.every((behavior) => behavior.surface === "game"));
   assert.match(intent.normalizedRequest ?? "", /Bölüm sistemi/);
   assert.doesNotMatch(intent.normalizedRequest ?? "", /oyunda listedeki/);
+});
+
+test("verified no-change summaries are accepted as completion", () => {
+  assert.equal(
+    summaryAllowsNoChanges(
+      "The full update set is implemented. No further code change was needed; the real entry page passes an end-to-end browser check.",
+    ),
+    true,
+  );
+  assert.equal(summaryAllowsNoChanges("The task is incomplete; route wiring is missing."), false);
+});
+
+test("work state includes the result evidence even when the loop status failed", () => {
+  const base = {
+    id: "task-1",
+    title: "Build the update",
+    detail: "",
+    status: "failed" as const,
+    effort: "standard" as const,
+    role: "main" as const,
+    dependsOn: [],
+    attempts: 2,
+    changedFiles: [],
+    commands: [],
+    createdAt: "",
+    updatedAt: "",
+    resultSummary:
+      "The full update set is implemented. The real entry page passes an end-to-end browser check. No further code change was needed.",
+  };
+  const queue = {
+    version: 1 as const,
+    projectId: "p",
+    goal: "Build the update",
+    status: "failed" as const,
+    createdAt: "",
+    updatedAt: "",
+    notesPath: "",
+    planPath: "",
+    contextPath: "",
+    digestPath: "",
+    tasks: [base],
+  };
+  const state = summarizeWorkState(queue);
+  assert.match(state, /Queue status: failed/);
+  assert.match(state, /implemented/);
+  assert.match(state, /browser check/);
+  assert.match(state, /Status is the loop state/);
 });
 
 test("retry context carries the failure evidence and changed files", () => {
