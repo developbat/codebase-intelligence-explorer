@@ -11,8 +11,10 @@ import {
   Search,
   ShieldCheck,
   Sparkles,
+  ExternalLink,
 } from "lucide-react";
 import type {
+  SkillCatalogItem,
   SkillDetail,
   SkillInstallScope,
   SkillListResponse,
@@ -25,6 +27,13 @@ import { readCache, writeCache } from "../lib/resourceCache";
 
 interface SkillsPanelProps {
   projectId: string;
+}
+
+function formatInstalls(installs: number): string {
+  if (!installs || installs <= 0) return "—";
+  if (installs >= 1_000_000) return `${(installs / 1_000_000).toFixed(1).replace(/\.0$/, "")}M installs`;
+  if (installs >= 1_000) return `${(installs / 1_000).toFixed(1).replace(/\.0$/, "")}K installs`;
+  return `${installs} installs`;
 }
 
 function formatBytes(bytes: number): string {
@@ -53,10 +62,14 @@ export function SkillsPanel({ projectId }: SkillsPanelProps) {
   const [source, setSource] = useState("");
   const [sourceRef, setSourceRef] = useState("");
   const [scopeChoice, setScopeChoice] = useState<SkillInstallScope>("project");
-  const [enableOnInstall, setEnableOnInstall] = useState(true);
+  const [enableOnInstall, setEnableOnInstall] = useState(false);
   const [preview, setPreview] = useState<SkillSourcePreview | null>(null);
   const [selectedCandidates, setSelectedCandidates] = useState<Set<string>>(new Set());
   const [previewBusy, setPreviewBusy] = useState(false);
+  const [catalogQuery, setCatalogQuery] = useState("");
+  const [catalogResults, setCatalogResults] = useState<SkillCatalogItem[] | null>(null);
+  const [catalogBusy, setCatalogBusy] = useState(false);
+  const [catalogError, setCatalogError] = useState<string | null>(null);
   const [installBusy, setInstallBusy] = useState(false);
   const [addMessage, setAddMessage] = useState<string | null>(null);
   const [scriptBusy, setScriptBusy] = useState(false);
@@ -208,14 +221,35 @@ export function SkillsPanel({ projectId }: SkillsPanelProps) {
     }
   }
 
-  async function previewSource() {
-    if (!source.trim()) return;
+  async function previewSource(
+    sourceValue = source,
+    refValue = sourceRef,
+    preselect?: string,
+  ) {
+    const value = sourceValue.trim();
+    if (!value) return;
     setPreviewBusy(true);
     setAddMessage(null);
     try {
-      const result = await api.skills.previewSource(projectId, source.trim(), sourceRef.trim() || undefined);
+      const result = await api.skills.previewSource(projectId, value, refValue.trim() || undefined);
       setPreview(result);
-      setSelectedCandidates(new Set(result.candidates.map((candidate) => candidate.id)));
+      if (preselect) {
+        const wanted = preselect.toLowerCase();
+        const match = result.candidates.find(
+          (candidate) =>
+            candidate.id.toLowerCase() === wanted ||
+            candidate.name.toLowerCase() === wanted ||
+            candidate.id.toLowerCase().endsWith(`/${wanted}`),
+        );
+        setSelectedCandidates(new Set(match ? [match.id] : []));
+        if (!match) {
+          setAddMessage(
+            t("Preview loaded. Select {name} from the candidate list.", { name: preselect }),
+          );
+        }
+      } else {
+        setSelectedCandidates(new Set(result.candidates.map((candidate) => candidate.id)));
+      }
     } catch (requestError) {
       setAddMessage(
         requestError instanceof Error ? requestError.message : t("Could not preview this skill source."),
@@ -223,6 +257,33 @@ export function SkillsPanel({ projectId }: SkillsPanelProps) {
     } finally {
       setPreviewBusy(false);
     }
+  }
+
+  async function searchCatalog() {
+    const value = catalogQuery.trim();
+    if (value.length < 2) {
+      setCatalogError(t("Enter at least 2 characters."));
+      return;
+    }
+    setCatalogBusy(true);
+    setCatalogError(null);
+    try {
+      const result = await api.skills.search(projectId, value);
+      setCatalogResults(result.skills);
+    } catch (requestError) {
+      setCatalogError(
+        requestError instanceof Error ? requestError.message : t("Could not search the skill catalog."),
+      );
+    } finally {
+      setCatalogBusy(false);
+    }
+  }
+
+  async function previewCatalogSkill(item: SkillCatalogItem) {
+    setSource(item.source);
+    setSourceRef("");
+    setAddMessage(t("Previewing {name} from {source}…", { name: item.name, source: item.source }));
+    await previewSource(item.source, "", item.skillId);
   }
 
   async function installSelected() {
@@ -334,12 +395,76 @@ export function SkillsPanel({ projectId }: SkillsPanelProps) {
 
       <p className="skills-intro">
         {t(
-          "Installed skills are enabled by default. The agent sees a compact capability index and loads a skill's full instructions only when a task matches it. Type @skill-name to force a skill for one run. Skill scripts run only after explicit approval.",
+          "New skills start disabled; review the source and SKILL.md, then enable them. The agent sees a compact capability index and loads full instructions only when a task matches. Type @skill-name to force a skill for one run. Skill scripts run only after explicit approval.",
         )}
       </p>
 
       {addOpen ? (
         <div className="skills-add-panel">
+          <div className="skills-discover">
+            <div className="skills-discover-head">
+              <strong><Sparkles size={11} /> {t("Discover skills.sh")}</strong>
+              <span className="skills-discover-note">
+                {t("Read-only search · review before install")}
+              </span>
+            </div>
+            <div className="skills-add-row">
+              <input
+                className="text-input"
+                value={catalogQuery}
+                onChange={(event) => setCatalogQuery(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") void searchCatalog();
+                }}
+                placeholder={t("Search: ui design, testing, security…")}
+                spellCheck={false}
+              />
+              <button
+                className="ghost-button"
+                onClick={() => void searchCatalog()}
+                disabled={catalogBusy || catalogQuery.trim().length < 2}
+              >
+                {catalogBusy ? <Loader2 size={11} className="spin" /> : <Search size={11} />}
+                {t("Search catalog")}
+              </button>
+            </div>
+            {catalogError ? <small className="skills-candidate-warning">{catalogError}</small> : null}
+            {catalogResults ? (
+              catalogResults.length === 0 ? (
+                <small className="skills-discover-note">
+                  {t("No catalog match. You can still add a GitHub source below.")}
+                </small>
+              ) : (
+                <div className="skills-catalog-list">
+                  {catalogResults.map((item) => (
+                    <div className="skills-catalog-item" key={item.id}>
+                      <div>
+                        <strong>{item.name}</strong>
+                        <small>
+                          {item.source} · {formatInstalls(item.installs)}
+                        </small>
+                      </div>
+                      <div className="skills-catalog-actions">
+                        <a href={item.url} target="_blank" rel="noreferrer" title={t("Open on skills.sh")}>
+                          <ExternalLink size={11} />
+                        </a>
+                        <button
+                          className="ghost-button"
+                          onClick={() => void previewCatalogSkill(item)}
+                          disabled={previewBusy}
+                        >
+                          {t("Preview")}
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )
+            ) : null}
+            <small className="skills-discover-note">
+              {t("Third-party skills are instructions, not code. Scripts are stored but never run automatically.")}
+            </small>
+          </div>
           <div className="skills-add-row">
             <input
               className="text-input mono"
@@ -378,7 +503,7 @@ export function SkillsPanel({ projectId }: SkillsPanelProps) {
                 checked={enableOnInstall}
                 onChange={(event) => setEnableOnInstall(event.target.checked)}
               />
-              {t("Enable after install")}
+              {t("Enable after install (review first)")}
             </label>
             <span>{t("Scripts run only after explicit approval.")}</span>
           </div>

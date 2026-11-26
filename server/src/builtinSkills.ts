@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 
-const BUILTIN_VERSION = "4";
+const BUILTIN_VERSION = "5";
 
 interface BuiltinSkill {
   slug: string;
@@ -270,6 +270,97 @@ If two verification attempts fail, do not read more files. Write the exact faili
 ## Output
 
 Return: requirement table, files/lines inspected, check command or browser steps, before/after values, and the minimal change (or "no change needed" with evidence).`,
+  },
+  {
+    slug: "skill-discovery",
+    name: "Skill Discovery",
+    description:
+      "Find and safely add an agent skill when the user asks for a capability that is not installed. Search the catalog, present candidates, and install only with explicit approval.",
+    body: `# Skill Discovery
+
+Use this skill when the user asks for a skill/capability or when no installed skill matches the task.
+
+## 1. Check what is already installed
+
+Call list_skills before searching. Do not install a duplicate. The current auto-match already loads the best local skill; discovery is for gaps.
+
+## 2. Search the public catalog
+
+Use search_skills with a short domain + task query ("ui design", "playwright testing", "security audit"). Prefer official sources (vercel-labs, anthropics, microsoft) and skills with 1K+ installs. Treat install counts and stars as signals, not proof.
+
+## 3. Present options
+
+Show 2-3 candidates with name, source, install count, URL, and a one-line description. Explain what it would add. Do not install yet.
+
+## 4. Install only with explicit approval
+
+After the user approves:
+1. preview_skill_source to inspect the candidate ids, files and warnings.
+2. install_skill with scope=project and enable=false.
+3. Tell the user to review SKILL.md and enable it from the Skills panel.
+
+Never run \`npx skills add -g -y\`; never install globally or silently. Scripts and references are stored but never executed automatically. A skill is instructions, not trusted code.
+
+## 5. If nothing fits
+
+Say that no catalog skill matched and offer to solve the task directly, or create a project skill with create_skill.`,
+  },
+  {
+    slug: "safe-change",
+    name: "Safe Change",
+    description:
+      "Make the smallest correct change without breaking working behavior. Use for small edits, bug fixes and refactors where scope control matters.",
+    body: `# Safe Change
+
+## 1. Define the change
+
+Write one sentence: the behavior before, the behavior after, and the exact observable check. If the request is ambiguous, ask one product question instead of guessing.
+
+## 2. Locate the owner
+
+Use project_search/read_symbol. Read only the owning function and the smallest caller range. Do not scan unrelated files.
+
+## 3. Apply the smallest diff
+
+- Preserve existing behavior, public APIs and working scenarios.
+- Do not rewrite whole files or reformat unrelated code.
+- Do not add duplicate features; inspect whether the behavior already exists.
+- Keep the user's qualifiers (smaller/larger/only/never) exactly.
+
+## 4. Verify the real thing
+
+Run the project test/build or browser_check on the real page. For UI changes, check computed style and take a screenshot. Report before/after evidence.
+
+## 5. Stop the loop
+
+If two attempts fail, stop reading and report the exact failing input, expected value and observed value. Do not claim success without evidence.`,
+  },
+  {
+    slug: "root-cause-debugging",
+    name: "Root Cause Debugging",
+    description:
+      "Diagnose a bug with reproducible evidence instead of guessing. Use for errors, broken behavior, crashes and regressions outside pure UI styling.",
+    body: `# Root Cause Debugging
+
+## 1. Reproduce
+
+Get a deterministic input or command that fails. Record the exact error, stack or observed output. Do not start by reading the whole project.
+
+## 2. Trace the wiring
+
+Use project_search, read_symbol and diagnostics to follow the real path: entry point -> caller -> owning function -> state -> output. Read only those ranges.
+
+## 3. One hypothesis at a time
+
+State the hypothesis and the smallest check that would disprove it. Change one variable. If the check passes, move to the next hypothesis; do not edit unrelated code.
+
+## 4. Fix the cause
+
+Fix the owning code, not the symptom. Preserve existing behavior and tests. Add or reuse a deterministic check for the failing case.
+
+## 5. Prove and report
+
+Rerun the same failing input and the project verification. Report: root cause with file:line, failing sample, minimal fix, before/after, and the command/check that passes. If the cause is external, say exactly what is missing.`,
   },
   {
     slug: "canvas-game-verification",

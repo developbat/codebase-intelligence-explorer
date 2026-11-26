@@ -89,6 +89,7 @@ import type {
   ToolchainReport,
 } from "../../shared/toolchains";
 import type {
+  SkillCatalogResponse,
   SkillDetail,
   SkillFileResponse,
   SkillInstallRequest,
@@ -334,6 +335,13 @@ export const api = {
 
   skills: {
     list: (id: string) => request<SkillListResponse>(`/api/projects/${id}/skills`),
+
+    search: (id: string, query: string, owner?: string) =>
+      request<SkillCatalogResponse>(
+        `/api/projects/${id}/skills/search?q=${encodeURIComponent(query)}${
+          owner ? `&owner=${encodeURIComponent(owner)}` : ""
+        }`,
+      ),
 
     previewSource: (id: string, source: string, ref?: string) =>
       request<SkillSourcePreview>(`/api/projects/${id}/skills/preview`, {

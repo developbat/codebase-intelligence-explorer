@@ -410,8 +410,12 @@ export async function installSkills(
       installedAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
-    if (request.enable) {
+    if (request.enable === true) {
       await setSkillEnabled(projectRoot, projectId, key, true, { dataDir, homeDir: options.homeDir }).catch(() => undefined);
+    } else if (request.enable === false) {
+      // New skills default to enabled in the scanner; discovery installs must
+      // stay disabled until the user has reviewed SKILL.md.
+      await setSkillEnabled(projectRoot, projectId, key, false, { dataDir, homeDir: options.homeDir }).catch(() => undefined);
     }
     installed.push({
       key,
@@ -422,7 +426,7 @@ export async function installSkills(
       ref: loaded.ref,
       hash,
       commitSha: loaded.commitSha,
-      enabled: request.enable === true,
+      enabled: request.enable !== false,
     });
   }
   await writeLock(root, lock);

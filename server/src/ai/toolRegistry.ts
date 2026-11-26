@@ -726,6 +726,14 @@ const TOOL_SPECS: AgentToolSpec[] = [
     args: { required: [["path", "file", "filePath", "target"], ["outputPath", "to"]], types: { path: "string", outputPath: "string" } },
   },
   {
+    action: "search_skills",
+    groups: ["skills"],
+    example: '{"action":"search_skills","args":{"query":"ui design"}}',
+    description: "Search the public skills.sh catalog for installable skills.",
+    whenToUse: "Use when the user asks for a skill or a capability is missing; preview and install only with explicit approval.",
+    args: { required: [["query"]], types: { query: "string", owner: "string", limit: "number" } },
+  },
+  {
     action: "install_skill",
     groups: ["skills"],
     example: '{"action":"install_skill","args":{"source":"owner/repo","ref":"main","skills":["skill-folder"],"scope":"project","enable":true}}',

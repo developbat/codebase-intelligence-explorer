@@ -627,6 +627,18 @@ const SKILL_SIGNALS: Record<string, { strong: string[]; weak: string[] }> = {
     strong: ["canvas", "oyun", "game", "fps"],
     weak: ["sprite", "score", "puan", "timer", "sayaç", "sayac", "frame", "render"],
   },
+  "skill-discovery": {
+    strong: ["find a skill", "skill ara", "skill bul", "discover skill", "skill öner", "skill oner"],
+    weak: ["skill", "capability", "extension", "plugin", "yetenek"],
+  },
+  "safe-change": {
+    strong: ["safe change", "minimal change", "smallest change", "küçük değişiklik", "kucuk degisiklik"],
+    weak: ["preserve behavior", "regression", "scope", "risk", "davranışı koru", "davranisi koru"],
+  },
+  "root-cause-debugging": {
+    strong: ["debug", "root cause", "kök neden", "kok neden", "hata ayıkla", "hata ayikla"],
+    weak: ["bug", "error", "crash", "broken", "fail", "hata"],
+  },
 };
 
 function autoMatchedSkills(records: SkillRecord[], instruction: string): SkillRecord[] {

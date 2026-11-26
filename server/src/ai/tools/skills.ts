@@ -8,6 +8,7 @@ import {
   previewSkillSource,
   removeInstalledSkill,
 } from "../../skillInstall";
+import { searchSkillCatalog } from "../../skillSearch";
 import type { AgentToolHandler, AgentToolResult } from "./types";
 
 const listSkillsHandler: AgentToolHandler = async (context): Promise<AgentToolResult> => {
@@ -43,6 +44,27 @@ const loadSkillHandler: AgentToolHandler = async (context): Promise<AgentToolRes
     ]
       .filter((line) => line !== "")
       .join("\n"),
+    ok: true,
+  };
+};
+
+const searchSkillsHandler: AgentToolHandler = async (context): Promise<AgentToolResult> => {
+  const query = typeof context.args.query === "string" ? context.args.query.trim() : "";
+  if (query.length < 2) throw new Error("Enter at least 2 characters to search skills.");
+  const result = await searchSkillCatalog(query, {
+    owner: typeof context.args.owner === "string" ? context.args.owner : undefined,
+    limit: Number(context.args.limit) || undefined,
+  });
+  context.log("info", "Skill catalog searched", `${result.skills.length} results`);
+  return {
+    observation: [
+      `${result.skills.length} catalog result(s) for "${query}".`,
+      ...result.skills.map(
+        (item) =>
+          `${item.source}@${item.skillId} · ${item.name} · ${item.installs} installs · ${item.url}`,
+      ),
+      "Install only after preview_skill_source and explicit user approval.",
+    ].join("\n"),
     ok: true,
   };
 };
@@ -153,6 +175,7 @@ const removeSkillHandler: AgentToolHandler = async (context): Promise<AgentToolR
 
 export const SKILL_TOOL_HANDLERS: Record<string, AgentToolHandler> = {
   list_skills: listSkillsHandler,
+  search_skills: searchSkillsHandler,
   load_skill: loadSkillHandler,
   preview_skill_source: previewSkillSourceHandler,
   install_skill: installSkillHandler,

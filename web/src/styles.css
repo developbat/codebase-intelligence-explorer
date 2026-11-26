@@ -16172,6 +16172,85 @@ button.canvas-stat {
   background: rgba(12, 22, 36, 0.72);
 }
 
+.skills-discover {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-bottom: 8px;
+  border-bottom: 1px dashed var(--line);
+}
+
+.skills-discover-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: #9fb6d1;
+  font-size: 8px;
+}
+
+.skills-discover-head strong {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #eef6ff;
+  font-size: 9px;
+}
+
+.skills-discover-note {
+  color: #7f9bbd;
+  font-size: 7.5px;
+  line-height: 1.45;
+}
+
+.skills-catalog-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 220px;
+  overflow: auto;
+}
+
+.skills-catalog-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 5px 7px;
+  border: 1px solid #1d3448;
+  border-radius: 6px;
+  background: #0b1725;
+}
+
+.skills-catalog-item strong {
+  display: block;
+  color: #e6f2ff;
+  font-size: 8.5px;
+}
+
+.skills-catalog-item small {
+  display: block;
+  color: #7f9bbd;
+  font-size: 7.5px;
+}
+
+.skills-catalog-actions {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex: 0 0 auto;
+}
+
+.skills-catalog-actions a {
+  display: inline-flex;
+  color: #5eead4;
+}
+
+.skills-catalog-actions button {
+  padding: 3px 7px;
+  font-size: 8px;
+}
+
 .skills-add-row {
   display: flex;
   gap: 6px;

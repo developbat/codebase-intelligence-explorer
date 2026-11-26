@@ -24,6 +24,7 @@ test("full catalog exposes every group when no filter is provided", () => {
   assert.match(catalog, /"action":"read_document"/);
   assert.match(catalog, /"action":"write_file"/);
   assert.match(catalog, /"action":"load_skill"/);
+  assert.match(catalog, /"action":"search_skills"/);
 });
 
 test("read-only catalogs hide writes and commands but keep notes", () => {
@@ -77,6 +78,7 @@ test("every tool action is unique and grouped", () => {
   assert.ok(toolGroupsFor("write_file").includes("edit"));
   assert.ok(toolGroupsFor("browser_check").includes("browser"));
   assert.ok(toolGroupsFor("load_skill").includes("core"));
+  assert.ok(toolGroupsFor("search_skills").includes("skills"));
   for (const tool of allToolSpecs()) {
     assert.ok(tool.description.length > 0);
     assert.ok(tool.whenToUse.length > 0);

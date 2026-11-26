@@ -63,6 +63,34 @@ test("GitHub-style tar archives parse skill files and pax long paths", () => {
   assert.equal(files.get(deep!)?.toString("utf8"), "deep content\n");
 });
 
+test("installs a reviewed skill as disabled when enable is false", async () => {
+  const base = await fs.mkdtemp(path.join(os.tmpdir(), "cie-skills-off-"));
+  const source = path.join(base, "source");
+  const project = path.join(base, "project");
+  const dataDir = path.join(base, "data");
+  await fs.mkdir(project, { recursive: true });
+  await writeSkill(source, "gamma", "Gamma helper", "Gamma body");
+  try {
+    const preview = await previewSkillSource(source);
+    const gamma = preview.candidates.find((candidate) => candidate.name === "gamma");
+    assert.ok(gamma);
+    const installed = await installSkills(
+      project,
+      "project-off",
+      { source, skills: [gamma.id], scope: "project", enable: false },
+      { dataDir },
+    );
+    assert.equal(installed.installed[0]?.enabled, false);
+    const listed = await listSkills(project, "project-off", { dataDir });
+    assert.equal(
+      listed.skills.find((skill) => skill.key === installed.installed[0]?.key)?.enabled,
+      false,
+    );
+  } finally {
+    await fs.rm(base, { recursive: true, force: true });
+  }
+});
+
 test("previews, installs, updates and removes a local skill pack", async () => {
   const base = await fs.mkdtemp(path.join(os.tmpdir(), "cie-skills-"));
   const source = path.join(base, "source");

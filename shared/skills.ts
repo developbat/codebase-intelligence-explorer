@@ -112,3 +112,17 @@ export interface SkillInstallResult {
   registryPath: string;
   warnings: string[];
 }
+
+export interface SkillCatalogItem {
+  id: string;
+  name: string;
+  source: string;
+  skillId: string;
+  installs: number;
+  url: string;
+}
+
+export interface SkillCatalogResponse {
+  query: string;
+  skills: SkillCatalogItem[];
+}
