@@ -186,7 +186,7 @@ Rules:
 - Do not invent files that do not exist; inspect is allowed later by the executor.
 - Use the project map and goal-relevant symbols to name the correct file/function. If a symbol hint points to a file, use that file as the primary edit target. Prefer files loaded by the HTML entry or imported by it. Do not add runtime behavior to a file that is not loaded; verify an import before using an unreferenced file.
 - Do not invent cleanup/dedup tasks unless the project map or a concrete duplicate shows it is needed. Verify first.
-- If the Existing-code preflight shows a requested feature already exists, either omit it or make it a verification-only task that changes no files. Never create a task that re-adds it.
+- If the Existing-code preflight shows a requested feature already exists, either omit it or make it a verification-only task that changes no files. A verification-only task must assert presence AND the requested shape, placement and acceptance on the real page; a symbol, icon constant, element id or plain "visible" check is not enough. Never create a task that re-adds it.
 - The context notes in .cie/agent/context.md and .cie/agent/TASKS.md are for continuity; you may mention them.
 - Write task titles, details and acceptance in English. Keep quoted user text, file paths, function names and code identifiers unchanged.
 - Never return placeholder tasks such as "...", "TODO", "TBD" or "fill me". Every task must contain a real title, detail and acceptance.
@@ -967,6 +967,17 @@ export function summaryAllowsNoChanges(summary: string): boolean {
   );
 }
 
+/**
+ * A narrower signal than summaryAllowsNoChanges: the report explicitly says a
+ * requested item already exists or needed no change. This can happen inside a
+ * task that changed another file, so it must be checked per request.
+ */
+export function summaryClaimsAlreadyPresent(summary: string): boolean {
+  return /already (?:present|exists|implemented|applied|there|complete|satisf(?:y|ies|ied)|fits|matches|renders|sits|works|has)|no (?:further )?(?:code )?changes? (?:are |was |were )?(?:needed|required)|nothing needed to change|none needed|nothing (?:was|is) (?:changed|rewritten)|no (?:changes|modifications) (?:made|required)|zaten (?:var|mevcut|tamam|tam|işlevsel|karşılan|uyumlu|uygulanmış|eklenmiş|yapılmış|mevcutmuş)|değişiklik gerekmiyor|gerek yok/i.test(
+    summary,
+  );
+}
+
 export function compactRetryContext(result: AiAgentResult): string {
   const failed = result.steps
     .filter((step) => !step.ok)
@@ -1432,9 +1443,11 @@ function taskInstruction(
   const brief = resolveWorkBrief(task.title);
   const extractionTask = brief?.mode === "extract";
   const scoreVerification = !extractionTask &&
-    /presskeys|scoring|score|puan|canvas|game|oyun/i.test(
+    /\bpresskeys\b|scoring|\bscore\b|\bpuan\b|çarpma|\bmultiply\b|skor/i.test(
       `${task.title}\n${task.detail}\n${task.acceptance ?? ""}`,
     );
+  const visualVerification =
+    !extractionTask && taskRequestsVisualShapeOrPlacement(task);
   const prior = priorTasks
     .filter((item) => item.status === "done" && item.resultSummary)
     .slice(-8)
@@ -1476,7 +1489,7 @@ function taskInstruction(
       ? "Do not edit files and do not add runtime checks; the extraction table is the evidence."
       : inspection
         ? "This is a read-only inspection/diagnosis task. Do not edit files. Collect the minimum evidence, then finish with a compact diagnosis: root cause, file:line evidence, runtime proof, and the exact fix that would be needed. Do not keep reading after you have evidence."
-        : "Before editing, check whether the requested behavior already exists. If it does, verify it and finish with evidence instead of adding a duplicate implementation.",
+        : "Before editing, check whether the requested behavior already exists. Presence alone is not enough: verify presence, the exact shape/form, the exact placement and the acceptance behavior. Cite file:line and rendered evidence. If any of the four differs, edit; do not label it 'already present'.",
     extractionTask
       ? ""
       : existingCode.length > 0
@@ -1490,13 +1503,13 @@ function taskInstruction(
     changedSinceGoal.length > 0 && !extractionTask
       ? `Files changed since this goal started: ${changedSinceGoal.join(
           ", ",
-        )}. They may contain partial work from an interrupted run. Inspect them first. If the requested behavior already exists, verify it and finish with evidence; do not rewrite or duplicate it.`
+        )}. They may contain partial work from an interrupted run. Inspect them first. A symbol, icon constant, element id or 'visible' check only proves presence; also verify shape, placement and acceptance on the real page. If all four match, finish with file:line and rendered evidence; otherwise edit. Do not rewrite or duplicate unrelated work.`
       : "",
     extractionTask ? "" : "Do not re-read files already fully read by a previous task unless the current task needs exact content after a change.",
     extractionTask ? "" : "Batch up to 4 independent read-only calls in one reply (read_file, find_in_file, search_code, list_files). One context round-trip per batch instead of one per read.",
     extractionTask ? "" : "Put all UI assertions into one browser_check call (up to 6 steps). Run the verification command once after the final edit; do not repeat a successful check unless code changed.",
     extractionTask ? "" : "Do not create .cie/agent/checks or .cie/agent/scenarios files for a one-off verification; use the existing tests and browser_check.",
-    extractionTask ? "" : "Before the first edit, search for the exact feature name, symbol or label. If it already exists, verify it and finish with evidence instead of adding a duplicate.",
+    extractionTask ? "" : "Before the first edit, search for the exact feature name, symbol or label. If it already exists, verify presence + shape + placement + acceptance with file:line and rendered evidence before finishing; a selector, icon constant or element id alone is not proof.",
     extractionTask
       ? ""
       : "Compare the task detail with the original user request before editing. If the detail narrows or contradicts it (for example the original says the smaller operand, while the detail says the second operand), follow the original request and state the discrepancy.",
@@ -1506,6 +1519,9 @@ function taskInstruction(
       : "For scoring/round logic use the canvas-game-verification recipe: find the owning function, then drive the real page with browser_check pressKeys and assert #score deltas (before/after). Never call startRound, round or state from eval. If the behavior already exists, finish with a before/after evidence table.",
     scoreVerification
       ? `Required score-verification shape: {"action":"browser_check","args":{"path":"index.html","steps":[{"action":"pressKeys","keys":["3","0","*","1","Enter"]},{"action":"expectText","selector":"#score","text":"1"}]}}. Prepare a deterministic target/operation with one short eval wait before these steps; do not call startRound/round/state from eval. First check .cie/agent/scenarios for a matching saved scenario and run it with run_test_scenario.`
+      : "",
+    visualVerification
+      ? `Required visual-verification shape: one browser_check with an eval step that returns the rendered geometry (getBoundingClientRect for DOM placement, or canvas getImageData for a drawn shape) plus an expectText/expectValue assertion. A symbol, icon constant, element id or expectVisible only proves presence; it does not prove shape or placement. Measure each requested item separately (for example, the inventory rect and the key pixels); one item's geometry does not prove another. If the rendered result differs, edit the code.`
       : "",
     extractionTask
       ? ""
@@ -1811,6 +1827,112 @@ export function isInteractiveUiCheck(step: AiAgentStep): boolean {
       step.observation ?? "",
     )
   );
+}
+
+const VISUAL_SHAPE_PLACEMENT =
+  /\b(?:shape|shaped|icon|glyph|sprite|drawn|draw|render(?:ed|ing)?|top[-\s]?left|left[-\s]?top|top[-\s]?right|right[-\s]?top|bottom[-\s]?left|bottom[-\s]?right|corner|position(?:ed)?|placement|placed|layout|align(?:ed|ment)?)\b|şekil(?:inde|li)?|ikon|simge|sol[-\s]?üst|üst[-\s]?sol|sağ[-\s]?üst|üst[-\s]?sağ|sol[-\s]?alt|sağ[-\s]?alt|köşe|konum|hizala|çiz|görünüm/i;
+
+/** True when the request is about how something looks or where it sits. */
+export function taskRequestsVisualShapeOrPlacement(task: ProjectTask): boolean {
+  return VISUAL_SHAPE_PLACEMENT.test(`${task.title}\n${task.detail}\n${task.acceptance ?? ""}`);
+}
+
+/** A real file:line reference, not just a bare symbol or file name. */
+export function summaryCitesFileLines(summary: string): boolean {
+  return /(?:^|[\s(`"'])[\w./@-]+\.(?:[cm]?[jt]sx?|vue|svelte|astro|html?|css|scss|sass|less|php|py|go|rs|java|kt|kts|cs|rb|swift|scala|json|toml|ya?ml|md|txt|sh|sql):\d+(?:-\d+)?/i.test(
+    summary,
+  );
+}
+
+/**
+ * Rendered geometry evidence: an eval step that reads a bounding box or canvas
+ * pixels, plus an assertion. A "visible" check or a symbol constant does not
+ * prove the requested shape or placement.
+ */
+export function isGeometryEvidenceCheck(step: AiAgentStep): boolean {
+  if (!step.ok) return false;
+  if (!["browser_check", "game_check", "run_test_scenario"].includes(step.action)) {
+    return false;
+  }
+  const raw = step.args?.steps;
+  const steps = Array.isArray(raw)
+    ? raw.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object")
+    : [];
+  const hasGeometryEval = steps.some((item) => {
+    if (String(item.action ?? "") !== "eval") return false;
+    const script = String(item.script ?? "");
+    return /getBoundingClientRect|getClientRects|getImageData|offsetLeft|offsetTop|offsetWidth|offsetHeight|clientWidth|clientHeight|toDataURL/i.test(
+      script,
+    );
+  });
+  const hasAssertion =
+    steps.some((item) =>
+      ["expectText", "expectValue", "expectVisible", "expectCount", "expectStable"].includes(
+        String(item.action ?? ""),
+      ),
+    ) ||
+    steps.some(
+      (item) =>
+        String(item.action ?? "") === "eval" && typeof item.expectText === "string",
+    );
+  if (hasGeometryEval && hasAssertion) return true;
+  const observation = step.observation ?? "";
+  return (
+    /getBoundingClientRect|getImageData|bounding box|pixel|canvas/i.test(observation) &&
+    /expectText|expectValue|expectVisible|expectCount|expectStable|PASS/i.test(observation)
+  );
+}
+
+/**
+ * A changed visual task is not verified by "the page loads" or a visibility
+ * check. It needs a rendered-geometry assertion, even when files changed.
+ */
+export function needsRenderedGeometryEvidence(
+  task: ProjectTask,
+  steps: AiAgentStep[],
+  projectHasUi: boolean,
+): boolean {
+  return (
+    projectHasUi &&
+    taskRequestsVisualShapeOrPlacement(task) &&
+    !steps.some(isGeometryEvidenceCheck)
+  );
+}
+
+/**
+ * A task may only complete without an edit when it proves the four acceptance
+ * dimensions: presence, shape, placement and behavior. This is the deterministic
+ * guard behind "Already present (verified, no edit)".
+ */
+export function noChangeCompletionEvidence(
+  task: ProjectTask,
+  result: Pick<AiAgentResult, "summary" | "steps" | "changedFiles">,
+  projectHasUi: boolean,
+): { ok: boolean; reason: string } {
+  if (!summaryCitesFileLines(result.summary ?? "")) {
+    return {
+      ok: false,
+      reason:
+        "No-change completion rejected: cite the exact file:line for every item claimed as already present.",
+    };
+  }
+  const visual = taskRequestsVisualShapeOrPlacement(task);
+  const hasGeometry = result.steps.some(isGeometryEvidenceCheck);
+  if (visual && !hasGeometry) {
+    return {
+      ok: false,
+      reason:
+        "No-change completion rejected: the request asks for a visual shape or placement. A constant, icon name, element id or plain 'visible' check only proves presence. Verify the rendered result with browser_check eval (getBoundingClientRect or getImageData) plus an assertion, or edit the code to match the requested shape/placement.",
+    };
+  }
+  if (!visual && projectHasUi && !hasGeometry && !result.steps.some(isInteractiveUiCheck)) {
+    return {
+      ok: false,
+      reason:
+        "No-change completion rejected: add a passing interactive real-page check with an assertion, or edit the code.",
+    };
+  }
+  return { ok: true, reason: "" };
 }
 
 /**
@@ -3425,8 +3547,25 @@ ${collapsed.tasks[0].checklist
         options.intent?.kind === "run");
     const inspectionAnswer =
       inspectionTask && isInspectionAnswer(result.summary);
+    const projectHasHtml =
+      analysis.files.some((file) => /\.html?$/i.test(file.path)) ||
+      result.changedFiles.some((file) => /\.html?$/i.test(file));
+    const projectHasUi =
+      analysis.files.some((file) => /\.(?:html?|jsx|tsx|vue|svelte)$/i.test(file.path)) ||
+      result.changedFiles.some((file) => /\.(?:html?|jsx|tsx|vue|svelte)$/i.test(file));
+    // "Already present" is only accepted with presence + shape + placement +
+    // acceptance evidence, never from a symbol/icon/selector match alone. This
+    // also applies when another requirement in the same task did change a file.
+    const noChangeClaim =
+      summaryClaimsAlreadyPresent(result.summary) ||
+      (task.buildSession === true && result.changedFiles.length === 0);
+    const noChangeEvidence = noChangeClaim
+      ? noChangeCompletionEvidence(task, result, projectHasUi)
+      : { ok: true, reason: "" };
     const summaryAllowsCompletion =
-      summaryAllowsNoChanges(result.summary) && !summaryReportsBlocker(result.summary);
+      summaryAllowsNoChanges(result.summary) &&
+      noChangeEvidence.ok &&
+      !summaryReportsBlocker(result.summary);
     const hadPassedRealBrowserCheck = result.steps.some(
       (step) => step.action === "browser_check" && step.ok,
     );
@@ -3438,6 +3577,7 @@ ${collapsed.tasks[0].checklist
       result.changedFiles.length === 0 &&
       !mutatingCommand &&
       hadPassedRealBrowserCheck &&
+      noChangeEvidence.ok &&
       !summaryReportsBlocker(result.summary);
     const writeWithoutChange =
       !inspectionTask &&
@@ -3454,9 +3594,6 @@ ${collapsed.tasks[0].checklist
       !summaryAllowsCompletion &&
       !verifiedNoChange;
     const pendingWork = !inspectionTask && reportsRemainingWork(result.summary);
-    const projectHasHtml =
-      analysis.files.some((file) => /\.html?$/i.test(file.path)) ||
-      result.changedFiles.some((file) => /\.html?$/i.test(file));
     const uiFilesChanged = result.changedFiles.some((file) =>
       /\.(?:html?|css|scss|sass|less|jsx|tsx|vue|svelte|mjs|cjs|js)$/i.test(file),
     );
@@ -3495,24 +3632,34 @@ ${collapsed.tasks[0].checklist
         result.stoppedReason === "max_steps" ||
         result.stoppedReason === "budget");
     const missingUiVerification = needsUiVerification && !microVerified;
+    const missingVisualVerification =
+      !inspectionTask &&
+      needsRenderedGeometryEvidence(task, result.steps, projectHasUi);
     let status: ProjectTask["status"] =
       result.stoppedReason === "aborted" || result.stoppedReason === "budget"
         ? "blocked"
         : inspectionAnswer
           ? "done"
           : result.stoppedReason !== "finished" ||
+            !noChangeEvidence.ok ||
             malformedToolReply ||
             writeWithoutChange ||
             verificationBlocker ||
             pendingWork ||
-            missingUiVerification
+            missingUiVerification ||
+            missingVisualVerification
           ? "failed"
           : "done";
     const requiredScenarioSatisfied =
       !requiredScenario ||
       Boolean(scenarioRescue?.ok) ||
       result.logs?.some((entry) => entry.label === "Required scenario passed");
-    if (scenarioRescue?.ok || (microCompleted && requiredScenarioSatisfied)) status = "done";
+    if (
+      scenarioRescue?.ok ||
+      (microCompleted && requiredScenarioSatisfied && !missingVisualVerification)
+    ) {
+      status = "done";
+    }
     const unavailableModel = /error 410\b|end of life|no longer available|model_not_found|model .* not found|does not exist/i.test(
       result.summary,
     );
@@ -4037,8 +4184,9 @@ ${collapsed.tasks[0].checklist
       } else if (!autoSwitchModels) {
         queue = markTask(queue, task.id, {
           status: "failed",
-          notes:
-            "Automatic model switching is disabled. Choose another model or enable it in Settings → General.",
+          notes: `Automatic model switching is disabled. Choose another model or enable it in Settings → General.${
+            noChangeEvidence.ok ? "" : ` ${noChangeEvidence.reason}`
+          }`,
         });
       } else if (!modelFailure) {
         // The provider answered normally; the task itself was incomplete.
@@ -4056,6 +4204,12 @@ ${collapsed.tasks[0].checklist
           commands: task.commands ?? [],
           retryContext: compactRetryContext(result),
           notes: `Retry the same model: the provider worked, but the task was incomplete. Continue from the current files, complete the missing work and verify it. Do not restart from scratch.${
+            noChangeEvidence.ok ? "" : ` ${noChangeEvidence.reason}`
+          }${
+            missingVisualVerification
+              ? " No rendered-geometry check ran for the requested shape/placement. Add one browser_check step that reads getBoundingClientRect (DOM position) or canvas getImageData (drawn shape) and assert it with expectText/expectValue; a symbol, icon constant, element id or expectVisible is not proof."
+              : ""
+          }${
             missingUiVerification
               ? ` No interactive real-page check ran after the UI change. Run browser_check or game_check on the actual entry page with a click/fill/press/eval and an assertion; for a canvas game, click a key and check the HUD/status.${uiSmokeSummary ? ` ${uiSmokeSummary}` : ""}`
               : ""

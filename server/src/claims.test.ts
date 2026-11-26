@@ -81,3 +81,21 @@ test("rejects read and browser claims without matching evidence", () => {
 test("does not flag explicit negative statements", () => {
   assert.equal(auditClaims("No file was changed; tests were not run.", base).issues.length, 0);
 });
+
+test("does not treat the harness verification note as a test claim", () => {
+  const summary = `## Sonuç
+İstenen üç davranış gerçek sayfada browser_check ile doğrulandı (tüm adımlar PASS).
+
+## Değişen dosyalar
+- game.js
+
+**Verification:** No lint/typecheck/test/build command was detected for this project.`;
+  assert.equal(
+    auditClaims(summary, {
+      ...base,
+      changedFiles: ["game.js"],
+      browserChecks: [{ ok: true, assertions: 3 }],
+    }).issues.length,
+    0,
+  );
+});

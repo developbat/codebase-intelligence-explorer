@@ -1271,6 +1271,25 @@ button:disabled {
   flex: none;
 }
 
+.rescan-status {
+  position: fixed;
+  top: 58px;
+  right: 16px;
+  z-index: 80;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 12px;
+  border: 1px solid rgba(34, 211, 238, 0.35);
+  border-radius: 999px;
+  background: rgba(8, 47, 58, 0.92);
+  color: #a5e9f5;
+  font-size: 10px;
+  box-shadow: 0 10px 30px -12px rgba(0, 0, 0, 0.7);
+  pointer-events: none;
+  animation: fadeIn 0.15s ease both;
+}
+
 .workspace-update-button {
   margin-left: auto;
   height: 23px;
@@ -10853,6 +10872,13 @@ button.canvas-stat {
 
 .studio-workflow-message.user {
   align-items: flex-end;
+}
+
+.studio-workflow-message.is-note .studio-workflow-text {
+  border-style: dashed;
+  border-color: rgba(94, 234, 212, 0.22);
+  background: rgba(15, 118, 110, 0.08);
+  color: #bfeee8;
 }
 
 .studio-workflow-role {

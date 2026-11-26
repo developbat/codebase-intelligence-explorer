@@ -39,7 +39,13 @@ function unique(values: string[]): string[] {
 }
 
 export function auditClaims(summary: string, evidence: ClaimEvidence): ClaimAudit {
-  const text = summary.trim();
+  // The harness appends its own "**Verification:** No lint/typecheck/test/build
+  // command was detected" line. That line mentions tests but is a negative
+  // capability note, not a model claim. Strip harness notes before auditing.
+  const text = summary
+    .replace(/\n?\*\*Verification:\*\*[^\n]*/gi, "")
+    .replace(/\n?\*\*Evidence warning:\*\*[^\n]*/gi, "")
+    .trim();
   const negative = NEGATIVE.test(text);
   const claims: string[] = [];
   const issues: string[] = [];

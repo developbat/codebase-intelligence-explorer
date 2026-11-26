@@ -858,6 +858,7 @@ export function CodeStudio({
   type StudioChatMessage = {
     role: "user" | "assistant";
     content: string;
+    note?: boolean;
     evidence?: { path: string; startLine?: number }[];
     steps?: AiAgentStep[];
     logs?: AiAgentLogEntry[];
@@ -2731,6 +2732,20 @@ export function CodeStudio({
     return files.some((file) => /\.(?:html?|css|jsx?|tsx?|vue|svelte|php)$/i.test(file));
   }
 
+  function workspaceUpdateNote(files: string[], visual: boolean): string {
+    const shown = files.slice(0, 3).join(", ");
+    const more = files.length > 3 ? ` (+${files.length - 3})` : "";
+    return t(
+      "Files changed on disk: {files}. {preview} The code graph refreshes in the background; use the workspace banner when you want to reload the analysis. No page reload was performed.",
+      {
+        files: `${shown}${more}`,
+        preview: visual
+          ? t("The preview was refreshed in place.")
+          : t("The change report is ready in the right panel."),
+      },
+    );
+  }
+
   async function refreshChangeReport(openChanges = true) {
     setChangeReportBusy(true);
     setChangeReportError(null);
@@ -2817,9 +2832,10 @@ export function CodeStudio({
   function serializeChatMessages(messages: StudioChatMessage[]) {
     return messages
       .slice(-40)
-      .map(({ role, content, evidence, tokenUsage, logs, plan, planPath, mode, provider, model, taskQueue, intent, changeReport, readMap, extraction, changedFiles }) => ({
+      .map(({ role, content, note, evidence, tokenUsage, logs, plan, planPath, mode, provider, model, taskQueue, intent, changeReport, readMap, extraction, changedFiles }) => ({
         role,
         content,
+        note,
         evidence,
         tokenUsage,
         logs: logs?.slice(-150),
@@ -2997,7 +3013,9 @@ export function CodeStudio({
       : baseText;
     const userMessage = { role: "user" as const, content: text };
     const sentAttachment = attachment;
-    let history = chatMessages.map((message) => ({ role: message.role, content: message.content }));
+    let history = chatMessages
+      .filter((message) => !message.note)
+      .map((message) => ({ role: message.role, content: message.content }));
     if (appendUser) {
       setChatMessages((current) => [...current, userMessage]);
       setChatInput("");
@@ -3005,7 +3023,10 @@ export function CodeStudio({
     } else {
       const last = chatMessages[chatMessages.length - 1];
       if (last?.role === "user" && last.content === text) {
-        history = chatMessages.slice(0, -1).map((message) => ({ role: message.role, content: message.content }));
+        history = chatMessages
+          .slice(0, -1)
+          .filter((message) => !message.note)
+          .map((message) => ({ role: message.role, content: message.content }));
       }
     }
     setClarification(null);
@@ -3218,22 +3239,23 @@ export function CodeStudio({
         if (result.changeReport) {
           setAgentChangeReport(result.changeReport);
           setSelectedChangePath(result.changeReport.files[0]?.path ?? "");
-          setRightTab(destination);
-          if (visual) setPreviewKey((value) => value + 1);
-          keepRightTabRef.current = true;
-          onRescan();
-        } else if (onAnalysisLoaded) {
-          await refreshChangeReport(false);
-          setRightTab(destination);
-          if (visual) setPreviewKey((value) => value + 1);
-        } else {
-          setRightTab(destination);
-          if (visual) setPreviewKey((value) => value + 1);
-          keepRightTabRef.current = true;
-          if (useTaskLoop) {
-            window.setTimeout(() => onRescan(), 500);
-          }
         }
+        setRightTab(destination);
+        if (visual) setPreviewKey((value) => value + 1);
+        keepRightTabRef.current = true;
+        // Never start a full analysis/rescan here. It showed a blocking dark
+        // overlay and looked like a page reload. The file watcher refreshes the
+        // graph in the background; the info belongs in the conversation.
+        setChatMessages((current) => [
+          ...current,
+          {
+            role: "assistant",
+            model: t("Workspace"),
+            note: true,
+            content: workspaceUpdateNote(result.changedFiles, visual),
+            changedFiles: result.changedFiles,
+          },
+        ]);
       }
     }
     setChatLiveSteps([]);
@@ -4111,7 +4133,7 @@ export function CodeStudio({
                   workflowMessage.content,
                 );
               return (
-              <div key={index} className={`studio-workflow-message ${workflowMessage.role}`}>
+              <div key={index} className={`studio-workflow-message ${workflowMessage.role}${workflowMessage.note ? " is-note" : ""}`}>
                 <div className="studio-workflow-role">
                   {workflowMessage.role === "user" ? <User size={11} /> : <Bot size={11} />}
                   <span>

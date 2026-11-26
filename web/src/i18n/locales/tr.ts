@@ -624,6 +624,12 @@ export const tr: Dictionary = {
   // Analysis overlay
   "Analyzing codebase": "Kod tabanı analiz ediliyor",
   "Rescanning project": "Proje yeniden taranıyor",
+  "Refreshing the analysis in place…": "Analiz yerinde yenileniyor…",
+  "Files changed on disk: {files}. {preview} The code graph refreshes in the background; use the workspace banner when you want to reload the analysis. No page reload was performed.":
+    "Diskte değişen dosyalar: {files}. {preview} Kod grafiği arka planda yenilenir; analizi yüklemek istediğinde üstteki çalışma alanı bildirimini kullan. Sayfa yenilenmedi.",
+  "The preview was refreshed in place.": "Önizleme yerinde yenilendi.",
+  "The change report is ready in the right panel.": "Değişiklik raporu sağ panelde hazır.",
+  "Workspace": "Çalışma alanı",
   "Loading project": "Proje yükleniyor",
   "Reading source in read-only mode.": "Kaynak kod salt okunur biçimde işleniyor.",
   "Opening the saved knowledge graph…": "Kaydedilmiş knowledge graph açılıyor…",

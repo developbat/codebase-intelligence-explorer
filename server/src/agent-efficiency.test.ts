@@ -16,8 +16,14 @@ import {
   taskLooksLikeVerification,
   taskLooksLikeWrite,
   summaryAllowsNoChanges,
+  summaryClaimsAlreadyPresent,
   reviewFileExcerpt,
   summaryReportsBlocker,
+  isGeometryEvidenceCheck,
+  needsRenderedGeometryEvidence,
+  noChangeCompletionEvidence,
+  summaryCitesFileLines,
+  taskRequestsVisualShapeOrPlacement,
   splitGoalSections,
   collapseToBuildSession,
   isSmallProjectForBuildSession,
@@ -111,6 +117,170 @@ test("verified no-change summaries are accepted as completion", () => {
     true,
   );
   assert.equal(summaryAllowsNoChanges("The task is incomplete; route wiring is missing."), false);
+});
+
+test("visual shape/placement requests classify and require rendered geometry evidence", () => {
+  const task = {
+    id: "task-1",
+    title: "Random levels, key shape and inventory position",
+    detail:
+      "bölümler he başlatıldığında random olarak gelsin. anahtar anahtar şeklinde olsun. inventory sol üstre olsun.",
+    acceptance: "The key is drawn as a key and the inventory sits in the top-left.",
+  } as unknown as Parameters<typeof noChangeCompletionEvidence>[0];
+  assert.equal(taskRequestsVisualShapeOrPlacement(task), true);
+  assert.equal(taskRequestsVisualShapeOrPlacement({ ...task, title: "Fix the parser crash", detail: "", acceptance: "" }), false);
+
+  const visibilityOnly: AiAgentStep[] = [
+    {
+      index: 1,
+      action: "browser_check",
+      ok: true,
+      observation: "PASS click #menu-start-btn PASS expectVisible #game PASS expectVisible #inventory",
+      args: {
+        steps: [
+          { action: "click", selector: "#menu-start-btn" },
+          { action: "expectVisible", selector: "#inventory" },
+        ],
+      },
+      durationMs: 10,
+    },
+  ];
+  const rejected = noChangeCompletionEvidence(
+    task,
+    {
+      summary: "Already present: key icon at game.js:208 and inventory in the HUD.",
+      steps: visibilityOnly,
+      changedFiles: [],
+    },
+    true,
+  );
+  assert.equal(rejected.ok, false);
+  assert.match(rejected.reason, /shape or placement/i);
+
+  const geometryStep: AiAgentStep[] = [
+    {
+      index: 2,
+      action: "browser_check",
+      ok: true,
+      observation: "PASS eval rect PASS expectText left<120 PASS eval key pixel PASS expectText true",
+      args: {
+        steps: [
+          {
+            action: "eval",
+            script: "JSON.stringify(document.querySelector('#inventory').getBoundingClientRect())",
+          },
+          { action: "expectText", selector: "#result", text: "left" },
+          {
+            action: "eval",
+            script:
+              "JSON.stringify(document.querySelector('#game').getContext('2d').getImageData(133,63,1,1).data)",
+          },
+          { action: "expectText", selector: "#result", text: "true" },
+        ],
+      },
+      durationMs: 12,
+    },
+  ];
+  assert.equal(isGeometryEvidenceCheck(geometryStep[0]), true);
+  const accepted = noChangeCompletionEvidence(
+    task,
+    {
+      summary:
+        "Verified on the real page: key renders as a ring and shaft at game.js:445 and the inventory bounding box is top-left (index.html:48, styles.css:176).",
+      steps: geometryStep,
+      changedFiles: [],
+    },
+    true,
+  );
+  assert.equal(accepted.ok, true);
+  assert.equal(needsRenderedGeometryEvidence(task, visibilityOnly, true), true);
+  assert.equal(needsRenderedGeometryEvidence(task, geometryStep, true), false);
+});
+
+test("a changed file does not excuse unverified 'already present' shape/placement claims", () => {
+  const task = {
+    id: "task-1",
+    title: "bölümler he başlatıldığında random olarak gelsin. anahtar anahtar şeklinde olsun. inven…",
+    detail:
+      "bölümler he başlatıldığında random olarak gelsin. anahtar anahtar şeklinde olsun. inventory sol üstre olsun.",
+    acceptance: "The requested change is implemented and verified on the real page.",
+  } as unknown as Parameters<typeof noChangeCompletionEvidence>[0];
+  // Real summary and browser_check from test-maze3: game.js changed for the
+  // random start, while the key shape and inventory placement were claimed as
+  // "already present" from a symbol and a visibility check.
+  const summary = `## Outcome
+Levels now start at a random level when the game is launched without an explicit level index. The key already renders as a key icon and the inventory already sits in the top-left, so no change was needed there.
+
+## Already present (verified, no edit)
+- Key icon: \`ITEM_TYPES.key.icon\` (game.js:208)
+- Inventory top-left: \`#inventory\` element is visible in the top-left HUD area (index.html/styles.css).`;
+  const steps: AiAgentStep[] = [
+    {
+      index: 7,
+      action: "browser_check",
+      ok: true,
+      observation:
+        "PASS #1 click PASS #2 expectVisible: #game PASS #3 expectText: #level PASS #4 eval PASS #5 expectVisible: #inventory",
+      args: {
+        steps: [
+          { action: "click", selector: "#menu-start-btn" },
+          { action: "expectVisible", selector: "#game" },
+          { action: "expectText", selector: "#level", text: "1" },
+          { action: "eval", script: "document.querySelector('#level').textContent" },
+          { action: "expectVisible", selector: "#inventory" },
+        ],
+      },
+      durationMs: 3577,
+    },
+  ];
+  assert.equal(summaryClaimsAlreadyPresent(summary), true);
+  const verdict = noChangeCompletionEvidence(
+    task,
+    { summary, steps, changedFiles: ["game.js"] },
+    true,
+  );
+  assert.equal(verdict.ok, false);
+  assert.match(verdict.reason, /shape or placement/i);
+});
+
+test("no-change completion requires file:line evidence and a real check", () => {
+  const plain = {
+    id: "task-1",
+    title: "Tidy the parser",
+    detail: "Rename the helper.",
+    acceptance: "Tests pass.",
+  } as unknown as Parameters<typeof noChangeCompletionEvidence>[0];
+  assert.equal(summaryCitesFileLines("game.js:208 has the icon"), true);
+  assert.equal(summaryCitesFileLines("game.js has the icon"), false);
+  assert.equal(
+    noChangeCompletionEvidence(
+      plain,
+      { summary: "Already present in game.js.", steps: [], changedFiles: [] },
+      true,
+    ).ok,
+    false,
+  );
+  assert.equal(
+    noChangeCompletionEvidence(
+      plain,
+      {
+        summary: "Already present at parser.ts:42; verified with a passing test.",
+        steps: [
+          {
+            index: 1,
+            action: "run_test_scenario",
+            ok: true,
+            observation: "passed",
+            args: {},
+            durationMs: 5,
+          },
+        ],
+        changedFiles: [],
+      },
+      false,
+    ).ok,
+    true,
+  );
 });
 
 test("work state includes the result evidence even when the loop status failed", () => {

@@ -1544,18 +1544,21 @@ export default function App() {
         </span>
       </footer>
 
-      {busy ? (
+      {busy === "rescan" ? (
+        <div className="rescan-status" role="status" aria-live="polite">
+          <Loader2 size={13} className="spin" />
+          <span>{t("Refreshing the analysis in place…")}</span>
+        </div>
+      ) : null}
+
+      {busy && busy !== "rescan" ? (
         <div className="busy-overlay">
           <div className="busy-card">
             <div className="busy-orbit">
               <Loader2 size={24} className="spin" />
             </div>
             <h3>
-              {busy === "analyze"
-                ? t("Analyzing codebase")
-                : busy === "rescan"
-                  ? t("Rescanning project")
-                  : t("Loading project")}
+              {busy === "analyze" ? t("Analyzing codebase") : t("Loading project")}
             </h3>
             <p className="busy-sub">
               {busy === "load" ? t("Opening the saved knowledge graph…") : t("Reading project files…")}
