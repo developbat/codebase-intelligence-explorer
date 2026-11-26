@@ -29,6 +29,7 @@ import type {
   TestStreamEvent,
 } from "../../shared/types";
 import type { ContentInventory } from "../../shared/contentInventory";
+import type { ProjectBrainView } from "../../shared/projectBrain";
 import type {
   AiAgentEvent,
   AiAgentResult,
@@ -142,6 +143,11 @@ export const api = {
   recent: () => request<{ projects: RecentProject[] }>("/api/recent"),
 
   project: (id: string) => request<AnalysisResult>(`/api/projects/${id}`),
+
+  projectBrain: (id: string) => request<ProjectBrainView>(`/api/projects/${id}/brain`),
+
+  refreshProjectBrain: (id: string) =>
+    request<ProjectBrainView>(`/api/projects/${id}/brain/refresh`, { method: "POST" }),
 
   projectIconUrl: (id: string, version?: string) => {
     const query = version ? `?v=${encodeURIComponent(version)}` : "";

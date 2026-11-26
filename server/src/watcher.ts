@@ -10,6 +10,7 @@ const WATCHED_EXTENSIONS =
 const IGNORED = [
   "**/node_modules/**",
   "**/.git/**",
+  "**/.cie/**",
   "**/dist/**",
   "**/build/**",
   "**/coverage/**",

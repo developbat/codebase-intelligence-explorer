@@ -57,6 +57,13 @@ import { recordUsage } from "./usage";
 import { getPublicSettings, resolveAgentRole, resolveProvider } from "./settings";
 import { pickAlternateAgentModel } from "./agents";
 import {
+  addProjectConstraints,
+  compactProjectBrainBrief,
+  ensureProjectBrain,
+  extractProjectConstraints,
+  updateProjectBrainFromTask,
+} from "../projectBrain";
+import {
   RECOVERY_POLICY,
   buildResumeContract,
   cleanTaskDetail,
@@ -623,7 +630,7 @@ export async function planProjectTasks(
   const analysis = await loadAnalysis(projectId);
   const verification = preferredVerificationCommand(analysis.tooling);
   const config = await resolveAgentRole("planner");
-  const [projectMap, preflightHints, skillLoad] = await Promise.all([
+  const [projectMap, preflightHints, skillLoad, projectBrainBrief] = await Promise.all([
     ensureProjectMap(analysis).catch(() => ""),
     featurePreflightHints(analysis, goal).catch(() => []),
     loadSkillsForPrompt(analysis.rootPath, projectId, goal, {
@@ -632,6 +639,9 @@ export async function planProjectTasks(
       relevant: [] as string[],
       selected: [] as string[],
     })),
+    ensureProjectBrain(analysis)
+      .then((brain) => compactProjectBrainBrief(brain))
+      .catch(() => ""),
   ]);
   const goalTokens = [...new Set((goal.toLowerCase().match(/[a-z0-9_]{3,}/g) ?? []))].filter(
     (token) => !["the", "and", "for", "with", "add", "fix", "make", "get", "set", "use", "from", "this", "that", "var", "let", "const"].includes(token),
@@ -651,6 +661,9 @@ export async function planProjectTasks(
       role: "user",
       content: [
         projectFacts(analysis),
+        projectBrainBrief
+          ? `Persistent project brain (authoritative; reuse it instead of rediscovering the project):\n${projectBrainBrief}`
+          : "",
         `Project files (all): ${allFiles}`,
         goalFiles.length > 0 ? `Goal-relevant files: ${goalFiles.join(", ")}` : "",
         goalHints.length > 0
@@ -1447,6 +1460,7 @@ function taskInstruction(
   parallelNote?: string,
   originalRequest?: string,
   language?: string,
+  projectBrief?: string,
 ): string {
   const brief = resolveWorkBrief(task.title);
   const extractionTask = brief?.mode === "extract";
@@ -1477,6 +1491,9 @@ function taskInstruction(
     `You are executing task ${task.id} of ${total} in a persistent project task loop.`,
     originalRequest
       ? `Original user request (authoritative; resolve conflicts in its favor):\n${originalRequest}`
+      : "",
+    projectBrief
+      ? `Persistent project brain (authoritative project memory; trust this before rediscovering the repository):\n${projectBrief}`
       : "",
     `Task: ${task.title}`,
     cleanTaskDetail(task.detail),
@@ -2723,6 +2740,29 @@ export async function runProjectLoop(
     }
   }
   const verification = preferredVerificationCommand(analysis.tooling);
+  const requestConstraints = [
+    ...new Set([
+      ...(options.intent?.constraints ?? []),
+      ...extractProjectConstraints(goal),
+    ]),
+  ];
+  if (requestConstraints.length > 0) {
+    await addProjectConstraints(analysis, requestConstraints, "request").catch(() => undefined);
+  }
+  const projectBrain = await ensureProjectBrain(analysis).catch(() => null);
+  const projectBriefText = projectBrain ? compactProjectBrainBrief(projectBrain) : "";
+  if (projectBriefText) {
+    emit({
+      type: "log",
+      entry: {
+        id: `log-${Date.now()}-project-brain`,
+        at: nowIso(),
+        level: "info",
+        label: "Project brain loaded",
+        detail: `${projectBriefText.length} chars · ${projectBrain?.features.length ?? 0} features · ${projectBrain?.recentChanges.length ?? 0} recent changes`,
+      },
+    });
+  }
   const runPreviewRequest = requestIsRunPreview(goal);
   let runPreviewUrl: string | null = null;
   if (runPreviewRequest) {
@@ -3309,6 +3349,7 @@ ${collapsed.tasks[0].checklist
         parallelNote,
         queue.goal,
         options.language,
+        projectBriefText,
       ),
       {
         activeFile: options.activeFile,
@@ -3844,6 +3885,7 @@ ${collapsed.tasks[0].checklist
     ) {
       status = "done";
     }
+    await updateProjectBrainFromTask(analysis, current, result, status).catch(() => undefined);
     const unavailableModel = /error 410\b|end of life|no longer available|model_not_found|model .* not found|does not exist/i.test(
       result.summary,
     );

@@ -134,6 +134,7 @@ import { runRegisteredTool } from "./tools/registry";
 import type { AgentToolContext } from "./tools/types";
 import { appendLesson, readLessons } from "../tasks";
 import { ensureProjectMap } from "../projectMap";
+import { addProjectConstraints, compactProjectBrainBrief, ensureProjectBrain } from "../projectBrain";
 import { buildChangeReport } from "../changes";
 import { auditClaims } from "./claims";
 import { auditContentInventory, renderContentInventory } from "../contentInventory";
@@ -1722,8 +1723,13 @@ export async function askProject(
       .map((node) => ({ node, score: 0 }));
   }
 
+  if (options.intent?.constraints?.length) {
+    await addProjectConstraints(analysis, options.intent.constraints, "chat").catch(() => null);
+  }
+  const brain = await ensureProjectBrain(analysis).catch(() => null);
+  const brainBrief = brain ? compactProjectBrainBrief(brain) : "";
   const contextParts: string[] = [
-    projectBrief(analysis),
+    brainBrief || projectBrief(analysis),
     options.workState ?? "",
     options.intent?.normalizedRequest ? `Interpreted request: ${options.intent.normalizedRequest}` : "",
     options.intent?.behaviors?.length
@@ -4341,6 +4347,16 @@ export async function runAgentTask(
   if (projectMap) {
     log("info", "Project map loaded", `${projectMap.length} chars`);
   }
+  const instructionHasProjectBrain = /Persistent project brain/i.test(instruction);
+  const projectBrainBrief =
+    instructionHasProjectBrain || contextMode === "none" || testTask || options.microEdit === true
+      ? ""
+      : await ensureProjectBrain(analysis)
+          .then((brain) => compactProjectBrainBrief(brain))
+          .catch(() => "");
+  if (projectBrainBrief) {
+    log("info", "Project brain loaded", `${projectBrainBrief.length} chars`);
+  }
   const continuation = continuationFindings(options.history, instruction);
   const continuationMode = Boolean(continuation);
   const latestProjectPlan =
@@ -4425,6 +4441,9 @@ export async function runAgentTask(
           0,
           1_500,
         )}`
+      : "",
+    projectBrainBrief
+      ? `Persistent project brain (authoritative project memory; trust this before rediscovering the repository):\n${projectBrainBrief}`
       : "",
     "",
     options.intent?.approach ? `Intent approach: ${options.intent.approach}` : "",

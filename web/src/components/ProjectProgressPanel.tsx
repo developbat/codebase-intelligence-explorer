@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
+  Brain,
   CheckCircle2,
   Clock,
   FileCode2,
@@ -10,6 +11,9 @@ import {
   Loader2,
   Network,
   RefreshCw,
+  ShieldCheck,
+  Sparkles,
+  Wrench,
   X,
 } from "lucide-react";
 import type { AnalysisResult } from "../../../shared/types";
@@ -19,6 +23,7 @@ import type {
   ProjectTaskQueue,
 } from "../../../shared/tasks";
 import type { AiPlanSummary } from "../../../shared/ai";
+import type { ProjectBrainView } from "../../../shared/projectBrain";
 import { api } from "../api";
 import { useI18n } from "../i18n";
 import { MarkdownText } from "./MarkdownText";
@@ -173,7 +178,10 @@ export function ProjectProgressPanel({
   liveStepCount = 0,
 }: ProjectProgressPanelProps) {
   const { t, locale } = useI18n();
-  const [tab, setTab] = useState<"overview" | "todos" | "plan">("overview");
+  const [tab, setTab] = useState<"overview" | "todos" | "plan" | "brain">("overview");
+  const [brain, setBrain] = useState<ProjectBrainView | null>(null);
+  const [brainBusy, setBrainBusy] = useState(false);
+  const [brainError, setBrainError] = useState<string | null>(null);
   const [plans, setPlans] = useState<AiPlanSummary[]>([]);
   const [planName, setPlanName] = useState("");
   const [planContent, setPlanContent] = useState("");
@@ -208,6 +216,43 @@ export function ProjectProgressPanel({
       cancelled = true;
     };
   }, [analysis.id]);
+  useEffect(() => {
+    if (tab !== "brain" || brain) return;
+    let cancelled = false;
+    setBrainBusy(true);
+    setBrainError(null);
+    void api.projectBrain(analysis.id)
+      .then((result) => {
+        if (!cancelled) setBrain(result);
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) {
+          setBrainError(error instanceof Error ? error.message : t("Could not load the project brain."));
+        }
+      })
+      .finally(() => {
+        setBrainBusy(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // `t` is intentionally omitted: a locale change must not cancel an in-flight
+    // brain request. `brainBusy` must also stay out of the deps, otherwise the
+    // cleanup cancels the request as soon as the spinner starts.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [analysis.id, tab, brain]);
+  async function refreshBrain() {
+    if (brainBusy) return;
+    setBrainBusy(true);
+    setBrainError(null);
+    try {
+      setBrain(await api.refreshProjectBrain(analysis.id));
+    } catch (error) {
+      setBrainError(error instanceof Error ? error.message : t("Could not refresh the project brain."));
+    } finally {
+      setBrainBusy(false);
+    }
+  }
   const tasks = queue?.tasks ?? [];
   const { done, active, planned, attention } = useMemo(() => {
     const sortDone = (a: ProjectTask, b: ProjectTask) =>
@@ -275,6 +320,14 @@ export function ProjectProgressPanel({
           aria-selected={tab === "plan"}
         >
           <FileText size={10} /> {t("Plan")}
+        </button>
+        <button
+          className={tab === "brain" ? "is-active" : ""}
+          onClick={() => setTab("brain")}
+          role="tab"
+          aria-selected={tab === "brain"}
+        >
+          <Brain size={10} /> {t("Project brain")}
         </button>
       </div>
 
@@ -453,6 +506,186 @@ export function ProjectProgressPanel({
               <span>{t("Start a job in Chat; planned and completed tasks appear here.")}</span>
             </div>
           )}
+        </div>
+      ) : tab === "brain" ? (
+        <div className="pp-brain">
+          <div className="pp-brain-head">
+            <div>
+              <span className="pp-eyebrow">
+                <Brain size={10} /> {t("Project brain")}
+              </span>
+              <p>{t("Persistent project memory; every task and chat starts with this brief instead of rediscovering the project.")}</p>
+            </div>
+            <button onClick={() => void refreshBrain()} disabled={brainBusy} title={t("Refresh project brain")}>
+              {brainBusy ? <Loader2 size={11} className="spin" /> : <RefreshCw size={11} />}
+            </button>
+          </div>
+          {brainError ? (
+            <div className="pp-brain-error">
+              <AlertTriangle size={12} />
+              <span>{brainError}</span>
+            </div>
+          ) : null}
+          {!brain && brainBusy ? (
+            <div className="pp-todos-empty">
+              <Loader2 size={17} className="spin" />
+              <strong>{t("Loading project memory…")}</strong>
+            </div>
+          ) : null}
+          {brain ? (
+            <>
+              <div className="pp-brain-identity">
+                <div>
+                  <span>{t("Kind")}</span>
+                  <b>{brain.brain.identity.kind}</b>
+                </div>
+                <div>
+                  <span>{t("Stack")}</span>
+                  <b>{brain.brain.identity.stack.slice(0, 4).join(" · ") || "—"}</b>
+                </div>
+                <div>
+                  <span>{t("Entry points")}</span>
+                  <b title={brain.brain.identity.entryPoints.join(", ")}>
+                    {brain.brain.identity.entryPoints.slice(0, 3).join(" · ") || "—"}
+                  </b>
+                </div>
+                <div>
+                  <span>{t("Updated")}</span>
+                  <b>{formatDate(brain.brain.updatedAt, locale)}</b>
+                </div>
+              </div>
+
+              <div className="pp-brain-grid">
+                <section>
+                  <h4>
+                    <Network size={11} /> {t("Architecture")}
+                  </h4>
+                  <p>{plainText(brain.brain.architecture.summary, 260)}</p>
+                  {brain.brain.architecture.modules.slice(0, 5).map((module) => (
+                    <div className="pp-brain-line" key={`${module.name}-${module.role}`}>
+                      <b>{module.name}</b>
+                      <span>{module.role}</span>
+                      <small title={module.files.join(", ")}>{module.files.slice(0, 3).join(", ")}</small>
+                    </div>
+                  ))}
+                  {brain.brain.architecture.routes.length > 0 ? (
+                    <div className="pp-brain-sub">
+                      <span>{t("Routes")}</span>
+                      {brain.brain.architecture.routes.slice(0, 6).map((route) => (
+                        <small key={`${route.label}-${route.filePath ?? ""}`}>
+                          {route.label}
+                          {route.filePath ? ` — ${route.filePath}` : ""}
+                        </small>
+                      ))}
+                    </div>
+                  ) : null}
+                </section>
+
+                <section>
+                  <h4>
+                    <FileCode2 size={11} /> {t("Key files")}
+                  </h4>
+                  {brain.brain.inventory.files.slice(0, 10).map((file) => (
+                    <button
+                      type="button"
+                      className="pp-brain-file"
+                      key={file.path}
+                      onClick={() => onOpenFile?.(file.path)}
+                      title={`${file.role} · ${file.loc} lines · ${file.symbols} symbols`}
+                    >
+                      <span>{file.path}</span>
+                      <small>{file.role}</small>
+                    </button>
+                  ))}
+                </section>
+
+                <section>
+                  <h4>
+                    <CheckCircle2 size={11} /> {t("Features")}
+                  </h4>
+                  {brain.brain.features.length === 0 ? (
+                    <p className="pp-brain-muted">{t("No completed work recorded yet.")}</p>
+                  ) : (
+                    brain.brain.features.slice(0, 8).map((feature) => (
+                      <div className={`pp-brain-feature is-${feature.status}`} key={feature.id}>
+                        <span className="pp-chip">{feature.status}</span>
+                        <b>{plainText(feature.name, 90)}</b>
+                        {feature.files.length > 0 ? (
+                          <small title={feature.files.join(", ")}>{feature.files.slice(0, 2).join(", ")}</small>
+                        ) : null}
+                      </div>
+                    ))
+                  )}
+                </section>
+
+                <section>
+                  <h4>
+                    <ShieldCheck size={11} /> {t("Constraints")}
+                  </h4>
+                  {brain.brain.constraints.length === 0 ? (
+                    <p className="pp-brain-muted">{t("No explicit constraints recorded.")}</p>
+                  ) : (
+                    brain.brain.constraints.slice(0, 6).map((constraint) => (
+                      <div className="pp-brain-line" key={constraint.id}>
+                        <span className="pp-chip">{constraint.kind}</span>
+                        <b>{plainText(constraint.text, 120)}</b>
+                      </div>
+                    ))
+                  )}
+                  {brain.brain.knownIssues.length > 0 ? (
+                    <div className="pp-brain-sub">
+                      <span>{t("Known issues")}</span>
+                      {brain.brain.knownIssues.slice(0, 4).map((issue) => (
+                        <small key={issue.text}>{plainText(issue.text, 140)}</small>
+                      ))}
+                    </div>
+                  ) : null}
+                </section>
+
+                <section>
+                  <h4>
+                    <History size={11} /> {t("Recent changes")}
+                  </h4>
+                  {brain.brain.recentChanges.length === 0 ? (
+                    <p className="pp-brain-muted">{t("No recent changes recorded.")}</p>
+                  ) : (
+                    brain.brain.recentChanges.slice(0, 6).map((change) => (
+                      <div className="pp-brain-change" key={`${change.at}-${change.taskId ?? change.summary.slice(0, 20)}`}>
+                        <small>{formatDate(change.at, locale)}</small>
+                        <b>{plainText(change.summary, 140)}</b>
+                        {change.files.length > 0 ? (
+                          <span title={change.files.join(", ")}>{change.files.slice(0, 3).join(", ")}</span>
+                        ) : null}
+                      </div>
+                    ))
+                  )}
+                </section>
+
+                <section>
+                  <h4>
+                    <Wrench size={11} /> {t("Verification")}
+                  </h4>
+                  {brain.brain.verification.commands.map((command) => (
+                    <code className="pp-brain-command" key={command}>
+                      {command}
+                    </code>
+                  ))}
+                  {brain.brain.verification.checks.slice(0, 4).map((check) => (
+                    <small className="pp-brain-check" key={check}>
+                      {check}
+                    </small>
+                  ))}
+                </section>
+              </div>
+
+              <details className="pp-brain-brief">
+                <summary>
+                  <Sparkles size={10} /> {t("Memory brief used in prompts")}
+                </summary>
+                <pre>{brain.brief}</pre>
+              </details>
+            </>
+          ) : null}
         </div>
       ) : (
         <div className="pp-plan">

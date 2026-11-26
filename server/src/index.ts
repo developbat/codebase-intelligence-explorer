@@ -64,6 +64,7 @@ import {
   updateTask,
 } from "./tasks";
 import type { ProjectTask } from "../../shared/tasks";
+import { compactProjectBrainBrief, ensureProjectBrain, getProjectBrainView, refreshProjectBrain } from "./projectBrain";
 import { getPublicSettings, resolveAgentRole, resolveProvider, updateAiSettings } from "./ai/settings";
 import { allToolSpecs } from "./ai/toolRegistry";
 import { runTryTool, tryableToolActions } from "./ai/tools/tryRegistry";
@@ -2679,9 +2680,38 @@ app.get("/api/projects/:id", async (req, res) => {
     // Opening a saved Python project must prepare its environment too, not
     // only a fresh analyze.
     void startPythonEnvironment(result.id, result.rootPath).catch(() => undefined);
+    // Warm persistent project memory in the background so the first chat/task
+    // already has a project brief instead of rediscovering everything.
+    void ensureProjectBrain(result).catch(() => undefined);
     res.json(result);
   } catch (error) {
     handleError(res, error, 404);
+  }
+});
+
+app.get("/api/projects/:id/brain", async (req, res) => {
+  try {
+    const analysis = await loadAnalysis(req.params.id);
+    res.json(await getProjectBrainView(analysis));
+  } catch (error) {
+    handleError(res, error, 404);
+  }
+});
+
+app.post("/api/projects/:id/brain/refresh", async (req, res) => {
+  try {
+    const analysis = await loadAnalysis(req.params.id);
+    const brain = await refreshProjectBrain(analysis);
+    res.json({
+      brain,
+      brief: compactProjectBrainBrief(brain),
+      paths: {
+        json: ".cie/agent/project-brain.json",
+        markdown: ".cie/agent/project-brain.md",
+      },
+    });
+  } catch (error) {
+    handleError(res, error, 400);
   }
 });
 
