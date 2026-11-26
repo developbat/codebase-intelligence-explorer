@@ -1692,7 +1692,7 @@ export async function askProject(
 ): Promise<AiChatResult> {
   const analysis = await loadAnalysis(projectId);
   const config = await resolveProvider(options.provider, options.model);
-  const tokens = keywords(options.intent?.normalizedRequest || question);
+  const tokens = keywords(`${options.intent?.normalizedRequest ?? ""} ${question}`);
 
   let scored = analysis.nodes
     .filter((node) => !["project", "folder", "module"].includes(node.kind))
