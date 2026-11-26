@@ -2017,6 +2017,108 @@ export function splitGoalSections(goal: string, verification?: string): ProjectT
   });
 }
 
+const BUILD_SESSION_MAX_FILES = 12;
+const BUILD_SESSION_MAX_BYTES = 40_000;
+
+export function isSmallProjectForBuildSession(analysis: AnalysisResult): boolean {
+  const files = analysis.files.filter(
+    (file) => !file.path.startsWith(".cie/") && !file.path.startsWith(".git/"),
+  );
+  if (files.length === 0 || files.length > BUILD_SESSION_MAX_FILES) return false;
+  return files.reduce((sum, file) => sum + (file.bytes || 0), 0) <= BUILD_SESSION_MAX_BYTES;
+}
+
+/**
+ * Phase 1 orchestration: a small/medium project is one agent session, not one
+ * session per behavior. The plan tasks become a checklist inside a single
+ * build task; plan coverage and acceptance stay intact.
+ */
+export function collapseToBuildSession(
+  queue: ProjectTaskQueue,
+  analysis: AnalysisResult,
+  goal: string,
+  intent?: IntentAnalysis,
+  verification?: string,
+): ProjectTaskQueue {
+  if (queue.tasks.length <= 1) return queue;
+  if (!queue.tasks.every((task) => task.status === "pending")) return queue;
+  if (queue.tasks.some((task) => (task.changedFiles?.length ?? 0) > 0)) return queue;
+  if (!isSmallProjectForBuildSession(analysis)) return queue;
+
+  const tasks = queue.tasks;
+  const at = nowIso();
+  const firstLine =
+    goal
+      .split(/\r?\n/)
+      .map((line) => line.replace(/^#+\s*/, "").trim())
+      .find(Boolean) ?? "Build the requested project";
+  const checklist = tasks.map((task) => ({
+    id: task.id,
+    title: task.title,
+    acceptance: task.acceptance ?? "The behavior works and is verified.",
+  }));
+  const surface =
+    tasks.map((task) => task.surface).find((value) => value && value !== "other") ??
+    (intent && isUiIntent(goal, intent) ? "ui" : "other");
+  const detail = [
+    "Execute this project as ONE build session. Implement every checklist item; do not stop after a subset.",
+    "Checklist:",
+    ...tasks.map((task, index) =>
+      [
+        `${index + 1}. ${task.title}`,
+        task.detail.slice(0, 700),
+        task.acceptance ? `Acceptance: ${task.acceptance.slice(0, 400)}` : "",
+      ]
+        .filter(Boolean)
+        .join("\n"),
+    ),
+    "After implementing, run ONE end-to-end browser check on the real entry page that covers the main flow (start, movement, key/pickup, win/restart where applicable). Do not run a separate check for every checklist item.",
+    verification ? `Verification command: ${verification}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+
+  const task: ProjectTask = {
+    id: "task-1",
+    title: `Build: ${firstLine}`.slice(0, 140),
+    detail,
+    acceptance: [
+      "Every checklist item is implemented.",
+      "One end-to-end browser check on the real entry page passes.",
+      ...tasks
+        .map((item) => item.acceptance)
+        .filter((value): value is string => Boolean(value))
+        .slice(0, 6),
+    ]
+      .join(" ")
+      .slice(0, 1_200),
+    status: "pending",
+    effort: "standard",
+    role: "main",
+    action: "update",
+    surface,
+    readOnly: false,
+    verificationOnly: false,
+    microEdit: false,
+    buildSession: true,
+    checklist,
+    stepBudget: 20,
+    dependsOn: [],
+    attempts: 0,
+    changedFiles: [],
+    commands: [],
+    createdAt: at,
+    updatedAt: at,
+  };
+  return {
+    ...queue,
+    tasks: [task],
+    status: "idle",
+    updatedAt: at,
+    planMeta: queue.planMeta,
+  };
+}
+
 function isUiIntent(goal: string, intent: IntentAnalysis): boolean {
   if (intent.behaviors?.some((behavior) => behavior.surface === "ui" || behavior.surface === "game")) {
     return true;
@@ -2352,6 +2454,7 @@ export async function runProjectLoop(
   const intentSingle =
     workspaceMode !== "build" ||
     (intent?.mode === "single" && !multiPartGoal && !lowConfidenceLargeGoal);
+  let plannedNow = false;
   if (
     !queue ||
     options.replan ||
@@ -2361,6 +2464,7 @@ export async function runProjectLoop(
     (intentSingle && queue.status === "failed" && !options.retryFailed)
   ) {
     if (intent && intentSingle) {
+      plannedNow = true;
       queue = await createQueue(analysis.rootPath, projectId, goal.trim(), [
         intentTask(goal, intent, verification, workspaceMode),
       ]);
@@ -2379,6 +2483,7 @@ export async function runProjectLoop(
           .join("\n"),
       );
     } else {
+      plannedNow = true;
       queue = await planProjectTasks(projectId, goal, {
         language: options.language,
         signal,
@@ -2456,6 +2561,7 @@ export async function runProjectLoop(
         };
       }
       if (review.verdict === "replan") {
+        plannedNow = true;
         queue = applyPlanReview(queue, goal, review);
       } else {
         queue = {
@@ -2464,6 +2570,43 @@ export async function runProjectLoop(
         };
       }
       queue = await saveQueue(analysis.rootPath, queue);
+      emit({ type: "task", queue });
+    }
+  }
+
+  // Phase 1 orchestration: one build session for a small/medium project.
+  // The plan tasks become a checklist; they are not separate agent sessions.
+  if (
+    plannedNow &&
+    workspaceMode === "build" &&
+    queue &&
+    queue.tasks.length > 1 &&
+    queue.tasks.every((task) => task.status === "pending") &&
+    !queue.tasks.some((task) => (task.changedFiles?.length ?? 0) > 0) &&
+    isSmallProjectForBuildSession(analysis)
+  ) {
+    const before = queue.tasks.length;
+    const collapsed = collapseToBuildSession(queue, analysis, goal, intent, verification);
+    if (collapsed.tasks.length === 1 && collapsed.tasks[0]?.buildSession) {
+      queue = await saveQueue(analysis.rootPath, collapsed);
+      emit({
+        type: "log",
+        entry: {
+          id: `log-${Date.now()}-build-session`,
+          at: nowIso(),
+          level: "info",
+          label: "Build session",
+          detail: `${before} checklist items → 1 agent session · 20 turns · one end-to-end verify`,
+        },
+      });
+      await appendTaskContext(
+        analysis.rootPath,
+        "Build session",
+        `${before} plan tasks were merged into one build session to avoid one agent session per behavior. Checklist:
+${collapsed.tasks[0].checklist
+          ?.map((item) => `- ${item.title}`)
+          .join("\n")}`,
+      );
       emit({ type: "task", queue });
     }
   }
@@ -3568,7 +3711,7 @@ export async function runProjectLoop(
       if (
         !softBudgetWithWork &&
         softBudgetRetries < 1 &&
-        repairAttempts < RECOVERY_POLICY.maxRepairsPerTask &&
+        repairAttempts < (latestTask.buildSession ? 1 : RECOVERY_POLICY.maxRepairsPerTask) &&
         autoRepairs < RECOVERY_POLICY.maxRepairsPerRun &&
         lifetimeTokens < hardTaskTokens
       ) {
@@ -3839,7 +3982,7 @@ export async function runProjectLoop(
     if (
       finalTask &&
       finalTask.status === "failed" &&
-      (finalTask.repairAttempts ?? 0) < 2 &&
+      (finalTask.repairAttempts ?? 0) < (finalTask.buildSession ? 0 : 2) &&
       result.stoppedReason !== "aborted" &&
       result.stoppedReason !== "budget" &&
       !protocolFailure &&

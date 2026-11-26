@@ -17,6 +17,8 @@ import {
   reviewFileExcerpt,
   summaryReportsBlocker,
   splitGoalSections,
+  collapseToBuildSession,
+  isSmallProjectForBuildSession,
 } from "./ai/loop";
 import {
   budgetExceeded,
@@ -27,6 +29,77 @@ import {
   reportsIncompleteWiring,
   reportsRemainingWork,
 } from "./ai/service";
+
+test("small builds collapse plan tasks into one build session with a checklist", () => {
+  const analysis = {
+    files: [
+      { path: "index.html", bytes: 1_500 },
+      { path: "styles.css", bytes: 1_200 },
+      { path: "game.js", bytes: 2_000 },
+      { path: "README.md", bytes: 150 },
+    ],
+  } as unknown as import("../../shared/types").AnalysisResult;
+  assert.equal(isSmallProjectForBuildSession(analysis), true);
+
+  const base = {
+    status: "pending" as const,
+    effort: "standard" as const,
+    role: "main" as const,
+    action: "update" as const,
+    surface: "ui" as const,
+    dependsOn: [],
+    attempts: 0,
+    changedFiles: [],
+    commands: [],
+    createdAt: "",
+    updatedAt: "",
+  };
+  const queue = {
+    version: 1 as const,
+    projectId: "p",
+    goal: "Build a game",
+    status: "idle" as const,
+    createdAt: "",
+    updatedAt: "",
+    notesPath: "",
+    planPath: "",
+    contextPath: "",
+    digestPath: "",
+    planMeta: {
+      version: 2,
+      goalHash: "hash",
+      reviewedAt: "",
+      verdict: "ok" as const,
+      requirements: ["movement", "win"],
+      missing: [],
+      assumptions: [],
+      reviewCount: 1,
+    },
+    tasks: [
+      { ...base, id: "task-1", title: "Shell", detail: "Build the shell", acceptance: "Shell works" },
+      { ...base, id: "task-2", title: "Movement", detail: "Move the player", acceptance: "Player moves" },
+      { ...base, id: "task-3", title: "Win", detail: "Show win", acceptance: "Win works" },
+    ],
+  };
+  const collapsed = collapseToBuildSession(queue, analysis, queue.goal);
+  assert.equal(collapsed.tasks.length, 1);
+  assert.equal(collapsed.tasks[0].buildSession, true);
+  assert.equal(collapsed.tasks[0].stepBudget, 20);
+  assert.equal(collapsed.tasks[0].checklist?.length, 3);
+  assert.match(collapsed.tasks[0].detail, /Movement/);
+  assert.match(collapsed.tasks[0].detail, /ONE build session/);
+  assert.equal(collapsed.planMeta?.requirements.length, 2);
+
+  const tooLarge = {
+    ...analysis,
+    files: Array.from({ length: 13 }, (_, index) => ({ path: `f${index}.js`, bytes: 1_000 })),
+  } as unknown as import("../../shared/types").AnalysisResult;
+  assert.equal(isSmallProjectForBuildSession(tooLarge), false);
+  assert.equal(collapseToBuildSession(queue, tooLarge, queue.goal).tasks.length, 3);
+
+  const hasDone = { ...queue, tasks: [{ ...queue.tasks[0], status: "done" as const }, queue.tasks[1]] };
+  assert.equal(collapseToBuildSession(hasDone, analysis, queue.goal).tasks.length, 2);
+});
 
 test("a failed planner still splits a large goal by its sections", () => {
   const goal = [

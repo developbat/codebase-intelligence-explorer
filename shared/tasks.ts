@@ -33,6 +33,10 @@ export interface ProjectTask {
   microEdit?: boolean;
   /** Per-attempt model-turn cap override (used by narrow repairs). */
   stepBudget?: number;
+  /** One agent session covers all checklist items instead of one task per item. */
+  buildSession?: boolean;
+  /** Behavior checklist executed inside a build session. */
+  checklist?: Array<{ id: string; title: string; acceptance: string }>;
   dependsOn: string[];
   provider?: string;
   model?: string;
