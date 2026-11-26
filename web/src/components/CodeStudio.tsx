@@ -2985,6 +2985,7 @@ export function CodeStudio({
       retryFailed?: boolean;
       confirmed?: boolean;
       skipClarify?: boolean;
+      intent?: IntentAnalysis;
       workspaceMode?: AiWorkspaceMode;
       provider?: AiProviderId;
       model?: string;
@@ -3119,6 +3120,7 @@ export function CodeStudio({
             retryFailed: runOptions.retryFailed === true,
             clarified: runOptions.skipClarify === true,
             confirmed: runOptions.confirmed === true,
+            intent: runOptions.intent,
             history: history.slice(-8),
             liveBrowser,
           },
@@ -4545,7 +4547,11 @@ export function CodeStudio({
                   onClick={() => {
                     const original = confirmation.original;
                     setConfirmation(null);
-                    void askProject(original, false, { confirmed: true, skipClarify: true });
+                    void askProject(original, false, {
+                      confirmed: true,
+                      skipClarify: true,
+                      intent: confirmation.intent,
+                    });
                   }}
                 >
                   {t("Confirm and start")}

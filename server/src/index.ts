@@ -2361,6 +2361,15 @@ app.post("/api/projects/:id/ai/loop/stream", async (req, res) => {
   };
 
   let intent = undefined as Awaited<ReturnType<typeof analyzeIntent>>["intent"] | undefined;
+  const suppliedIntent =
+    req.body?.intent &&
+    typeof req.body.intent === "object" &&
+    typeof (req.body.intent as { kind?: unknown }).kind === "string"
+      ? (req.body.intent as IntentAnalysis)
+      : undefined;
+  if (suppliedIntent && req.body?.confirmed === true) {
+    intent = suppliedIntent;
+  }
   let intentProvider: string | undefined;
   let intentModel: string | undefined;
   let intentTotalTokens: number | undefined;
@@ -2384,12 +2393,12 @@ app.post("/api/projects/:id/ai/loop/stream", async (req, res) => {
     existing!.goal.trim() === goal.trim() &&
     existing!.status !== "completed" &&
     req.body?.replan !== true;
-  if (resuming && existing?.intent) {
+  if (resuming && !intent && existing?.intent) {
     // Resuming a queue must keep the original write intent. Without this the
     // per-task fallback classifier can turn a build task into inspection.
     intent = existing.intent;
   }
-  if (!resuming) {
+  if (!resuming && !intent) {
     try {
       const analyzed = await analyzeIntent(req.params.id, goal, {
         provider: typeof req.body?.provider === "string" ? req.body.provider : undefined,

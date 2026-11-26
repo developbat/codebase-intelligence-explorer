@@ -55,6 +55,7 @@ import type {
   ProjectTaskHistoryEntry,
   ProjectTaskQueue,
 } from "../../shared/tasks";
+import type { IntentAnalysis } from "../../shared/intent";
 import type { LspCompletionItem, LspDiagnostic, LspHover } from "../../shared/lsp";
 import type {
   CatalogImportResult,
@@ -935,6 +936,7 @@ export const api = {
         retryFailed?: boolean;
         clarified?: boolean;
         confirmed?: boolean;
+        intent?: IntentAnalysis;
         workspaceMode?: "ask" | "plan" | "build" | "research";
         tokenBudget?: number;
         costBudgetUsd?: number;
