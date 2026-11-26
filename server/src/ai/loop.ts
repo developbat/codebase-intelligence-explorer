@@ -2940,7 +2940,9 @@ ${collapsed.tasks[0].checklist
         inspection: inspectionRun,
         maxSteps: microEdit ? 4 : current.stepBudget ?? taskStepBudget(budgetEffort),
         tokenBudget,
-        softTokenBudget: softTaskTokenBudget(budgetEffort),
+        softTokenBudget: current.buildSession
+          ? Math.max(softTaskTokenBudget(budgetEffort), 240_000)
+          : softTaskTokenBudget(budgetEffort),
         costBudgetUsd,
         budgetMode: settings?.taskBudgetMode ?? "off",
         maxOutputTokens: settings?.agentMaxOutputTokens ?? 16_000,
