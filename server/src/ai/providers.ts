@@ -11,6 +11,8 @@ export interface ChatOptions {
   maxTokens?: number;
   temperature?: number;
   timeoutMs?: number;
+  /** Ask OpenAI-compatible providers for a JSON object response. */
+  responseFormat?: "json";
   signal?: AbortSignal;
   onUsage?: (usage: AiTokenUsage) => void;
   onToken?: (chunk: string) => void;
@@ -249,6 +251,9 @@ async function chatOpenAi(config: ResolvedProvider, messages: ChatMessage[], opt
     stream: streaming,
   };
   if (streaming) body.stream_options = { include_usage: true };
+  if (options.responseFormat === "json") {
+    body.response_format = { type: "json_object" };
+  }
   if (reasoningModel) body.max_completion_tokens = maxTokens;
   else {
     body.max_tokens = maxTokens;

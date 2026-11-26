@@ -3,6 +3,7 @@ import type {
   IntentBehaviorAction,
   IntentBehaviorSurface,
 } from "./intent";
+import type { ProjectDiagnosis } from "./diagnosis";
 
 export type ProjectTaskStatus = "pending" | "in_progress" | "done" | "failed" | "blocked";
 
@@ -91,6 +92,7 @@ export interface ProjectTask {
 
 export interface ProjectTaskStageUsage {
   intent?: { inputTokens: number; outputTokens: number; totalTokens: number };
+  diagnosis?: { inputTokens: number; outputTokens: number; totalTokens: number; costUsd?: number };
   planner?: { inputTokens: number; outputTokens: number; totalTokens: number };
   agent?: { inputTokens: number; outputTokens: number; totalTokens: number };
   reviewer?: { inputTokens: number; outputTokens: number; totalTokens: number };
@@ -119,6 +121,9 @@ export interface ProjectTaskQueue {
   stageUsage?: ProjectTaskStageUsage;
   /** The intent that created this queue; reused when the queue is resumed. */
   intent?: IntentAnalysis;
+  /** Read-only diagnosis generated before planning; reused on resume. */
+  diagnosis?: ProjectDiagnosis;
+  diagnosisPath?: string;
   planMeta?: {
     version: number;
     goalHash: string;

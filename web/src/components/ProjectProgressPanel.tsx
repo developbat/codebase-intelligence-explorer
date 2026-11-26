@@ -24,6 +24,7 @@ import type {
 } from "../../../shared/tasks";
 import type { AiPlanSummary } from "../../../shared/ai";
 import type { ProjectBrainView } from "../../../shared/projectBrain";
+import type { ProjectDiagnosis, ProjectDiagnosisView } from "../../../shared/diagnosis";
 import { api } from "../api";
 import { useI18n } from "../i18n";
 import { MarkdownText } from "./MarkdownText";
@@ -178,10 +179,13 @@ export function ProjectProgressPanel({
   liveStepCount = 0,
 }: ProjectProgressPanelProps) {
   const { t, locale } = useI18n();
-  const [tab, setTab] = useState<"overview" | "todos" | "plan" | "brain">("overview");
+  const [tab, setTab] = useState<"overview" | "todos" | "plan" | "diagnosis" | "brain">("overview");
   const [brain, setBrain] = useState<ProjectBrainView | null>(null);
   const [brainBusy, setBrainBusy] = useState(false);
   const [brainError, setBrainError] = useState<string | null>(null);
+  const [diagnosisView, setDiagnosisView] = useState<ProjectDiagnosisView | null>(null);
+  const [diagnosisBusy, setDiagnosisBusy] = useState(false);
+  const [diagnosisError, setDiagnosisError] = useState<string | null>(null);
   const [plans, setPlans] = useState<AiPlanSummary[]>([]);
   const [planName, setPlanName] = useState("");
   const [planContent, setPlanContent] = useState("");
@@ -253,6 +257,46 @@ export function ProjectProgressPanel({
       setBrainBusy(false);
     }
   }
+  useEffect(() => {
+    if (tab !== "diagnosis" || diagnosisView) return;
+    let cancelled = false;
+    setDiagnosisBusy(true);
+    setDiagnosisError(null);
+    void api.projectDiagnosis(analysis.id)
+      .then((result) => {
+        if (!cancelled) setDiagnosisView(result);
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) {
+          setDiagnosisError(error instanceof Error ? error.message : t("Could not load the diagnosis."));
+        }
+      })
+      .finally(() => {
+        setDiagnosisBusy(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // `t` is intentionally omitted so a locale change does not cancel the request.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [analysis.id, tab, diagnosisView]);
+  async function runDiagnosis() {
+    if (diagnosisBusy || !queue?.goal) return;
+    setDiagnosisBusy(true);
+    setDiagnosisError(null);
+    try {
+      setDiagnosisView(await api.runProjectDiagnosis(analysis.id, queue.goal));
+    } catch (error) {
+      setDiagnosisError(error instanceof Error ? error.message : t("Could not run the diagnosis."));
+    } finally {
+      setDiagnosisBusy(false);
+    }
+  }
+  const diagnosisData =
+    [queue?.diagnosis, diagnosisView?.diagnosis]
+      .filter((item): item is ProjectDiagnosis => Boolean(item))
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+      .at(-1) ?? null;
   const tasks = queue?.tasks ?? [];
   const { done, active, planned, attention } = useMemo(() => {
     const sortDone = (a: ProjectTask, b: ProjectTask) =>
@@ -320,6 +364,14 @@ export function ProjectProgressPanel({
           aria-selected={tab === "plan"}
         >
           <FileText size={10} /> {t("Plan")}
+        </button>
+        <button
+          className={tab === "diagnosis" ? "is-active" : ""}
+          onClick={() => setTab("diagnosis")}
+          role="tab"
+          aria-selected={tab === "diagnosis"}
+        >
+          <Sparkles size={10} /> {t("Diagnosis")}
         </button>
         <button
           className={tab === "brain" ? "is-active" : ""}
@@ -504,6 +556,208 @@ export function ProjectProgressPanel({
               <ListChecks size={17} />
               <strong>{t("No AI todos yet")}</strong>
               <span>{t("Start a job in Chat; planned and completed tasks appear here.")}</span>
+            </div>
+          )}
+        </div>
+      ) : tab === "diagnosis" ? (
+        <div className="pp-diagnosis">
+          {diagnosisError ? (
+            <div className="pp-brain-error">
+              <AlertTriangle size={12} />
+              <span>{diagnosisError}</span>
+            </div>
+          ) : null}
+          {diagnosisData ? (
+            (() => {
+              const diagnosis: ProjectDiagnosis = diagnosisData;
+              return (
+                <>
+                  <div className="pp-diag-head">
+                    <div>
+                      <span className="pp-eyebrow">
+                        <Sparkles size={10} /> {t("Diagnosis")}
+                      </span>
+                      <p>{t("Read-only root-cause and design analysis generated before planning.")}</p>
+                    </div>
+                    <div className="pp-diag-head-actions">
+                      <button
+                        type="button"
+                        onClick={() => void runDiagnosis()}
+                        disabled={diagnosisBusy || !queue?.goal}
+                        title={t("Run the diagnosis again")}
+                      >
+                        {diagnosisBusy ? <Loader2 size={11} className="spin" /> : <RefreshCw size={11} />}
+                      </button>
+                      <span className={`pp-diag-confidence ${diagnosis.confidence < 0.5 ? "is-low" : ""}`}>
+                        {Math.round(diagnosis.confidence * 100)}%
+                      </span>
+                    </div>
+                  </div>
+
+                  <section className="pp-diag-problem">
+                    <h4>{t("Problem")}</h4>
+                    <p>{plainText(diagnosis.problem, 500)}</p>
+                    <h4>{t("Root cause")}</h4>
+                    <p>{plainText(diagnosis.rootCause, 900)}</p>
+                  </section>
+
+                  {diagnosis.facts.length > 0 ? (
+                    <section className="pp-diag-section">
+                      <h4>
+                        <FileCode2 size={11} /> {t("Facts")}
+                      </h4>
+                      {diagnosis.facts.slice(0, 8).map((fact, index) => (
+                        <div className="pp-diag-fact" key={`${fact.claim}-${index}`}>
+                          <b>{plainText(fact.claim, 220)}</b>
+                          {fact.file ? (
+                            <button
+                              type="button"
+                              className="pp-diag-file"
+                              onClick={() => onOpenFile?.(fact.file!)}
+                              title={fact.file}
+                            >
+                              {fact.file}
+                              {fact.line ? `:${fact.line}` : ""}
+                            </button>
+                          ) : null}
+                        </div>
+                      ))}
+                    </section>
+                  ) : null}
+
+                  {diagnosis.constraints.length > 0 || diagnosis.unknowns.length > 0 ? (
+                    <section className="pp-diag-section">
+                      <h4>
+                        <ShieldCheck size={11} /> {t("Constraints & unknowns")}
+                      </h4>
+                      {diagnosis.constraints.map((constraint) => (
+                        <div className="pp-diag-line" key={constraint}>
+                          <span className="pp-chip">{t("constraint")}</span>
+                          <b>{plainText(constraint, 160)}</b>
+                        </div>
+                      ))}
+                      {diagnosis.unknowns.map((unknown) => (
+                        <div className="pp-diag-line" key={unknown}>
+                          <span className="pp-chip is-warn">{t("unknown")}</span>
+                          <b>{plainText(unknown, 180)}</b>
+                        </div>
+                      ))}
+                    </section>
+                  ) : null}
+
+                  {diagnosis.designs.length > 0 ? (
+                    <section className="pp-diag-section">
+                      <h4>
+                        <Network size={11} /> {t("Designs")}
+                      </h4>
+                      {diagnosis.designs.map((design) => {
+                        const chosen = design.name === diagnosis.chosenDesign;
+                        return (
+                          <div className={`pp-diag-design ${chosen ? "is-chosen" : ""}`} key={design.name}>
+                            <div className="pp-diag-design-head">
+                              <b>{design.name}</b>
+                              <span className={`pp-chip ${chosen ? "is-ok" : ""}`}>
+                                {chosen ? t("chosen") : design.risk}
+                              </span>
+                            </div>
+                            <p>{plainText(design.summary, 300)}</p>
+                            {design.pros.length > 0 ? <small>+ {design.pros.join(" · ")}</small> : null}
+                            {design.cons.length > 0 ? <small>− {design.cons.join(" · ")}</small> : null}
+                          </div>
+                        );
+                      })}
+                      {diagnosis.rationale ? (
+                        <p className="pp-diag-rationale">
+                          <b>{t("Why:")}</b> {plainText(diagnosis.rationale, 400)}
+                        </p>
+                      ) : null}
+                    </section>
+                  ) : null}
+
+                  {diagnosis.callSites.length > 0 || diagnosis.includes.length > 0 || diagnosis.impact.length > 0 ? (
+                    <section className="pp-diag-section">
+                      <h4>
+                        <Wrench size={11} /> {t("Call sites & impact")}
+                      </h4>
+                      {[...diagnosis.callSites, ...diagnosis.includes, ...diagnosis.impact].slice(0, 10).map((item) => (
+                        <small className="pp-diag-mono" key={item}>
+                          {plainText(item, 180)}
+                        </small>
+                      ))}
+                    </section>
+                  ) : null}
+
+                  {diagnosis.failureModes.length > 0 || diagnosis.rollback ? (
+                    <section className="pp-diag-section">
+                      <h4>
+                        <AlertTriangle size={11} /> {t("Failure modes & rollback")}
+                      </h4>
+                      {diagnosis.failureModes.slice(0, 6).map((mode) => (
+                        <div className="pp-diag-failure" key={mode.scenario}>
+                          <b>{plainText(mode.scenario, 180)}</b>
+                          <small>{plainText(mode.impact, 160)}</small>
+                          <small className="is-fix">→ {plainText(mode.mitigation, 180)}</small>
+                        </div>
+                      ))}
+                      {diagnosis.rollback ? (
+                        <p className="pp-diag-rollback">
+                          <b>{t("Rollback:")}</b> {plainText(diagnosis.rollback, 300)}
+                        </p>
+                      ) : null}
+                    </section>
+                  ) : null}
+
+                  <section className="pp-diag-section">
+                    <h4>
+                      <CheckCircle2 size={11} /> {t("Verification")}
+                    </h4>
+                    {diagnosis.verification.command ? (
+                      <code className="pp-brain-command">{diagnosis.verification.command}</code>
+                    ) : null}
+                    {diagnosis.verification.checks.map((check) => (
+                      <small className="pp-diag-check" key={check}>
+                        {plainText(check, 200)}
+                      </small>
+                    ))}
+                    {diagnosis.verification.expected.map((expected) => (
+                      <small className="pp-diag-mono" key={expected}>
+                        → {plainText(expected, 180)}
+                      </small>
+                    ))}
+                  </section>
+
+                  {diagnosis.todos.length > 0 ? (
+                    <section className="pp-diag-section">
+                      <h4>
+                        <ListChecks size={11} /> {t("Todos")}
+                      </h4>
+                      {diagnosis.todos.map((todo) => (
+                        <div className="pp-diag-line" key={todo}>
+                          <span className="pp-card-dot" />
+                          <b>{plainText(todo, 180)}</b>
+                        </div>
+                      ))}
+                    </section>
+                  ) : null}
+
+                  <div className="pp-diag-meta">
+                    <span>{diagnosis.provider ?? "—"}/{diagnosis.model ?? "—"}</span>
+                    <span>{diagnosis.tokenUsage?.totalTokens?.toLocaleString() ?? 0} tokens</span>
+                    <span>{formatDate(diagnosis.createdAt, locale)}</span>
+                  </div>
+                </>
+              );
+            })()
+          ) : (
+            <div className="pp-todos-empty">
+              <Sparkles size={17} />
+              <strong>{diagnosisBusy ? t("Running diagnosis…") : t("No diagnosis yet")}</strong>
+              <span>{t("Run a build task; the read-only diagnosis appears here before planning.")}</span>
+              {queue?.goal ? (
+                <button className="pp-open-queue" onClick={() => void runDiagnosis()} disabled={diagnosisBusy}>
+                  {diagnosisBusy ? <Loader2 size={11} className="spin" /> : <Sparkles size={11} />} {t("Run diagnosis")}
+                </button>
+              ) : null}
             </div>
           )}
         </div>

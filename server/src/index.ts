@@ -64,7 +64,8 @@ import {
   updateTask,
 } from "./tasks";
 import type { ProjectTask } from "../../shared/tasks";
-import { compactProjectBrainBrief, ensureProjectBrain, getProjectBrainView, refreshProjectBrain } from "./projectBrain";
+import { ensureProjectBrain, getProjectBrainView, refreshProjectBrain, compactProjectBrainBrief } from "./projectBrain";
+import { compactDiagnosisBrief, diagnoseProject, diagnosisPaths, loadDiagnosis } from "./ai/diagnosis";
 import { getPublicSettings, resolveAgentRole, resolveProvider, updateAiSettings } from "./ai/settings";
 import { allToolSpecs } from "./ai/toolRegistry";
 import { runTryTool, tryableToolActions } from "./ai/tools/tryRegistry";
@@ -2708,6 +2709,62 @@ app.post("/api/projects/:id/brain/refresh", async (req, res) => {
       paths: {
         json: ".cie/agent/project-brain.json",
         markdown: ".cie/agent/project-brain.md",
+      },
+    });
+  } catch (error) {
+    handleError(res, error, 400);
+  }
+});
+
+app.get("/api/projects/:id/diagnosis", async (req, res) => {
+  try {
+    const analysis = await loadAnalysis(req.params.id);
+    const diagnosis = await loadDiagnosis(analysis.rootPath);
+    res.json({
+      diagnosis,
+      brief: compactDiagnosisBrief(diagnosis),
+      paths: {
+        json: ".cie/agent/diagnosis.json",
+        markdown: ".cie/agent/diagnosis.md",
+      },
+    });
+  } catch (error) {
+    handleError(res, error, 404);
+  }
+});
+
+app.post("/api/projects/:id/diagnosis", async (req, res) => {
+  try {
+    const analysis = await loadAnalysis(req.params.id);
+    const queue = await getProjectTaskQueue(req.params.id).catch(() => null);
+    const goal =
+      (typeof req.body?.goal === "string" ? req.body.goal.trim() : "") ||
+      queue?.goal ||
+      "";
+    if (!goal) {
+      res.status(400).json({ error: "A goal is required for diagnosis." });
+      return;
+    }
+    const result = await diagnoseProject(analysis, goal, {
+      provider: typeof req.body?.provider === "string" ? req.body.provider : undefined,
+      model: typeof req.body?.model === "string" ? req.body.model : undefined,
+      constraints: Array.isArray(req.body?.constraints)
+        ? req.body.constraints.filter((item: unknown): item is string => typeof item === "string")
+        : undefined,
+      language: typeof req.body?.language === "string" ? req.body.language : undefined,
+    });
+    const paths = diagnosisPaths(analysis.rootPath);
+    res.json({
+      diagnosis: result.diagnosis,
+      brief: compactDiagnosisBrief(result.diagnosis),
+      usedFallback: result.usedFallback,
+      provider: result.provider,
+      model: result.model,
+      tokenUsage: result.tokenUsage,
+      costUsd: result.costUsd,
+      paths: {
+        json: ".cie/agent/diagnosis.json",
+        markdown: ".cie/agent/diagnosis.md",
       },
     });
   } catch (error) {

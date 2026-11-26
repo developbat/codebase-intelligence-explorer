@@ -7,6 +7,7 @@ import type {
   AiWorkspaceMode,
 } from "../../../shared/ai";
 import type { IntentAnalysis } from "../../../shared/intent";
+import type { ProjectDiagnosis } from "../../../shared/diagnosis";
 import type {
   ProjectTask,
   ProjectTaskEffort,
@@ -63,6 +64,12 @@ import {
   extractProjectConstraints,
   updateProjectBrainFromTask,
 } from "../projectBrain";
+import {
+  compactDiagnosisBrief,
+  diagnoseProject,
+  diagnosisPaths,
+  type DiagnoseResult,
+} from "./diagnosis";
 import {
   RECOVERY_POLICY,
   buildResumeContract,
@@ -623,6 +630,8 @@ export async function planProjectTasks(
     replan?: boolean;
     intent?: IntentAnalysis;
     history?: { role: "user" | "assistant"; content: string }[];
+    /** Read-only diagnosis generated before planning. */
+    diagnosis?: ProjectDiagnosis;
     /** Build a queue for inspection without writing it to the project. */
     dryRun?: boolean;
   } = {},
@@ -663,6 +672,9 @@ export async function planProjectTasks(
         projectFacts(analysis),
         projectBrainBrief
           ? `Persistent project brain (authoritative; reuse it instead of rediscovering the project):\n${projectBrainBrief}`
+          : "",
+        options.diagnosis
+          ? `Pre-edit diagnosis (authoritative; build tasks from this, do not repeat the analysis):\n${compactDiagnosisBrief(options.diagnosis)}`
           : "",
         `Project files (all): ${allFiles}`,
         goalFiles.length > 0 ? `Goal-relevant files: ${goalFiles.join(", ")}` : "",
@@ -1461,6 +1473,7 @@ function taskInstruction(
   originalRequest?: string,
   language?: string,
   projectBrief?: string,
+  diagnosisBrief?: string,
 ): string {
   const brief = resolveWorkBrief(task.title);
   const extractionTask = brief?.mode === "extract";
@@ -1494,6 +1507,9 @@ function taskInstruction(
       : "",
     projectBrief
       ? `Persistent project brain (authoritative project memory; trust this before rediscovering the repository):\n${projectBrief}`
+      : "",
+    diagnosisBrief
+      ? `Pre-edit diagnosis (authoritative; follow this root cause/design/verification instead of repeating the analysis):\n${diagnosisBrief}`
       : "",
     `Task: ${task.title}`,
     cleanTaskDetail(task.detail),
@@ -1979,6 +1995,17 @@ function evalHasAssertion(item: Record<string, unknown>): boolean {
   );
 }
 
+/** A real behavior assertion in the same check (visibility alone is not enough). */
+function hasBehaviorAssertion(steps: Record<string, unknown>[]): boolean {
+  return steps.some((item) => {
+    const action = String(item.action ?? "");
+    if (["expectText", "expectValue", "expectCount", "expectStable"].includes(action)) {
+      return true;
+    }
+    return action === "eval" && typeof item.expectText === "string";
+  });
+}
+
 /** Runtime proof that a spawned item is on a walkable/reachable cell or collectible. */
 export function isSpawnPlacementEvidenceCheck(step: AiAgentStep): boolean {
   if (!step.ok) return false;
@@ -1986,22 +2013,21 @@ export function isSpawnPlacementEvidenceCheck(step: AiAgentStep): boolean {
     return false;
   }
   const steps = browserCheckSteps(step);
-  const hasProbe = steps.some((item) => {
+  const probeItem = steps.find((item) => {
     if (String(item.action ?? "") !== "eval") return false;
     const script = String(item.script ?? "");
-    const objectProbe = /rewards?|collectible|pickup|pellet|gem|blue|ball|mavi|top|item/i.test(
-      script,
+    return (
+      /rewards?|collectible|pickup|pellet|gem|blue|ball|mavi|top|item/i.test(script) &&
+      /isWall|reachable|walkable|BFS|path|duvar|geçilebilir|hareket|map|floor|zemin/i.test(script)
     );
-    const walkability = /isWall|reachable|walkable|BFS|path|duvar|geçilebilir|hareket|map|floor|zemin/i.test(
-      script,
-    );
-    return objectProbe && walkability && evalHasAssertion(item);
   });
-  if (hasProbe) return true;
+  if (probeItem && (evalHasAssertion(probeItem) || hasBehaviorAssertion(steps))) {
+    return true;
+  }
   const observation = step.observation ?? "";
   return (
-    /rewards?|collectible|pickup|pellet|gem|blue|ball|mavi|top|item/i.test(observation) &&
-    /isWall|reachable|walkable|duvar|geçilebilir|floor|wall|zemin|map/i.test(observation) &&
+    /rewards?|collectible|pickup|pellet|gem|blue|ball|mavi|top|item|gained|respawn/i.test(observation) &&
+    /isWall|reachable|walkable|duvar|geçilebilir|floor|wall|zemin|map|walk|notSpecial/i.test(observation) &&
     /PASS|expectText|expectValue|expectCount|expectStable/i.test(observation)
   );
 }
@@ -2046,13 +2072,14 @@ export function isRandomStartEvidenceCheck(step: AiAgentStep): boolean {
     return false;
   }
   const steps = browserCheckSteps(step);
-  const probe = steps.some(
+  const probeItem = steps.find(
     (item) =>
       String(item.action ?? "") === "eval" &&
-      /LEVELS|level|start|restart|Math\.random|bölüm/i.test(String(item.script ?? "")) &&
-      evalHasAssertion(item),
+      /LEVELS|level|start|restart|Math\.random|bölüm/i.test(String(item.script ?? "")),
   );
-  if (probe) return true;
+  if (probeItem && (evalHasAssertion(probeItem) || hasBehaviorAssertion(steps))) {
+    return true;
+  }
   const observation = step.observation ?? "";
   return (
     /random|rastgele|levels?\s*[:=]|bölüm|\d+\/\d+/i.test(observation) &&
@@ -2859,6 +2886,67 @@ export async function runProjectLoop(
     workspaceMode !== "build" ||
     patchGoal ||
     (intent?.mode === "single" && !multiPartGoal && !lowConfidenceLargeGoal);
+  const diagnosisWanted =
+    workspaceMode === "build" &&
+    !patchGoal &&
+    intent?.kind !== "question" &&
+    intent?.kind !== "analyze" &&
+    intent?.kind !== "run" &&
+    goal.trim().length > 0;
+  let diagnosis: ProjectDiagnosis | null =
+    queue?.diagnosis &&
+    queue.diagnosis.goal.trim() === goal.trim() &&
+    options.replan !== true
+      ? queue.diagnosis
+      : null;
+  let diagnosisResult: DiagnoseResult | null = null;
+  if (diagnosisWanted && !diagnosis) {
+    emit({
+      type: "log",
+      entry: {
+        id: `log-${Date.now()}-diagnosis-start`,
+        at: nowIso(),
+        level: "info",
+        label: "Diagnosis started",
+        detail: "Read-only root-cause and design analysis before planning.",
+      },
+    });
+    diagnosisResult = await diagnoseProject(analysis, goal, {
+      provider: options.provider,
+      model: options.model,
+      constraints: options.intent?.constraints,
+      language: options.language,
+      signal,
+    }).catch(() => null);
+    if (diagnosisResult) {
+      const ready = diagnosisResult.diagnosis;
+      diagnosis = ready;
+      emit({
+        type: "log",
+        entry: {
+          id: `log-${Date.now()}-diagnosis-ready`,
+          at: nowIso(),
+          level: diagnosisResult.usedFallback ? "warn" : "success",
+          label: diagnosisResult.usedFallback ? "Diagnosis fallback" : "Diagnosis ready",
+          detail: `${ready.chosenDesign} · ${Math.round(ready.confidence * 100)}% · ${
+            diagnosisResult.tokenUsage?.totalTokens?.toLocaleString() ?? "0"
+          } tokens${diagnosisResult.usedFallback ? " · structured diagnosis unavailable" : ""} · ${ready.rootCause.slice(0, 160)}`,
+        },
+      });
+    }
+  } else if (diagnosis) {
+    emit({
+      type: "log",
+      entry: {
+        id: `log-${Date.now()}-diagnosis-reuse`,
+        at: nowIso(),
+        level: "info",
+        label: "Diagnosis reused",
+        detail: `${diagnosis.chosenDesign} · ${Math.round(diagnosis.confidence * 100)}% (same goal)`,
+      },
+    });
+  }
+  const diagnosisBrief = diagnosis ? compactDiagnosisBrief(diagnosis) : "";
   let plannedNow = false;
   if (
     !queue ||
@@ -2894,8 +2982,28 @@ export async function runProjectLoop(
         signal,
         intent,
         history: options.history,
+        diagnosis: diagnosis ?? undefined,
       });
     }
+  }
+
+  if (diagnosis && queue) {
+    const stageUsage = queue.stageUsage ?? {};
+    queue = {
+      ...queue,
+      diagnosis,
+      diagnosisPath: ".cie/agent/diagnosis.md",
+      stageUsage: {
+        ...stageUsage,
+        diagnosis: diagnosisResult?.tokenUsage
+          ? { ...diagnosisResult.tokenUsage, costUsd: diagnosisResult.costUsd }
+          : stageUsage.diagnosis,
+        costUsd: (stageUsage.costUsd ?? 0) + (diagnosisResult?.costUsd ?? 0),
+      },
+      updatedAt: nowIso(),
+    };
+    queue = await saveQueue(analysis.rootPath, queue);
+    emit({ type: "task", queue });
   }
 
   if (
@@ -3350,6 +3458,7 @@ ${collapsed.tasks[0].checklist
         queue.goal,
         options.language,
         projectBriefText,
+        diagnosisBrief,
       ),
       {
         activeFile: options.activeFile,

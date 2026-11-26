@@ -30,6 +30,7 @@ import type {
 } from "../../shared/types";
 import type { ContentInventory } from "../../shared/contentInventory";
 import type { ProjectBrainView } from "../../shared/projectBrain";
+import type { ProjectDiagnosisView } from "../../shared/diagnosis";
 import type {
   AiAgentEvent,
   AiAgentResult,
@@ -148,6 +149,27 @@ export const api = {
 
   refreshProjectBrain: (id: string) =>
     request<ProjectBrainView>(`/api/projects/${id}/brain/refresh`, { method: "POST" }),
+
+  projectDiagnosis: (id: string) =>
+    request<ProjectDiagnosisView>(`/api/projects/${id}/diagnosis`),
+
+  runProjectDiagnosis: (
+    id: string,
+    goal: string,
+    options: { provider?: string; model?: string; language?: string; constraints?: string[] } = {},
+  ) =>
+    request<
+      ProjectDiagnosisView & {
+        usedFallback?: boolean;
+        provider?: string;
+        model?: string;
+        tokenUsage?: { inputTokens: number; outputTokens: number; totalTokens: number };
+        costUsd?: number;
+      }
+    >(`/api/projects/${id}/diagnosis`, {
+      method: "POST",
+      body: JSON.stringify({ goal, ...options }),
+    }),
 
   projectIconUrl: (id: string, version?: string) => {
     const query = version ? `?v=${encodeURIComponent(version)}` : "";
