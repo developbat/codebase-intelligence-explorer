@@ -89,6 +89,8 @@ test("inspection tasks are recognized and may finish without edits", () => {
       id: "task-1",
       title: "Inspect existing project files and structure",
       detail: "Read the files and report the structure.",
+      readOnly: true,
+      action: "other",
       status: "in_progress",
       effort: "standard",
       role: "main",
@@ -106,6 +108,8 @@ test("inspection tasks are recognized and may finish without edits", () => {
       id: "task-list",
       title: "dosyada eksik işleri başlıkları ve iş açıklamaları ile getirip listeler misin?",
       detail: "List the unchecked items.",
+      readOnly: true,
+      action: "other",
       status: "pending",
       effort: "standard",
       role: "main",
@@ -123,6 +127,7 @@ test("inspection tasks are recognized and may finish without edits", () => {
       id: "task-2",
       title: "Add date and time input fields",
       detail: "Implement the form changes.",
+      action: "update",
       status: "pending",
       effort: "simple",
       role: "fast",
@@ -217,6 +222,8 @@ test("an edit task with inspection context is not a verification task", () => {
     id: "task-1",
     title: "form kısmında görev kişisi eklenmeli",
     detail: "Mevcut form yapısını inceleyerek alanı ekleyin.",
+    action: "update" as const,
+    verificationOnly: false,
     status: "pending" as const,
     effort: "simple" as const,
     role: "fast" as const,
@@ -228,7 +235,10 @@ test("an edit task with inspection context is not a verification task", () => {
     updatedAt: "",
   };
   assert.equal(taskLooksLikeVerification(task), false);
-  assert.equal(taskLooksLikeVerification({ ...task, title: "Verify the form" }), true);
+  assert.equal(
+    taskLooksLikeVerification({ ...task, action: "verify", verificationOnly: true }),
+    true,
+  );
   assert.equal(taskLooksLikeWrite(task), true);
 });
 
@@ -256,9 +266,10 @@ test("ask mode is a cheap read-only task profile", () => {
   assert.match(task.acceptance ?? "", /question is answered/i);
 });
 
-test("read-only write detection ignores reporting and listing work", () => {
+test("write detection uses structured task fields", () => {
   const base = {
     id: "task-1",
+    title: "Do the work",
     detail: "",
     status: "pending" as const,
     effort: "simple" as const,
@@ -270,27 +281,11 @@ test("read-only write detection ignores reporting and listing work", () => {
     createdAt: "",
     updatedAt: "",
   };
-  assert.equal(taskLooksLikeWrite({ ...base, title: "List every button and report the result" }), false);
-  assert.equal(taskLooksLikeWrite({ ...base, title: "Inspect the UI and list the buttons" }), false);
-  assert.equal(taskLooksLikeWrite({ ...base, title: "Add a fire button to the game UI" }), true);
-  assert.equal(taskLooksLikeWrite({ ...base, title: "Butonlari listele ve eksik olani ekle" }), true);
-  assert.equal(
-    taskLooksLikeWrite({
-      ...base,
-      title: "bana uygulamadaki buton listesini getir",
-      detail:
-        "Kullanıcı tüm butonları istiyor. Yaklaşım: etiketleri arayıp eksiksiz bir liste oluştur.",
-    }),
-    false,
-  );
-  assert.equal(
-    taskLooksLikeWrite({
-      ...base,
-      title: "List the buttons",
-      detail: "Create a complete inventory and report it.",
-    }),
-    false,
-  );
+  assert.equal(taskLooksLikeWrite({ ...base, action: "other", readOnly: true }), false);
+  assert.equal(taskLooksLikeWrite({ ...base, action: "verify", readOnly: true }), false);
+  assert.equal(taskLooksLikeWrite({ ...base, action: "update" }), true);
+  assert.equal(taskLooksLikeWrite({ ...base, action: "create" }), true);
+  assert.equal(taskLooksLikeWrite({ ...base, action: "run" }), false);
 });
 
 test("task budgets scale with effort and stop runaway usage", () => {

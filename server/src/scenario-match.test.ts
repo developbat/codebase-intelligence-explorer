@@ -65,6 +65,9 @@ test("finds a saved scenario for a scoring verification task", async () => {
 
     const realTask = task({
       title: "Verify target-30 scenario and ×1 scoring gives +1 with no code edits",
+      verificationOnly: true,
+      action: "verify",
+      readOnly: true,
       detail:
         "Do not modify any file. Run the existing score-30 scenario using public keys; do not add new hooks.",
       acceptance:
@@ -84,6 +87,9 @@ test("recognizes verification-only tasks but not behavior edits", () => {
         title: "Run score-30 scenario without editing code",
         detail: "Verify the score deltas.",
         acceptance: "Scenario passes.",
+        verificationOnly: true,
+        action: "verify",
+        readOnly: true,
       }),
     ),
     true,
@@ -94,6 +100,8 @@ test("recognizes verification-only tasks but not behavior edits", () => {
         title: "Award points as the smaller operand",
         detail: "Change submitRound to use Math.min.",
         acceptance: "Score matches.",
+        action: "update",
+        verificationOnly: false,
       }),
     ),
     false,
@@ -104,6 +112,8 @@ test("recognizes verification-only tasks but not behavior edits", () => {
         title: "Implement division from level 3",
         detail: "Implement OPS and makeTarget.",
         acceptance: "Division works.",
+        action: "update",
+        verificationOnly: false,
       }),
     ),
     false,
@@ -114,6 +124,8 @@ test("recognizes verification-only tasks but not behavior edits", () => {
         title: "Make feedback re-trigger reliably and verify both cases",
         detail: "Verify after the change.",
         acceptance: "Both cases pass.",
+        action: "update",
+        verificationOnly: false,
       }),
     ),
     false,

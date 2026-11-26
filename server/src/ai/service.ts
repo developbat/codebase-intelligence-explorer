@@ -1682,11 +1682,17 @@ async function chatCompleteTracked(
 export async function askProject(
   projectId: string,
   question: string,
-  options: { provider?: Parameters<typeof resolveProvider>[0]; model?: string; history?: ChatMessage[]; language?: string } = {},
+  options: {
+    provider?: Parameters<typeof resolveProvider>[0];
+    model?: string;
+    history?: ChatMessage[];
+    language?: string;
+    intent?: IntentAnalysis;
+  } = {},
 ): Promise<AiChatResult> {
   const analysis = await loadAnalysis(projectId);
   const config = await resolveProvider(options.provider, options.model);
-  const tokens = keywords(question);
+  const tokens = keywords(options.intent?.normalizedRequest || question);
 
   let scored = analysis.nodes
     .filter((node) => !["project", "folder", "module"].includes(node.kind))
@@ -1715,7 +1721,16 @@ export async function askProject(
       .map((node) => ({ node, score: 0 }));
   }
 
-  const contextParts: string[] = [projectBrief(analysis), ""];
+  const contextParts: string[] = [
+    projectBrief(analysis),
+    options.intent?.normalizedRequest ? `Interpreted request: ${options.intent.normalizedRequest}` : "",
+    options.intent?.behaviors?.length
+      ? `Requested behaviors: ${options.intent.behaviors
+          .map((behavior) => `${behavior.action} ${behavior.target}`)
+          .join("; ")}`
+      : "",
+    "",
+  ];
   const contextFiles: AiContextFile[] = [];
   const indexHits = [
     ...(await searchConversations(analysis.id, question, 3)),
@@ -1811,6 +1826,7 @@ export async function answerGeneralChat(
     model?: string;
     language?: string;
     history?: { role: "user" | "assistant"; content: string }[];
+    intent?: IntentAnalysis;
     onToken?: (chunk: string) => void;
   } = {},
 ): Promise<AiAgentResult> {
@@ -1822,6 +1838,17 @@ export async function answerGeneralChat(
         "You are a concise, friendly assistant inside a code editor.",
         "This message does not need project inspection, so answer directly without tools.",
         "If the user asks about their own code or project, say you need to inspect it and ask them to send it as a project request; never guess project details.",
+        options.intent?.normalizedRequest
+          ? `Interpreted request (canonical): ${options.intent.normalizedRequest}`
+          : "",
+        options.intent?.behaviors?.length
+          ? `Requested behaviors: ${options.intent.behaviors
+              .map((behavior) => `${behavior.action} ${behavior.target}${behavior.details ? ` (${behavior.details})` : ""}`)
+              .join("; ")}`
+          : "",
+        options.intent?.constraints?.length
+          ? `Constraints: ${options.intent.constraints.join("; ")}`
+          : "",
         aiLanguageInstruction(options.language ?? "en"),
       ].join("\n"),
     },

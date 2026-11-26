@@ -890,31 +890,12 @@ export async function planProjectTasks(
   return queue;
 }
 
-const TASK_WRITE_VERBS =
-  /\b(add|create|implement|update|change|edit|write|refactor|fix|remove|delete|rename|move|append|replace|insert|build|generate|repair|wire|restore|ensure|enable|disable|unlock|allow|prevent|make|define|adjust|route|set|use|render|tune|enforce|expose|register|convert|support|extend|validate|improve|optimize|enhance)\b|oluştur|ekle|güncelle|değiştir|düzelt|sil|taşı|yaz|kaldır|onar|bağla|kaydet|düzenle|iyileştir|optimize et/i;
-const TASK_INSPECTION_VERBS =
-  /\b(inspect|read|review|verify|check|analy[sz]e|research|understand|plan|list|show|explain|find|enumerate|count)\b|incele|oku|gözden geçir|doğrula|kontrol et|araştır|listele|listeler|listeleme|liste|göster|açıkla|(?<![a-zçğıöşü])say(?![a-zçğıöşü])/i;
-
-// Turkish goals often describe the desired end state instead of using an
-// imperative verb ("işlem gösterilmeyecek", "buton aktif olacak"). Treat those
-// state-change phrases as edits; otherwise they look like read-only inspection.
-const TASK_CHANGE_PHRASES =
-  /(gösterilmeyecek|gösterilecek|gösterilmesin|olacak|olcak|olmalı|olması|olmasın|olmayacak|değişecek|değiştirilecek|kaldırılacak|eklenecek|yapılacak|birleştirilecek|taşınacak|gizlenecek|gizle|aktif olacak|pasif olacak|aktif olsun|pasif olsun|tek bir|sadece[^.]{0,40}aktif|buton[^.]{0,40}aktif)/i;
-
 export function taskLooksLikeWrite(task: ProjectTask): boolean {
   if (task.readOnly === true) return false;
-  if (task.action) {
-    return ["create", "update", "remove", "move", "document"].includes(task.action);
-  }
-  const title = task.title;
-  const titleWrite = TASK_WRITE_VERBS.test(title) || TASK_CHANGE_PHRASES.test(title);
-  // The title is the user's actual goal. The detail is model-generated planning
-  // text and often says "create a list", "report" or "build an inventory" even
-  // for a read-only question. Never let that wording turn a list/question into
-  // a project edit.
-  if (TASK_INSPECTION_VERBS.test(title) && !titleWrite) return false;
-  if (titleWrite) return true;
-  return TASK_WRITE_VERBS.test(task.detail) || TASK_CHANGE_PHRASES.test(task.detail);
+  return (
+    task.action !== undefined &&
+    ["create", "update", "remove", "move", "document"].includes(task.action)
+  );
 }
 
 export function blockDependentsOf(
@@ -949,21 +930,11 @@ export function blockDependentsOf(
 }
 
 export function taskLooksLikeInspection(task: ProjectTask): boolean {
-  if (task.readOnly === true) return true;
-  if (task.action) return task.action === "verify";
-  const title = task.title;
-  const inspection =
-    /\b(inspect|read|review|analy[sz]e|research|understand|explore|audit|list|enumerate|count)\b|incele|oku|gözden geçir|araştır|analiz et|listele|listeler|listeleme|liste|kaç|kontrol et|kontrol/i;
-  const write = /\b(fix|update|add|create|write|implement|change|remove|delete|rename|move|refactor|repair|wire|restore|ensure|enable|tune|adjust|enforce|report|expose|register|route)\b|düzelt|ekle|oluştur|yaz|güncelle|değiştir|sil|taşı|onar|bağla/i;
-  return inspection.test(title) && !write.test(title);
+  return task.readOnly === true || task.action === "verify";
 }
 
 export function taskLooksLikeVerification(task: ProjectTask): boolean {
-  if (task.verificationOnly !== undefined) return task.verificationOnly;
-  if (task.action) return task.action === "verify";
-  return /\b(verify|verification|check|test|validate|confirm|review)\b|doğrula|kontrol|test et/i.test(
-    task.title,
-  );
+  return task.verificationOnly === true || task.action === "verify";
 }
 
 export function summaryAllowsNoChanges(summary: string): boolean {
@@ -1566,28 +1537,12 @@ export function taskBudgetEffort(task: ProjectTask): ProjectTaskEffort {
   if (task.surface === "ui" || task.surface === "game" || task.verificationOnly === true) {
     return "standard";
   }
-  const text = `${task.title}\n${cleanTaskDetail(task.detail)}`;
-  const uiOrVerification =
-    taskLooksLikeVerification(task) ||
-    /\b(?:browser|ui|ux|arayüz|arayuz|canvas|game|oyun|ekran|page|sayfa|html|css|screenshot|responsive|mobil|buton|button|aktif|pasif|hud|bar|göster|gizle|hesap|menü|menu|layout|düzen|renk|color)\b|\.(?:html?|css|jsx?|tsx?|vue|svelte)\b/i.test(
-      text,
-    );
-  return uiOrVerification ? "standard" : "simple";
+  return "simple";
 }
 
 /** A mechanical edit with an exact file/line target should use a short context budget. */
 export function isMicroEditTask(task: ProjectTask): boolean {
-  if (task.microEdit !== undefined) return task.microEdit;
-  const text = `${task.title}\n${task.detail}\n${task.acceptance ?? ""}`;
-  if (/one-line|only that line|change only that line|sadece .*satır|tek satır/i.test(text)) {
-    return true;
-  }
-  const exactLine =
-    /\b[A-Za-z0-9_./-]+\.(?:js|mjs|cjs|jsx|ts|tsx|css|html?|py|php|go|rs|java|kt|kts|cs|rb|swift|dart|json|md):\d+/i.test(
-      text,
-    ) || /\bline\s+\d{2,4}\b/i.test(text);
-  const broad = /project-wide|multiple files|all files|refactor|architecture|redesign/i.test(text);
-  return exactLine && !broad && text.length < 3_000;
+  return task.microEdit === true;
 }
 
 interface RetryRecovery {

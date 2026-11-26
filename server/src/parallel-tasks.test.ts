@@ -146,6 +146,8 @@ async function runScenario(tasks: ScenarioTask[], parallelTasks: number): Promis
         status: "pending" as const,
         effort: "standard" as const,
         role: "main" as const,
+        action: "update" as const,
+        surface: "other" as const,
         dependsOn: [],
         attempts: 0,
         changedFiles: [],

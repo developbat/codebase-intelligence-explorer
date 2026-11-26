@@ -1842,11 +1842,28 @@ app.post("/api/projects/:id/ai/chat", async (req, res) => {
           )
           .slice(-6)
       : [];
+    const analyzed = await analyzeIntent(req.params.id, question, {
+      provider,
+      model: typeof req.body?.model === "string" ? req.body.model : undefined,
+      language: typeof req.body?.language === "string" ? req.body.language : undefined,
+      history,
+    }).catch(() => null);
+    if (analyzed?.intent.needsClarification) {
+      res.json({
+        answer: analyzed.intent.question,
+        evidence: [],
+        provider: analyzed.provider,
+        model: analyzed.model,
+        createdAt: new Date().toISOString(),
+      });
+      return;
+    }
     const result = await askProject(req.params.id, question, {
       provider,
       model: typeof req.body?.model === "string" ? req.body.model : undefined,
       history,
       language: typeof req.body?.language === "string" ? req.body.language : undefined,
+      intent: analyzed?.intent,
     });
     res.json(result);
   } catch (error) {
@@ -1952,6 +1969,7 @@ app.post("/api/projects/:id/ai/agent", async (req, res) => {
         provider,
         model: typeof req.body?.model === "string" ? req.body.model : undefined,
         language: typeof req.body?.language === "string" ? req.body.language : undefined,
+        intent,
         history: Array.isArray(req.body?.history)
           ? req.body.history
               .filter(
@@ -2101,6 +2119,7 @@ app.post("/api/projects/:id/ai/agent/stream", async (req, res) => {
           typeof req.body?.provider === "string" ? (req.body.provider as AiProviderId) : undefined,
         model: typeof req.body?.model === "string" ? req.body.model : undefined,
         language: typeof req.body?.language === "string" ? req.body.language : undefined,
+        intent,
         history,
         onToken: (chunk) => write({ type: "token", text: chunk }),
       });
@@ -2443,6 +2462,7 @@ app.post("/api/projects/:id/ai/loop/stream", async (req, res) => {
           typeof req.body?.provider === "string" ? (req.body.provider as AiProviderId) : undefined,
         model: typeof req.body?.model === "string" ? req.body.model : undefined,
         language: typeof req.body?.language === "string" ? req.body.language : undefined,
+        intent,
         history,
         onToken: (chunk) => write({ type: "token", text: chunk }),
       });

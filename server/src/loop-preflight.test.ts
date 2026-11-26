@@ -218,6 +218,7 @@ test("turkish number words are not mistaken for an inspection request", () => {
     title: "hedef sayıya ulaşmaya çalış",
     detail: "Bu davranışı oyuna ekle.",
     acceptance: "Çalışır.",
+    action: "update",
     status: "pending",
     effort: "simple",
     role: "main",
@@ -248,6 +249,8 @@ test("UI and verification tasks get a standard budget even when planned simple",
     title: "Hedef sayı turunu doğrula",
     detail: "Canvas oyununu browser ile kontrol et.",
     acceptance: "Doğrulandı.",
+    surface: "ui",
+    verificationOnly: true,
     effort: "simple",
   } as unknown as Parameters<typeof taskBudgetEffort>[0];
   const textTask = {
@@ -255,6 +258,7 @@ test("UI and verification tasks get a standard budget even when planned simple",
     title: "Fix typo",
     detail: "Fix the typo in README.",
     acceptance: "Fixed.",
+    surface: "other",
     effort: "simple",
   } as unknown as Parameters<typeof taskBudgetEffort>[0];
   assert.equal(taskBudgetEffort(uiTask), "standard");
@@ -285,6 +289,8 @@ test("turkish end-state goals are classified as edits, not inspection", () => {
     title: "işlem yukarda gösterilmeyecek, sadece çarpma butonu aktif olacak",
     detail: "hedef ve puan tek bir barda olacak.",
     acceptance: "The requested change is implemented and verified.",
+    action: "update",
+    surface: "ui",
     status: "pending",
     effort: "simple",
     role: "main",
@@ -319,6 +325,7 @@ test("exact file-line micro tasks use the short edit profile", () => {
       title: "Add division to OPS",
       detail: "In game.js line 476 change OPS to include ÷. Change only that line.",
       acceptance: "OPS contains ÷.",
+      microEdit: true,
     } as unknown as Parameters<typeof isMicroEditTask>[0]),
     true,
   );
@@ -328,6 +335,7 @@ test("exact file-line micro tasks use the short edit profile", () => {
       title: "Refactor the whole project",
       detail: "Redesign all files and the architecture.",
       acceptance: "Everything is clean.",
+      microEdit: false,
     } as unknown as Parameters<typeof isMicroEditTask>[0]),
     false,
   );

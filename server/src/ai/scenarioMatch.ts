@@ -12,25 +12,6 @@ export interface TaskScenarioMatch {
   score: number;
 }
 
-const STOPWORDS = new Set([
-  "the", "and", "for", "with", "this", "that", "from", "into", "your", "please",
-  "task", "file", "files", "page", "real", "using", "use", "run", "make", "then",
-  "only", "one", "two", "both", "after", "before", "must", "should", "will",
-  "bir", "bu", "şu", "ile", "için", "olan", "ve", "veya", "gibi", "daha", "çok",
-  "puan", "hedef", "işlem", "oyun", "sayfa", "gerçek", "kullan",
-]);
-
-const SYNONYMS: Record<string, string[]> = {
-  score: ["puan", "score", "points"],
-  target: ["hedef", "target"],
-  operator: ["işlem", "operator", "op"],
-  multiply: ["çarpma", "çarpı", "multiply", "multiplication", "×", "*"],
-  add: ["toplama", "ekle", "add", "plus", "+"],
-  subtract: ["çıkarma", "çıkar", "subtract", "minus", "−", "-"],
-  wrong: ["yanlış", "wrong", "invalid"],
-  correct: ["doğru", "correct", "right"],
-};
-
 function stem(token: string): string {
   if (token.length > 5 && token.endsWith("ing")) return token.slice(0, -3);
   if (token.length > 4 && token.endsWith("ed")) return token.slice(0, -2);
@@ -39,21 +20,10 @@ function stem(token: string): string {
 }
 
 function tokens(text: string): string[] {
-  const raw = (text.toLowerCase().match(/[a-z0-9çğıöşü_]+/gi) ?? [])
-    .filter((token) => (token.length >= 3 || /^\d{2,}$/.test(token)) && !STOPWORDS.has(token))
+  const raw = (text.toLowerCase().match(/[\p{L}\p{N}_]+/gu) ?? [])
+    .filter((token) => token.length >= 3 || /^\d{2,}$/.test(token))
     .map(stem);
   return [...new Set(raw)];
-}
-
-function expand(token: string): string[] {
-  const values = new Set([token]);
-  for (const [key, aliases] of Object.entries(SYNONYMS)) {
-    if (key === token || aliases.includes(token)) {
-      values.add(key);
-      for (const alias of aliases) values.add(alias);
-    }
-  }
-  return [...values];
 }
 
 function scenarioSteps(raw: unknown): BrowserCheckStep[] {
@@ -143,7 +113,7 @@ export async function findTaskScenario(
     const jsonText = JSON.stringify(parsed).toLowerCase();
     let score = 0;
     for (const token of taskTokens) {
-      const values = expand(token);
+      const values = [token];
       if (nameTokens.some((nameToken) => values.includes(nameToken))) score += 3;
       if (values.some((value) => jsonText.includes(value))) score += 1;
     }
@@ -168,22 +138,5 @@ export async function findTaskScenario(
 
 /** A task that only needs to prove an existing behavior, not change it. */
 export function isScenarioVerificationTask(task: ProjectTask): boolean {
-  if (task.verificationOnly === true || task.action === "verify") return true;
-  if (
-    task.action &&
-    ["create", "update", "remove", "move", "document"].includes(task.action)
-  ) {
-    return false;
-  }
-  const title = task.title.trim();
-  const verifies =
-    /^(?:verify|prove|confirm|check|validate|test|run\b[^\n]{0,80}\bscenario|scenario|doğrula|kontrol|kanıtla|senaryo)/i.test(
-      title,
-    );
-  if (!verifies) return false;
-  const writes =
-    /\b(?:edit|fix|update|change|implement|create|add|remove|delete|replace|write|refactor|ensure|make|unlock|define|route|set)\b|ekle|düzelt|güncelle|değiştir|kaldır|sil|yaz/i.test(
-      title,
-    );
-  return !writes;
+  return task.verificationOnly === true || task.action === "verify";
 }
