@@ -881,6 +881,10 @@ export function CodeStudio({
     request: ClarificationRequest;
     original: string;
   } | null>(null);
+  const [confirmation, setConfirmation] = useState<{
+    intent: IntentAnalysis;
+    original: string;
+  } | null>(null);
   const [modelNotice, setModelNotice] = useState<{
     from: { provider: string; model: string };
     to: { provider: string; model: string };
@@ -2928,6 +2932,7 @@ export function CodeStudio({
     appendUser = true,
     runOptions: {
       retryFailed?: boolean;
+      confirmed?: boolean;
       skipClarify?: boolean;
       workspaceMode?: AiWorkspaceMode;
       provider?: AiProviderId;
@@ -2936,6 +2941,7 @@ export function CodeStudio({
   ) {
     const modeForRun = runOptions.workspaceMode ?? studioMode;
     if (!active || (!question.trim() && !attachment) || chatBusy) return;
+    setConfirmation(null);
     const runProvider = runOptions.provider ?? active.provider;
     const runModel = runOptions.model ?? active.model;
     const baseText = question.trim();
@@ -3018,8 +3024,13 @@ export function CodeStudio({
         setPermissionBusy(false);
       } else if (event.type === "intent") {
         lastIntentRef.current = event.intent;
+      } else if (event.type === "confirm") {
+        runStarted = true;
+        setClarification(null);
+        setConfirmation({ intent: event.intent, original: text });
       } else if (event.type === "clarify") {
         runStarted = true;
+        setConfirmation(null);
         setClarification({ request: event.request, original: text });
       } else if (event.type === "model") {
         setModelNotice({ from: event.from, to: event.to, reason: event.reason });
@@ -3056,6 +3067,7 @@ export function CodeStudio({
             workspaceMode: modeForRun,
             retryFailed: runOptions.retryFailed === true,
             clarified: runOptions.skipClarify === true,
+            confirmed: runOptions.confirmed === true,
             history: history.slice(-8),
             liveBrowser,
           },
@@ -4736,6 +4748,59 @@ export function CodeStudio({
             {footerTab === "chat" ? (
               <div className={`studio-composer is-${studioMode}`}>
 
+          {confirmation ? (
+            <div className="studio-clarify studio-confirm">
+              <div className="studio-clarify-head">
+                <MessageSquare size={11} />
+                <strong>{t("Anladığım")}</strong>
+              </div>
+              <p className="studio-confirm-request">
+                {confirmation.intent.normalizedRequest || confirmation.intent.understanding}
+              </p>
+              {confirmation.intent.behaviors?.length ? (
+                <ul className="studio-confirm-list">
+                  {confirmation.intent.behaviors.map((behavior) => (
+                    <li key={behavior.id}>
+                      <b>{behavior.target}</b>
+                      {behavior.details ? ` — ${behavior.details}` : ""}
+                      {behavior.acceptance ? ` · ${behavior.acceptance}` : ""}
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+              {confirmation.intent.constraints?.length ? (
+                <p className="studio-confirm-note">
+                  <b>{t("Constraints")}:</b> {confirmation.intent.constraints.join(" · ")}
+                </p>
+              ) : null}
+              {confirmation.intent.assumptions?.length ? (
+                <p className="studio-confirm-note">
+                  <b>{t("Assumptions")}:</b> {confirmation.intent.assumptions.join(" · ")}
+                </p>
+              ) : null}
+              <div className="studio-confirm-actions">
+                <button
+                  className="primary-button"
+                  onClick={() => {
+                    const original = confirmation.original;
+                    setConfirmation(null);
+                    void askProject(original, false, { confirmed: true, skipClarify: true });
+                  }}
+                >
+                  {t("Confirm and start")}
+                </button>
+                <button
+                  className="ghost-button"
+                  onClick={() => {
+                    setConfirmation(null);
+                    setChatInput(confirmation.original);
+                  }}
+                >
+                  {t("Edit")}
+                </button>
+              </div>
+            </div>
+          ) : null}
           {clarification ? (
             <div className="studio-clarify">
               <div className="studio-clarify-head">

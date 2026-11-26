@@ -18,7 +18,9 @@ import { estimateUsageCost } from "./pricing";
 import type { AnalysisResult, RecentProject } from "../../../shared/types";
 import type {
   AgentToolGroup,
+  IntentAmbiguity,
   IntentAnalysis,
+  IntentBehavior,
   IntentContext,
   IntentHistory,
   IntentKind,
@@ -107,10 +109,15 @@ function systemPrompt(): string {
   return `You are the intent analyst for a coding agent. Read the user request in any language (typos are possible) and the project facts. Return JSON only. Never write code.
 
 Schema:
-{"kind":"edit|question|run|scaffold|analyze","understanding":"one sentence in the user's language","language":"tr|en|zh|...","needsClarification":true|false,"question":"question in the user's language","options":[{"label":"short option in the user's language","suffix":"text appended to the user's original instruction when this option is chosen"}],"scope":"trivial|small|medium|large","mode":"single|loop","areas":["exact project-relative file paths"],"verification":"none|browser|test|build","context":"none|focused|project","history":"none|recent|extended","toolGroups":["core","edit","command","document","web","git","browser","skills","media","mobile","notes","tools"],"skills":["skill-slug"],"approach":"one-sentence strategy using tools and how to verify completeness","needsExhaustiveEvidence":true|false,"assumptions":["short assumptions"]}
+{"kind":"edit|question|run|scaffold|analyze","understanding":"one sentence in the user's language","language":"tr|en|zh|...","needsClarification":true|false,"question":"question in the user's language","options":[{"label":"short option in the user's language","suffix":"text appended to the user's original instruction when this option is chosen"}],"normalizedRequest":"canonical English restatement","behaviors":[{"id":"b1","action":"create|update|remove|move|verify|run|document|other","surface":"ui|api|data|config|docs|game|other","target":"what changes","details":"exact requested details","acceptance":"observable check"}],"constraints":["explicit user constraint"],"ambiguities":[{"id":"a1","question":"one product decision","impact":"high|low","options":[{"label":"option","suffix":"text appended to the original request"}]}],"confidence":0.0,"scope":"trivial|small|medium|large","mode":"single|loop","areas":["exact project-relative file paths"],"verification":"none|browser|test|build","context":"none|focused|project","history":"none|recent|extended","toolGroups":["core","edit","command","document","web","git","browser","skills","media","mobile","notes","tools"],"skills":["skill-slug"],"approach":"one-sentence strategy using tools and how to verify completeness","needsExhaustiveEvidence":true|false,"assumptions":["short assumptions"]}
 
 Rules:
-- Restate the user's goal accurately in "understanding". Paraphrase it, do not copy it. Describe what the user wants, not an investigation plan. Do not invent features or fields.
+- Restate the user's goal accurately in "understanding" in the user's language. In "normalizedRequest", write the same meaning as one canonical English sentence for downstream planning; keep identifiers and quoted values unchanged.
+- Decompose the request into "behaviors": one entry per independent change. Each behavior needs action, surface, target, details and a concrete acceptance check. Do not merge two independent changes into one behavior; do not invent behaviors the user did not ask for.
+- Put explicit user rules ("do not change X", "only Y", "preserve Z") into "constraints" exactly as rules, not as tasks.
+- Put only high-impact product decisions into "ambiguities" (a wrong guess would implement the wrong product behavior). Each ambiguity gets 2-3 concrete options. Never ask which files to inspect; that is not a product decision.
+- "confidence" is 0-1 for this interpretation. Use a lower value when the request is short, ambiguous, or missing acceptance details.
+- If a high-impact ambiguity exists, set needsClarification=true and use that question/options; otherwise needsClarification=false.
 - Write "understanding", "question", "options[].label" and "options[].suffix" in the interface language, unless the request is clearly in a different language; in that case use the request language.
 - Ask only when a wrong guess would implement the wrong feature or the requested object/field is genuinely ambiguous. Max 4 options. Options must be product/behavior choices, not implementation steps.
 - Never ask which files to read or where the code lives; the executor inspects automatically and "areas" is your best guess.
@@ -277,6 +284,134 @@ function safeArea(value: string): string | null {
   return area;
 }
 
+const BEHAVIOR_ACTIONS = [
+  "create",
+  "update",
+  "remove",
+  "move",
+  "verify",
+  "run",
+  "document",
+  "other",
+] as const;
+const BEHAVIOR_SURFACES = ["ui", "api", "data", "config", "docs", "game", "other"] as const;
+
+function fallbackIntentSpec(
+  instruction: string,
+  kind: IntentKind,
+): Pick<
+  IntentAnalysis,
+  "normalizedRequest" | "behaviors" | "constraints" | "ambiguities" | "confidence"
+> {
+  const text = instruction.trim().slice(0, 800);
+  return {
+    normalizedRequest: text,
+    behaviors: [
+      {
+        id: "b1",
+        action: kind === "run" ? "run" : kind === "question" ? "verify" : "update",
+        surface: "other",
+        target: text.slice(0, 200),
+        details: "",
+        acceptance: "",
+      },
+    ],
+    constraints: [],
+    ambiguities: [],
+    confidence: 0.3,
+  };
+}
+
+function ensureIntentSpec(intent: IntentAnalysis, instruction: string): IntentAnalysis {
+  if (intent.behaviors && intent.behaviors.length > 0) {
+    return {
+      ...intent,
+      normalizedRequest: intent.normalizedRequest || intent.understanding || instruction.trim(),
+      confidence: intent.confidence ?? 0.6,
+    };
+  }
+  return {
+    ...intent,
+    ...fallbackIntentSpec(instruction, intent.kind),
+  };
+}
+
+function parseBehaviors(value: unknown): IntentBehavior[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object")
+    .map((item, index) => ({
+      id:
+        typeof item.id === "string" && item.id.trim()
+          ? item.id.trim().slice(0, 40)
+          : `b${index + 1}`,
+      action:
+        typeof item.action === "string" && (BEHAVIOR_ACTIONS as readonly string[]).includes(item.action)
+          ? (item.action as IntentBehavior["action"])
+          : "update",
+      surface:
+        typeof item.surface === "string" && (BEHAVIOR_SURFACES as readonly string[]).includes(item.surface)
+          ? (item.surface as IntentBehavior["surface"])
+          : "other",
+      target:
+        typeof item.target === "string" && item.target.trim()
+          ? item.target.trim().slice(0, 200)
+          : "",
+      details:
+        typeof item.details === "string" && item.details.trim()
+          ? item.details.trim().slice(0, 500)
+          : "",
+      acceptance:
+        typeof item.acceptance === "string" && item.acceptance.trim()
+          ? item.acceptance.trim().slice(0, 400)
+          : "",
+    }))
+    .filter((item) => item.target)
+    .slice(0, 8);
+}
+
+function parseAmbiguities(value: unknown): IntentAmbiguity[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object")
+    .map((item, index) => {
+      const options: IntentOption[] = Array.isArray(item.options)
+        ? item.options
+            .filter(
+              (option): option is Record<string, unknown> =>
+                Boolean(option) && typeof option === "object",
+            )
+            .map((option, optionIndex) => ({
+              id: `opt-${optionIndex + 1}`,
+              label:
+                typeof option.label === "string" && option.label.trim()
+                  ? option.label.trim().slice(0, 120)
+                  : `Option ${optionIndex + 1}`,
+              instructionSuffix:
+                typeof option.suffix === "string" && option.suffix.trim()
+                  ? option.suffix.trim().slice(0, 400)
+                  : "",
+            }))
+            .filter((option) => option.instructionSuffix)
+            .slice(0, 4)
+        : [];
+      return {
+        id:
+          typeof item.id === "string" && item.id.trim()
+            ? item.id.trim().slice(0, 40)
+            : `a${index + 1}`,
+        question:
+          typeof item.question === "string" && item.question.trim()
+            ? item.question.trim().slice(0, 300)
+            : "",
+        impact: (item.impact === "high" ? "high" : "low") as "high" | "low",
+        options,
+      };
+    })
+    .filter((item) => item.question && item.options.length >= 2)
+    .slice(0, 2);
+}
+
 export function parseIntentResponse(
   raw: string,
   analysis: AnalysisResult,
@@ -317,6 +452,22 @@ export function parseIntentResponse(
       ? parsed.approach.trim().slice(0, 800)
       : "";
   const needsExhaustiveEvidence = parsed.needsExhaustiveEvidence === true;
+  const normalizedRequest =
+    typeof parsed.normalizedRequest === "string" && parsed.normalizedRequest.trim()
+      ? parsed.normalizedRequest.trim().slice(0, 800)
+      : "";
+  const behaviors = parseBehaviors(parsed.behaviors);
+  const constraints = Array.isArray(parsed.constraints)
+    ? parsed.constraints
+        .filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+        .map((item) => item.trim().slice(0, 300))
+        .slice(0, 10)
+    : [];
+  const ambiguities = parseAmbiguities(parsed.ambiguities);
+  const confidenceValue = Number(parsed.confidence);
+  const confidence = Number.isFinite(confidenceValue)
+    ? Math.max(0, Math.min(1, confidenceValue))
+    : 0.5;
   const understanding =
     typeof parsed.understanding === "string" && parsed.understanding.trim()
       ? parsed.understanding.trim().slice(0, 500)
@@ -389,6 +540,11 @@ export function parseIntentResponse(
       history,
       toolGroups,
       skills,
+      normalizedRequest,
+      behaviors,
+      constraints,
+      ambiguities,
+      confidence,
       approach,
       needsExhaustiveEvidence,
       assumptions,
@@ -776,6 +932,7 @@ export async function analyzeIntent(
         history: "recent",
         toolGroups: [],
         skills: [],
+        ...fallbackIntentSpec(instruction, questionLike ? "question" : "edit"),
         approach: "",
         needsExhaustiveEvidence: false,
         assumptions: [
@@ -848,6 +1005,7 @@ export async function analyzeIntent(
           history: "recent",
           toolGroups: [],
           skills: [],
+          ...fallbackIntentSpec(instruction, questionFallback ? "question" : "edit"),
           approach: "",
           needsExhaustiveEvidence: false,
           assumptions: ["Intent analyst could not parse its reply; proceeding with one focused task."],
@@ -856,6 +1014,7 @@ export async function analyzeIntent(
     }
   }
 
+  intent = ensureIntentSpec(intent, instruction);
   intent = suppressRedundantClarification(intent, instruction, analysis);
   intent = forceExplicitEditIntent(intent, instruction);
   intent = preserveNegations(intent, instruction);

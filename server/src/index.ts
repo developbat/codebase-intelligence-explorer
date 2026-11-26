@@ -2389,6 +2389,35 @@ app.post("/api/projects/:id/ai/loop/stream", async (req, res) => {
         res.end();
         return;
       }
+      const highAmbiguity = analyzed.intent.ambiguities?.find(
+        (ambiguity) => ambiguity.impact === "high",
+      );
+      if (highAmbiguity && req.body?.clarified !== true) {
+        write({
+          type: "clarify",
+          request: {
+            question: highAmbiguity.question,
+            options: highAmbiguity.options,
+            original: goal,
+          },
+        });
+        res.end();
+        return;
+      }
+      const needsConfirmation =
+        req.body?.confirmed !== true &&
+        req.body?.clarified !== true &&
+        (analyzed.intent.kind === "edit" ||
+          analyzed.intent.kind === "scaffold" ||
+          analyzed.intent.kind === "run") &&
+        ((analyzed.intent.behaviors?.length ?? 0) > 1 ||
+          (analyzed.intent.confidence ?? 1) < 0.8 ||
+          (analyzed.intent.constraints?.length ?? 0) > 0);
+      if (needsConfirmation) {
+        write({ type: "confirm", intent: analyzed.intent });
+        res.end();
+        return;
+      }
     } catch (error) {
       write({
         type: "error",

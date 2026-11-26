@@ -1,22 +1,22 @@
 import type { IntentAnalysis } from "../../shared/intent";
 
-const DETAIL_TERMS =
-  /(?:acceptance|kabul|verify|doğrula|dogrula|test|must|should|only|never|without|değiştirme|degistirme|bozma|koru|regression)/i;
-
 /**
  * Short, underspecified edit/scaffold/run requests get the requirements-first
- * skill even when the intent analyst did not select it. Verification-only and
- * read-only questions keep their normal profile.
+ * skill even when the intent analyst did not select it. The decision uses the
+ * structured intent spec, not language-specific words.
  */
 export function shouldForceRequirementsFirst(
   goalText: string,
-  intent: Pick<IntentAnalysis, "kind"> | undefined,
+  intent:
+    | Pick<IntentAnalysis, "kind" | "confidence" | "behaviors" | "ambiguities">
+    | undefined,
   microEdit = false,
 ): boolean {
   if (microEdit || !intent) return false;
   if (intent.kind !== "edit" && intent.kind !== "scaffold" && intent.kind !== "run") return false;
-  const goal = goalText.trim();
-  return goal.length > 0 && goal.length < 160 && !DETAIL_TERMS.test(goal);
+  return (
+    (intent.confidence ?? 0.5) < 0.8 ||
+    (intent.behaviors?.length ?? 0) > 1 ||
+    (intent.ambiguities?.length ?? 0) > 0
+  );
 }
-
-export { DETAIL_TERMS };

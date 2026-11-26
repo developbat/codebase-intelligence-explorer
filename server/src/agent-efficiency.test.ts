@@ -6,9 +6,7 @@ import {
   blockDependentsOf,
   intentTask,
   isInspectionAnswer,
-  looksMultiBehaviorGoal,
   shouldRetryWithEditFirst,
-  splitMultiBehaviorGoal,
   summarizeVerificationSteps,
   taskBudgetForEffort,
   taskStepBudget,
@@ -362,44 +360,29 @@ test("intentTask adds conventional UI checks for a terse prompt", () => {
     approach: "",
     needsExhaustiveEvidence: false,
     assumptions: [],
+    normalizedRequest: "Make the buttons dark blue.",
+    behaviors: [
+      {
+        id: "b1",
+        action: "update" as const,
+        surface: "ui" as const,
+        target: "buttons",
+        details: "dark blue",
+        acceptance: "buttons are dark blue",
+      },
+    ],
+    constraints: ["do not change scoring"],
+    confidence: 0.9,
   };
   const task = intentTask("butonları koyu mavi yap", intent, "npm run build", "build");
   assert.match(task.detail, /UI quality/i);
   assert.match(task.detail, /Preserve existing behavior/i);
   assert.match(task.detail, /Verification:/i);
+  assert.match(task.detail, /Behaviors:/i);
+  assert.match(task.detail, /do not change scoring/i);
+  assert.match(task.acceptance ?? "", /buttons are dark blue/i);
   assert.match(task.acceptance ?? "", /UI quality is verified/i);
   assert.match(task.acceptance ?? "", /Verification \(npm run build\) passes/i);
-});
-
-test("detects short multi-behavior UI goals for the planner", () => {
-  assert.equal(
-    looksMultiBehaviorGoal("HUD ikonlarını düzelt ve hedefi sağ üste taşı"),
-    true,
-  );
-  assert.equal(looksMultiBehaviorGoal("hedefi sağ üste taşı ve rengini değiştir"), true);
-  assert.equal(looksMultiBehaviorGoal("form ekle ve modal göster"), true);
-  assert.equal(
-    looksMultiBehaviorGoal("HUD ikonlarını 20px yap ve hedefin rengini beyaza çevir"),
-    true,
-  );
-  assert.equal(looksMultiBehaviorGoal("buton rengini koyu mavi yap"), false);
-  assert.equal(looksMultiBehaviorGoal("add a search box"), false);
-  assert.equal(looksMultiBehaviorGoal("hedefi taşı"), false);
-});
-
-test("splits a multi-behavior goal into one task per clause", () => {
-  const tasks = splitMultiBehaviorGoal("HUD ikonlarını düzelt ve hedefi sağ üste taşı");
-  assert.ok(tasks);
-  assert.equal(tasks.length, 2);
-  assert.match(tasks[0].detail, /HUD ikonlarını düzelt/);
-  assert.match(tasks[1].detail, /hedefi sağ üste taşı/);
-  assert.deepEqual(tasks[1].dependsOn, [tasks[0].id]);
-  const sizeAndColor = splitMultiBehaviorGoal(
-    "HUD ikonlarını 20px yap ve hedefin rengini beyaza çevir",
-  );
-  assert.ok(sizeAndColor);
-  assert.equal(sizeAndColor.length, 2);
-  assert.equal(splitMultiBehaviorGoal("buton rengini koyu mavi yap"), null);
 });
 
 test("summarizes successful verification steps for the stage trace", () => {

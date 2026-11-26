@@ -193,56 +193,6 @@ Rules:
 - If the preflight code already implements the requested rule, do not create an edit task that claims a flat bonus or missing guard; create a verification-only task or fold the verification into the behavior task.
 - Work in any programming language.`;
 
-/**
- * Detect a short goal that still contains two independent UI behaviors.
- * The planner is better at splitting these than the single-task path.
- */
-export function looksMultiBehaviorGoal(goal: string): boolean {
-  const text = goal.trim();
-  if (text.length < 20) return false;
-  const targets = new Set(
-    (text.match(
-      /(?:^|[^a-z0-9çğıöşü])(?:hud|icon|ikon|button|buton|target|hedef|score|puan|streak|seri|timer|saat|color|renk|reng|layout|düzen|duzen|canvas|menu|menü|form|input|modal|toast|toolbar|header|footer|sidebar|boyut)\w*/gi,
-    ) ?? []).map((value) => value.toLowerCase()),
-  );
-  const verbs = new Set(
-    (text.match(
-      /(?:^|[^a-z0-9çğıöşü])(?:add|create|change|move|remove|fix|make|update|hide|show|replace|ekle|oluştur|değiştir|degistir|taşı|tasi|kaldır|kaldir|düzelt|duzelt|yap|güncelle|guncelle|gizle|göster|goster|yerleştir|yerlestir|çevir|cevir|boyutlandır|boyutlandir|büyüt|buyut|küçült|kucult)\w*/gi,
-    ) ?? []).map((value) => value.toLowerCase()),
-  );
-  return targets.size >= 2 && verbs.size >= 2;
-}
-
-/**
- * Deterministic last resort when the planner returns one task for a goal that
- * clearly contains two independent UI behaviors.
- */
-export function splitMultiBehaviorGoal(goal: string): ProjectTask[] | null {
-  if (!looksMultiBehaviorGoal(goal)) return null;
-  const parts = goal
-    .split(/\s+(?:ve|and|ayrıca|ayrica|;)\s+/i)
-    .map((part) => part.trim().replace(/[.,;]+$/, ""))
-    .filter((part) => part.split(/\s+/).filter(Boolean).length >= 2)
-    .slice(0, 4);
-  if (parts.length < 2) return null;
-  const at = nowIso();
-  return parts.map((part, index) => ({
-    id: `task-${index + 1}`,
-    title: part.slice(0, 140),
-    detail: part,
-    acceptance: `The behavior described in "${part.slice(0, 120)}" works and is verified on the real page.`,
-    status: "pending",
-    effort: "standard",
-    role: "main",
-    dependsOn: index === 0 ? [] : [`task-${index}`],
-    attempts: 0,
-    changedFiles: [],
-    commands: [],
-    createdAt: at,
-    updatedAt: at,
-  }));
-}
-
 export function applyPlanReview(
   queue: ProjectTaskQueue,
   goal: string,
@@ -253,13 +203,18 @@ export function applyPlanReview(
   const note = changed.length
     ? `Previous attempt changed ${changed.join(", ")}. Inspect the current files and do not undo working changes.`
     : "";
-  const revised = review.tasks.length > 0 ? review.tasks : splitMultiBehaviorGoal(goal) ?? [];
-  if (revised.length === 0) {
-    return {
-      ...queue,
-      planMeta: createPlanMeta(goal, review, (queue.planMeta?.reviewCount ?? 0) + 1),
-    };
-  }
+  const requirements = queue.planMeta?.requirements.length
+    ? queue.planMeta.requirements
+    : [goal];
+  const revised =
+    review.tasks.length > 0
+      ? review.tasks
+      : requirements.map((requirement) => ({
+          title: requirement.slice(0, 120),
+          detail: requirement,
+          acceptance: `The requested behavior for "${requirement}" works and is verified.`,
+          effort: "standard" as const,
+        }));
   const at = nowIso();
   const tasks: ProjectTask[] = revised.map((task, index) => ({
     id: `task-${done.length + index + 1}`,
@@ -641,6 +596,26 @@ export async function planProjectTasks(
           ? [
               "Intent analyst:",
               `Understanding: ${options.intent.understanding}`,
+              options.intent.normalizedRequest
+                ? `Normalized request: ${options.intent.normalizedRequest}`
+                : "",
+              options.intent.behaviors?.length
+                ? `Behaviors (one task per behavior): ${JSON.stringify(
+                    options.intent.behaviors.map((behavior) => ({
+                      action: behavior.action,
+                      surface: behavior.surface,
+                      target: behavior.target,
+                      details: behavior.details,
+                      acceptance: behavior.acceptance,
+                    })),
+                  ).slice(0, 2_000)}`
+                : "",
+              options.intent.constraints?.length
+                ? `Constraints: ${options.intent.constraints.join("; ")}`
+                : "",
+              options.intent.confidence !== undefined
+                ? `Intent confidence: ${options.intent.confidence}`
+                : "",
               `Scope: ${options.intent.scope} · mode: ${options.intent.mode}`,
               options.intent.approach ? `Approach: ${options.intent.approach}` : "",
               options.intent.needsExhaustiveEvidence ? "This answer must be exhaustive; collect every item and verify the total." : "",
@@ -793,7 +768,9 @@ export async function planProjectTasks(
   }
 
   if (tasks.length === 1) {
-    const split = splitLargeGoal(goal, verification) ?? splitMultiBehaviorGoal(goal);
+    const behaviorTasks = options.intent ? tasksFromBehaviors(options.intent, goal) : [];
+    const split =
+      behaviorTasks.length > 1 ? behaviorTasks : splitLargeGoal(goal, verification);
     if (split && split.length > 1) {
       tasks = split;
       if (!options.dryRun) {
@@ -1893,11 +1870,43 @@ function aggregateResult(
   };
 }
 
+function behaviorRequirements(intent?: IntentAnalysis): string[] {
+  return (intent?.behaviors ?? [])
+    .map((behavior) => `${behavior.target}${behavior.details ? `: ${behavior.details}` : ""}`.trim())
+    .filter(Boolean);
+}
+
+function tasksFromBehaviors(intent: IntentAnalysis, goal: string): ProjectTask[] {
+  const behaviors = intent.behaviors ?? [];
+  if (behaviors.length <= 1) return [];
+  const at = nowIso();
+  return behaviors.map((behavior, index) => ({
+    id: `task-${index + 1}`,
+    title: `${behavior.action} ${behavior.target}`.slice(0, 140),
+    detail: [behavior.target, behavior.details, behavior.acceptance ? `Acceptance: ${behavior.acceptance}` : "", goal.trim()]
+      .filter(Boolean)
+      .join("\n"),
+    acceptance:
+      behavior.acceptance ||
+      `The requested behavior for "${behavior.target}" works and is verified on the real page.`,
+    status: "pending",
+    effort: "standard",
+    role: "main",
+    dependsOn: index === 0 ? [] : [`task-${index}`],
+    attempts: 0,
+    changedFiles: [],
+    commands: [],
+    createdAt: at,
+    updatedAt: at,
+  }));
+}
+
 function isUiIntent(goal: string, intent: IntentAnalysis): boolean {
-  const text = `${goal}\n${intent.understanding}\n${intent.areas.join(" ")}`.toLowerCase();
-  return /\b(ui|hud|icon|ikon|button|buton|css|style|stil|layout|düzen|duzen|color|renk|canvas|ekran|page|sayfa|responsive|mobil|görsel|gorsel)\b|\.(?:html?|css|jsx?|tsx?|vue|svelte)/i.test(
-    text,
-  );
+  if (intent.behaviors?.some((behavior) => behavior.surface === "ui" || behavior.surface === "game")) {
+    return true;
+  }
+  const areas = intent.areas.join(" ").toLowerCase();
+  return /\.(?:html?|css|jsx?|tsx?|vue|svelte)\b/.test(areas);
 }
 
 function conventionalAcceptance(
@@ -1906,6 +1915,9 @@ function conventionalAcceptance(
   verification?: string,
 ): string {
   const parts: string[] = [];
+  for (const behavior of intent.behaviors ?? []) {
+    if (behavior.acceptance) parts.push(`${behavior.target}: ${behavior.acceptance}`);
+  }
   if (isUiIntent(goal, intent)) {
     parts.push(
       "UI quality is verified on the real page: icon/label contrast, one-row alignment, no horizontal overflow, with screenshot or browser evidence.",
@@ -1988,7 +2000,18 @@ export function intentTask(
     id: "task-1",
     title: goal.length > 90 ? `${goal.slice(0, 87)}…` : goal,
     detail: [
-      intent.understanding,
+      intent.normalizedRequest || intent.understanding,
+      intent.behaviors?.length
+        ? `Behaviors:\n${intent.behaviors
+            .map(
+              (behavior) =>
+                `- ${behavior.action} ${behavior.target}${behavior.details ? `: ${behavior.details}` : ""}${
+                  behavior.acceptance ? ` (acceptance: ${behavior.acceptance})` : ""
+                }`,
+            )
+            .join("\n")}`
+        : "",
+      intent.constraints?.length ? `Constraints: ${intent.constraints.join("; ")}` : "",
       intent.approach ? `Approach: ${intent.approach}` : "",
       intent.areas.length > 0 ? `Likely areas: ${intent.areas.join(", ")}` : "",
       assumptions.length > 0 ? `Assumptions: ${assumptions.join("; ")}` : intent.understanding ? "" : goal,
@@ -2005,11 +2028,15 @@ export function intentTask(
           ? "The answer cites the evidence and states open questions."
           : readOnly
             ? "The question is answered with code-referenced evidence; no project files are changed."
-            : `The requested change is implemented and verified. ${conventionalAcceptance(
-                goal,
-                intent,
-                verification,
-              )}`.trim(),
+            : `The requested change is implemented and verified.${
+                intent.behaviors?.length
+                  ? ` ${intent.behaviors
+                      .map((behavior) => behavior.acceptance || `${behavior.target} is verified.`)
+                      .join(" ")}`
+                  : ""
+              }${
+                intent.constraints?.length ? ` Constraints: ${intent.constraints.join("; ")}` : ""
+              } ${conventionalAcceptance(goal, intent, verification)}`.trim(),
     status: "pending",
     effort,
     role:
@@ -2168,10 +2195,7 @@ export async function runProjectLoop(
   const intent = options.intent;
   const multiPartGoal =
     (intent?.kind === "edit" || intent?.kind === "scaffold" || intent?.kind === "run") &&
-    (goal.length > 180 ||
-      (goal.match(/[.!?;]+/g) ?? []).length >= 2 ||
-      /(?:^|\s)(?:ayrıca|hem|tek bir|sadece|bir de)\s/i.test(goal) ||
-      looksMultiBehaviorGoal(goal));
+    (intent?.behaviors?.length ?? 0) > 1;
   const intentSingle = workspaceMode !== "build" || (intent?.mode === "single" && !multiPartGoal);
   if (
     !queue ||

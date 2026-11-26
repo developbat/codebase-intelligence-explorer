@@ -3,7 +3,6 @@ import test from "node:test";
 import type { ProjectTaskQueue } from "../../shared/tasks";
 import {
   PLAN_VERSION,
-  behaviorKeys,
   createPlanMeta,
   goalHash,
   shouldReviewPlan,
@@ -41,16 +40,6 @@ function queue(overrides: Partial<ProjectTaskQueue> = {}): ProjectTaskQueue {
     ...overrides,
   };
 }
-
-test("behaviorKeys splits independent clauses", () => {
-  assert.deepEqual(
-    behaviorKeys("HUD ikonlarını 20px yap ve hedefin rengini beyaza çevir"),
-    ["HUD ikonlarını 20px yap", "hedefin rengini beyaza çevir"],
-  );
-  assert.deepEqual(behaviorKeys("buton rengini koyu mavi yap"), [
-    "buton rengini koyu mavi yap",
-  ]);
-});
 
 test("plan meta records version, goal hash and review count", () => {
   const meta = createPlanMeta("buton rengini koyu mavi yap");
@@ -94,7 +83,7 @@ test("stale, failed and multi-behavior queues need a plan review", () => {
       goal,
       { workspaceMode: "build" },
     ),
-    true,
+    false,
   );
   assert.equal(shouldReviewPlan(queue(), goal, { workspaceMode: "ask" }), false);
 });

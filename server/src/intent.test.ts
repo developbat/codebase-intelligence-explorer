@@ -241,3 +241,46 @@ test("intent selects at most three unique skill slugs", () => {
     "root-cause-debugging",
   ]);
 });
+
+test("parses the structured intent spec", () => {
+  const intent = parseIntentResponse(
+    JSON.stringify({
+      kind: "edit",
+      understanding: "HUD ikonlarını 20px yap ve hedefi beyaz yap",
+      language: "tr",
+      normalizedRequest: "Set HUD icons to 20px and make the target white.",
+      behaviors: [
+        {
+          id: "b1",
+          action: "update",
+          surface: "ui",
+          target: "HUD icons",
+          details: "20px",
+          acceptance: "icon size is 20px",
+        },
+        {
+          id: "b2",
+          action: "update",
+          surface: "ui",
+          target: "target",
+          details: "white",
+          acceptance: "target color is white",
+        },
+      ],
+      constraints: ["do not change the scoring"],
+      ambiguities: [],
+      confidence: 0.92,
+      scope: "small",
+      mode: "single",
+      areas: ["index.html"],
+      verification: "browser",
+    }),
+    analysis,
+    "HUD ikonlarını 20px yap ve hedefi beyaz yap",
+  );
+  assert.equal(intent.normalizedRequest, "Set HUD icons to 20px and make the target white.");
+  assert.equal(intent.behaviors?.length, 2);
+  assert.equal(intent.behaviors?.[1]?.surface, "ui");
+  assert.deepEqual(intent.constraints, ["do not change the scoring"]);
+  assert.equal(intent.confidence, 0.92);
+});

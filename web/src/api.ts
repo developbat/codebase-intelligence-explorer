@@ -928,6 +928,7 @@ export const api = {
         replan?: boolean;
         retryFailed?: boolean;
         clarified?: boolean;
+        confirmed?: boolean;
         workspaceMode?: "ask" | "plan" | "build" | "research";
         tokenBudget?: number;
         costBudgetUsd?: number;

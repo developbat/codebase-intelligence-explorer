@@ -31,6 +31,41 @@ export interface IntentOption {
   projectName?: string;
 }
 
+export type IntentBehaviorAction =
+  | "create"
+  | "update"
+  | "remove"
+  | "move"
+  | "verify"
+  | "run"
+  | "document"
+  | "other";
+
+export type IntentBehaviorSurface =
+  | "ui"
+  | "api"
+  | "data"
+  | "config"
+  | "docs"
+  | "game"
+  | "other";
+
+export interface IntentBehavior {
+  id: string;
+  action: IntentBehaviorAction;
+  surface: IntentBehaviorSurface;
+  target: string;
+  details: string;
+  acceptance: string;
+}
+
+export interface IntentAmbiguity {
+  id: string;
+  question: string;
+  impact: "low" | "high";
+  options: IntentOption[];
+}
+
 export interface IntentAnalysis {
   kind: IntentKind;
   understanding: string;
@@ -47,6 +82,16 @@ export interface IntentAnalysis {
   toolGroups: AgentToolGroup[];
   /** Skill slugs the intent analyst selected for this run (0-3). */
   skills?: string[];
+  /** Canonical, language-neutral restatement used by planning/execution. */
+  normalizedRequest?: string;
+  /** One entry per independent behavior the user asked for. */
+  behaviors?: IntentBehavior[];
+  /** Explicit user constraints (do not change X, only Y, preserve Z). */
+  constraints?: string[];
+  /** Product decisions that would change the outcome if guessed wrong. */
+  ambiguities?: IntentAmbiguity[];
+  /** Intent confidence from 0 to 1. */
+  confidence?: number;
   approach: string;
   needsExhaustiveEvidence: boolean;
   assumptions: string[];

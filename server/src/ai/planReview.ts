@@ -50,16 +50,6 @@ export interface PlanReviewOptions {
   model?: string;
 }
 
-export function behaviorKeys(goal: string): string[] {
-  const cleaned = goal.trim();
-  if (!cleaned) return [];
-  const parts = cleaned
-    .split(/\s+(?:ve|and|ayrıca|ayrica|;)\s+/i)
-    .map((part) => part.trim().replace(/[.,;]+$/, ""))
-    .filter((part) => part.split(/\s+/).filter(Boolean).length >= 2);
-  return parts.length >= 2 ? parts.slice(0, 6) : [cleaned];
-}
-
 export function goalHash(goal: string): string {
   return crypto.createHash("sha256").update(goal.trim()).digest("hex").slice(0, 16);
 }
@@ -68,13 +58,18 @@ export function createPlanMeta(
   goal: string,
   review?: Pick<PlanReviewResult, "requirements" | "missing" | "assumptions">,
   reviewCount = 0,
+  requirements?: string[],
 ): NonNullable<ProjectTaskQueue["planMeta"]> {
   return {
     version: PLAN_VERSION,
     goalHash: goalHash(goal),
     reviewedAt: new Date().toISOString(),
     verdict: "ok",
-    requirements: review?.requirements?.length ? review.requirements : behaviorKeys(goal),
+    requirements: review?.requirements?.length
+      ? review.requirements
+      : requirements?.length
+        ? requirements
+        : [goal.trim()],
     missing: review?.missing ?? [],
     assumptions: review?.assumptions ?? [],
     reviewCount,
@@ -89,7 +84,8 @@ export function shouldReviewPlan(
   if (options.workspaceMode !== undefined && options.workspaceMode !== "build") return false;
   if (options.replan === true) return true;
   const failed = queue.tasks.some((task) => task.status === "failed" || task.status === "blocked");
-  const singleMulti = queue.tasks.length <= 1 && behaviorKeys(goal).length >= 2;
+  const singleMulti =
+    queue.tasks.length <= 1 && (queue.planMeta?.requirements.length ?? 0) > 1;
   if (!queue.planMeta) return failed || singleMulti;
   if (queue.planMeta.version !== PLAN_VERSION) return true;
   if (queue.planMeta.goalHash !== goalHash(goal)) return true;
@@ -173,7 +169,9 @@ function reviewTasks(value: unknown): PlanReviewResult["tasks"] {
 }
 
 function fallbackReview(goal: string, queue: ProjectTaskQueue): PlanReviewResult {
-  const requirements = behaviorKeys(goal);
+  const requirements = queue.planMeta?.requirements.length
+    ? queue.planMeta.requirements
+    : [goal.trim()];
   if (queue.tasks.length <= 1 && requirements.length >= 2) {
     return {
       verdict: "replan",
@@ -224,7 +222,23 @@ export async function reviewProjectPlan(
       content: [
         `User goal:\n${goal.trim()}`,
         options.intent
-          ? `Intent: ${options.intent.kind} · ${options.intent.scope} · ${options.intent.mode}\n${options.intent.understanding}`
+          ? `Intent: ${options.intent.kind} · ${options.intent.scope} · ${options.intent.mode}\n${options.intent.understanding}${
+              options.intent.normalizedRequest
+                ? `\nNormalized: ${options.intent.normalizedRequest}`
+                : ""
+            }${
+              options.intent.behaviors?.length
+                ? `\nBehaviors: ${JSON.stringify(options.intent.behaviors).slice(0, 2_000)}`
+                : ""
+            }${
+              options.intent.constraints?.length
+                ? `\nConstraints: ${options.intent.constraints.join("; ")}`
+                : ""
+            }${
+              options.intent.confidence !== undefined
+                ? `\nConfidence: ${options.intent.confidence}`
+                : ""
+            }`
           : "",
         options.intent?.skills?.length ? `Intent-selected skills: ${options.intent.skills.join(", ")}` : "",
         changed.length > 0 ? `Already changed files: ${changed.join(", ")}` : "",

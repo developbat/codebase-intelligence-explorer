@@ -811,6 +811,7 @@ export type AiAgentEvent =
   | { type: "task"; queue: ProjectTaskQueue; task?: ProjectTaskQueue["tasks"][number] }
   | { type: "permission"; request: AiAgentPermissionRequest }
   | { type: "intent"; intent: IntentAnalysis; provider: string; model: string; totalTokens: number }
+  | { type: "confirm"; intent: IntentAnalysis }
   | { type: "clarify"; request: ClarificationRequest }
   | {
       type: "model";
