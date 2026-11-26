@@ -4366,7 +4366,7 @@ export async function runAgentTask(
       ? ""
       : await agentSeedContext(analysis, instruction, options.activeFile, projectToolList);
   const seedLimit =
-    testTask ? 1_500 : contextMode === "focused" ? 2_500 : fastTask ? 4_000 : 10_000;
+    testTask ? 1_200 : contextMode === "focused" ? 2_000 : fastTask ? 3_000 : 5_000;
   const seedText =
     seed.length > seedLimit
       ? `${seed.slice(0, seedLimit)}\n… seed context truncated to keep the prompt small …`
@@ -4404,7 +4404,7 @@ export async function runAgentTask(
     projectMap
       ? `Project map (file roles, indexed symbols and search hints — use it before scanning):\n${projectMap.slice(
           0,
-          3_500,
+          1_500,
         )}`
       : "",
     "",
@@ -4501,15 +4501,13 @@ ${lessons}` : "",
   const mentionedSkill = skillLoad.mentions.length > 0;
   const relevantSkill = skillLoad.relevant.length > 0;
   const selectedSkill = skillLoad.selected.length > 0;
+  // Full skill bodies are expensive on every turn. Load them only when the
+  // user/model selected them; otherwise ship the index and let load_skill
+  // pull the body once it is actually needed.
   const includeSkills =
     !testTask &&
     options.microEdit !== true &&
-    (!options.intent ||
-      contextMode === "project" ||
-      toolGroups.includes("skills") ||
-      mentionedSkill ||
-      relevantSkill ||
-      selectedSkill);
+    (fastTask || mentionedSkill || selectedSkill);
   const skillsPrompt = includeSkills ? renderSkillsForPrompt(enabledSkills) : "";
   const capabilityIndex = options.microEdit === true ? "" : skillLoad.index || "";
   if (skillLoad.mentions.length > 0) {
@@ -4766,8 +4764,9 @@ ${lessons}` : "",
   let unreferencedAssets: string[] = [];
   let assetNudges = 0;
   let browserCheckCalls = 0;
+  const browserCheckCache = new Map<string, number>();
   let browserCheckBlocked = false;
-  const maxBrowserChecks = testTask ? 2 : 3;
+  const maxBrowserChecks = 2;
   let realBrowserChecks = 0;
   let syntheticBrowserChecks = 0;
   let realScenarioRuns = 0;
@@ -4927,7 +4926,7 @@ ${lessons}` : "",
             "No file has been changed yet. You have enough context. If the requested behavior already exists, verify it and finish with evidence instead of editing. Otherwise perform the requested edit now with replace_in_file or write_file. Do not read more files unless a single exact line is essential; read only that range.",
         });
         log("warn", "Write reminder", "No files changed yet; asking the model to edit now.");
-      } else if (modelTurns >= (microEditMode ? 3 : 12) && writeNudges === 1) {
+      } else if (modelTurns >= (microEditMode ? 3 : 8) && writeNudges === 1) {
         writeNudges = 2;
         transcript.push({
           role: "system",
@@ -7205,22 +7204,29 @@ ${lessons}` : "",
         ok = result.ok;
         if (ok && !scenarioSynthetic) verificationPassed = true;
       } else if (action === "browser_check") {
+        const browserPath = typeof args.path === "string" ? args.path : "index.html";
+        // Validate and normalize before consuming the per-task browser budget.
+        // A bad step shape is a retryable argument error, not a spent check.
+        const rawSteps = normalizeBrowserSteps(args.steps);
+        const browserKey = `${browserPath}::${JSON.stringify(rawSteps)}`;
+        const cachedCheckFiles = browserCheckCache.get(browserKey);
+        if (cachedCheckFiles !== undefined && cachedCheckFiles === changedFiles.length) {
+          throw new Error(
+            "This exact browser check already ran since the last file change. Do not repeat it; use the previous result, change the steps, or fix the code first.",
+          );
+        }
         if (browserCheckCalls >= maxBrowserChecks) {
           browserCheckBlocked = true;
           throw new Error(
             `Browser check budget exhausted for this task (${maxBrowserChecks} calls). Do not call browser_check again; report the exact blocker or finish with the evidence you already have.`,
           );
         }
-        const browserPath = typeof args.path === "string" ? args.path : "index.html";
-        // Validate and normalize before consuming the per-task browser budget.
-        // A bad step shape is a retryable argument error, not a spent check.
-        const rawSteps = normalizeBrowserSteps(args.steps);
         browserCheckCalls += 1;
+        browserCheckCache.set(browserKey, changedFiles.length);
         const liveBrowser = options.liveBrowser === true || args.visible === true;
         if (liveBrowser) {
           log("info", "Live browser opened", `${browserPath} · ${rawSteps.length} steps`);
         }
-        const browserKey = `${browserPath}::${JSON.stringify(rawSteps)}`;
         const syntheticCheck = isSyntheticCheckPath(browserPath);
         const result = await runBrowserCheck(analysis.id, analysis.rootPath, {
           path: browserPath,

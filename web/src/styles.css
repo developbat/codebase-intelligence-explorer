@@ -25638,3 +25638,97 @@ button.canvas-stat {
 .pp-history-cards .pp-card::before {
   display: none;
 }
+
+/* Progress panel: overview + AI todos in one place */
+.pp-tabs {
+  display: inline-flex;
+  align-self: flex-start;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid rgba(110, 168, 254, 0.16);
+  border-radius: 7px;
+  background: rgba(8, 13, 21, 0.7);
+}
+
+.pp-tabs button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 24px;
+  padding: 0 9px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: #9fb2c9;
+  font-size: 8.5px;
+}
+
+.pp-tabs button:hover {
+  background: rgba(148, 163, 184, 0.08);
+  color: #dce9fb;
+}
+
+.pp-tabs button.is-active {
+  border-color: rgba(110, 168, 254, 0.28);
+  background: rgba(59, 130, 246, 0.14);
+  color: #e4efff;
+}
+
+.pp-tabs b {
+  min-width: 20px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: rgba(59, 130, 246, 0.2);
+  color: #bcd8ff;
+  font-family: var(--mono);
+  font-size: 7px;
+  text-align: center;
+}
+
+.pp-todos {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+}
+
+.project-progress .task-queue-card.is-flat {
+  margin: 0;
+  border: 0;
+  background: transparent;
+  overflow: visible;
+}
+
+.project-progress .task-queue-card.is-flat .task-queue-list {
+  max-height: none;
+  overflow: visible;
+  padding: 0;
+}
+
+.project-progress .task-queue-card.is-flat .task-queue-foot {
+  margin-top: 8px;
+  border-top: 1px solid var(--line);
+}
+
+.pp-todos-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 16px 12px;
+  border: 1px dashed rgba(110, 168, 254, 0.2);
+  border-radius: 10px;
+  background: rgba(59, 130, 246, 0.03);
+  color: #8fb8ee;
+}
+
+.pp-todos-empty strong {
+  color: #dfeafa;
+  font-size: 10.5px;
+}
+
+.pp-todos-empty span {
+  color: #8fa3bc;
+  font-size: 8.5px;
+  line-height: 1.45;
+}

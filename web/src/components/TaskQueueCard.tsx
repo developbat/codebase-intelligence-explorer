@@ -26,6 +26,8 @@ interface TaskQueueCardProps {
   onDeleteTask?: (taskId: string) => void | Promise<void>;
   onMoveTask?: (taskId: string, direction: "up" | "down") => void | Promise<void>;
   liveStepCount?: number;
+  /** Render the task list without the outer collapsible card. */
+  flat?: boolean;
 }
 
 function tokenLabel(tokens?: number): string {
@@ -57,6 +59,7 @@ export function TaskQueueCard({
   onDeleteTask,
   onMoveTask,
   liveStepCount = 0,
+  flat = false,
 }: TaskQueueCardProps) {
   const { t } = useI18n();
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -95,26 +98,8 @@ export function TaskQueueCard({
     queue.tasks.find((task) => task.status === "pending");
   const totalTokens = queue.tasks.reduce((sum, task) => sum + (task.tokenUsage?.totalTokens ?? 0), 0);
   const totalCost = queue.tasks.reduce((sum, task) => sum + (task.costUsd ?? 0), 0);
-  return (
-    <details className={`task-queue-card is-${queue.status}`} open={defaultOpen ? true : undefined}>
-      <summary>
-        <span className="task-queue-icon">
-          <ListChecks size={13} />
-        </span>
-        <span className="task-queue-title">
-          <strong>{t("Task queue")}</strong>
-          <small>
-            {done}/{queue.tasks.length} {t("done")}
-            {failed > 0 ? ` · ${failed} ${t("failed")}` : ""} · {t(queue.status)}
-            {totalTokens > 0 ? ` · ${tokenLabel(totalTokens)} ${t("tokens")}` : ""}
-            {totalCost > 0 ? ` · ${formatUsd(totalCost)}` : ""}
-            {liveStepCount > 0 ? ` · ${liveStepCount} ${t("steps")}` : ""}
-          </small>
-        </span>
-        <span className="task-queue-goal">
-          {current ? `${t(current.status)} · ${current.title}` : queue.goal}
-        </span>
-      </summary>
+  const content = (
+    <>
       <div className="task-queue-list">
         {queue.tasks.map((task, taskIndex) => (
           <div
@@ -352,6 +337,34 @@ export function TaskQueueCard({
         ) : null}
 
       </div>
+    </>
+  );
+  if (flat) {
+    return (
+      <div className={`task-queue-card is-flat is-${queue.status}`}>{content}</div>
+    );
+  }
+  return (
+    <details className={`task-queue-card is-${queue.status}`} open={defaultOpen ? true : undefined}>
+      <summary>
+        <span className="task-queue-icon">
+          <ListChecks size={13} />
+        </span>
+        <span className="task-queue-title">
+          <strong>{t("Task queue")}</strong>
+          <small>
+            {done}/{queue.tasks.length} {t("done")}
+            {failed > 0 ? ` · ${failed} ${t("failed")}` : ""} · {t(queue.status)}
+            {totalTokens > 0 ? ` · ${tokenLabel(totalTokens)} ${t("tokens")}` : ""}
+            {totalCost > 0 ? ` · ${formatUsd(totalCost)}` : ""}
+            {liveStepCount > 0 ? ` · ${liveStepCount} ${t("steps")}` : ""}
+          </small>
+        </span>
+        <span className="task-queue-goal">
+          {current ? `${t(current.status)} · ${current.title}` : queue.goal}
+        </span>
+      </summary>
+      {content}
     </details>
   );
 }

@@ -927,7 +927,7 @@ export function CodeStudio({
   const [previewFullscreen, setPreviewFullscreen] = useState(false);
   const [rightTab, setRightTab] = useState<"preview" | string>("preview");
   const [consoleOpen, setConsoleOpen] = useState(false);
-  const [footerTab, setFooterTab] = useState<"chat" | "console" | "tasks" | "git">("chat");
+  const [footerTab, setFooterTab] = useState<"chat" | "console" | "git">("chat");
   const [footerHeight, setFooterHeight] = useState(() => {
     const stored = Number(localStorage.getItem("cie:studio-footer-height"));
     return Number.isFinite(stored) && stored >= 180 ? stored : 260;
@@ -4889,21 +4889,6 @@ export function CodeStudio({
               ) : null}
             </button>
             <button
-              className={footerTab === "tasks" ? "is-active" : ""}
-              onClick={() => {
-                setFooterTab("tasks");
-                setConsoleOpen(false);
-              }}
-            >
-              <ListChecks size={12} /> {t("Task queue")}
-              {taskQueue ? (
-                <b>
-                  {taskQueue.tasks.filter((task) => task.status === "done").length}/
-                  {taskQueue.tasks.length}
-                </b>
-              ) : null}
-            </button>
-            <button
               className={footerTab === "git" ? "is-active" : ""}
               onClick={() => {
                 setFooterTab("git");
@@ -5918,33 +5903,6 @@ export function CodeStudio({
                   </div>
                 ) : null}
               </div>
-            ) : footerTab === "tasks" ? (
-              <div className="studio-footer-tasks">
-                {taskQueue && taskQueue.tasks.length > 0 ? (
-                  <TaskQueueCard
-                    queue={taskQueue}
-                    defaultOpen
-                    liveStepCount={chatLiveSteps.length}
-                    onOpenFile={(path) => void openFile(path)}
-                    onRetryFailed={() => {
-                      if (!taskQueue) return;
-                      void askProject(taskQueue.goal, false, {
-                        retryFailed: true,
-                        skipClarify: true,
-                        workspaceMode: "build",
-                      });
-                    }}
-                    onUpdateTask={updateQueueTask}
-                    onDeleteTask={deleteQueueTask}
-                    onMoveTask={moveQueueTask}
-                  />
-                ) : (
-                  <div className="studio-footer-empty">
-                    <ListChecks size={18} />
-                    <span>{t("No tasks yet. Send a request in Chat to start a task queue.")}</span>
-                  </div>
-                )}
-              </div>
             ) : (
               <div className="studio-footer-git">
                 <div className="studio-footer-git-head">
@@ -6180,10 +6138,19 @@ export function CodeStudio({
                   .finally(() => setProgressRefreshing(false));
               }}
               onClose={() => setRightTab("preview")}
-              onOpenQueue={() => {
-                setFooterTab("tasks");
-                setConsoleOpen(false);
+              liveStepCount={chatLiveSteps.length}
+              onOpenFile={(path) => void openFile(path)}
+              onRetryFailed={() => {
+                if (!taskQueue) return;
+                void askProject(taskQueue.goal, false, {
+                  retryFailed: true,
+                  skipClarify: true,
+                  workspaceMode: "build",
+                });
               }}
+              onUpdateTask={updateQueueTask}
+              onDeleteTask={deleteQueueTask}
+              onMoveTask={moveQueueTask}
             />
           ) : rightTab === "run" ? (
             <div className="studio-run-panel">

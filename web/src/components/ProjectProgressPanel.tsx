@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import {
   AlertTriangle,
   CheckCircle2,
@@ -18,6 +18,7 @@ import type {
   ProjectTaskQueue,
 } from "../../../shared/tasks";
 import { useI18n } from "../i18n";
+import { TaskQueueCard } from "./TaskQueueCard";
 
 interface ProjectProgressPanelProps {
   analysis: AnalysisResult;
@@ -26,7 +27,12 @@ interface ProjectProgressPanelProps {
   busy?: boolean;
   onRefresh: () => void;
   onClose: () => void;
-  onOpenQueue: () => void;
+  onRetryFailed?: () => void;
+  onOpenFile?: (path: string) => void;
+  onUpdateTask?: (taskId: string, patch: Partial<ProjectTask>) => void | Promise<void>;
+  onDeleteTask?: (taskId: string) => void | Promise<void>;
+  onMoveTask?: (taskId: string, direction: "up" | "down") => void | Promise<void>;
+  liveStepCount?: number;
 }
 
 function formatDate(iso: string | undefined, locale: string): string {
@@ -155,9 +161,15 @@ export function ProjectProgressPanel({
   busy = false,
   onRefresh,
   onClose,
-  onOpenQueue,
+  onRetryFailed,
+  onOpenFile,
+  onUpdateTask,
+  onDeleteTask,
+  onMoveTask,
+  liveStepCount = 0,
 }: ProjectProgressPanelProps) {
   const { t, locale } = useI18n();
+  const [tab, setTab] = useState<"overview" | "todos">("overview");
   const tasks = queue?.tasks ?? [];
   const { done, active, planned, attention } = useMemo(() => {
     const sortDone = (a: ProjectTask, b: ProjectTask) =>
@@ -200,6 +212,28 @@ export function ProjectProgressPanel({
         </div>
       </div>
 
+      <div className="pp-tabs" role="tablist">
+        <button
+          className={tab === "overview" ? "is-active" : ""}
+          onClick={() => setTab("overview")}
+          role="tab"
+          aria-selected={tab === "overview"}
+        >
+          <Network size={10} /> {t("Overview")}
+        </button>
+        <button
+          className={tab === "todos" ? "is-active" : ""}
+          onClick={() => setTab("todos")}
+          role="tab"
+          aria-selected={tab === "todos"}
+        >
+          <ListChecks size={10} /> {t("Todos")}
+          {total > 0 ? <b>{done.length}/{total}</b> : null}
+        </button>
+      </div>
+
+      {tab === "overview" ? (
+        <>
       {total === 0 ? (
         <div className="pp-empty">
           <div className="pp-empty-head">
@@ -229,8 +263,8 @@ export function ProjectProgressPanel({
               </div>
             ) : null}
           </div>
-          <button className="pp-open-queue" onClick={onOpenQueue}>
-            <ListChecks size={11} /> {t("Open task queue")}
+          <button className="pp-open-queue" onClick={() => setTab("todos")}>
+            <ListChecks size={11} /> {t("Open todos")}
           </button>
         </div>
       ) : (
@@ -352,6 +386,29 @@ export function ProjectProgressPanel({
           })}
         </div>
       ) : null}
+        </>
+      ) : (
+        <div className="pp-todos">
+          {queue && tasks.length > 0 ? (
+            <TaskQueueCard
+              queue={queue}
+              flat
+              liveStepCount={liveStepCount}
+              onOpenFile={onOpenFile}
+              onRetryFailed={onRetryFailed}
+              onUpdateTask={onUpdateTask}
+              onDeleteTask={onDeleteTask}
+              onMoveTask={onMoveTask}
+            />
+          ) : (
+            <div className="pp-todos-empty">
+              <ListChecks size={17} />
+              <strong>{t("No AI todos yet")}</strong>
+              <span>{t("Start a job in Chat; planned and completed tasks appear here.")}</span>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

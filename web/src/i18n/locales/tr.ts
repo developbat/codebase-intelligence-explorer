@@ -2165,6 +2165,12 @@ export const tr: Dictionary = {
   "Verified": "Doğrulandı",
   "Blocked": "Bloke",
   "More panels": "Diğer paneller",
+  "Overview": "Özet",
+  "Todos": "Todolar",
+  "Open todos": "Todoları aç",
+  "No AI todos yet": "Henüz AI todo yok",
+  "Start a job in Chat; planned and completed tasks appear here.":
+    "Sohbet'ten bir iş başlat; planlanan ve tamamlanan görevler burada görünür.",
   "Earlier work": "Önceki çalışmalar",
   "Untitled goal": "Başlıksız hedef"
 };
