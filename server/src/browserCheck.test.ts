@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { browserCheckTarget } from "./browserCheck";
+import { browserCheckTarget, normalizeLocalPreviewUrl } from "./browserCheck";
 import { normalizeBrowserSteps } from "../../shared/browserCheck";
 
 test("browser check treats a dev-server URL as url even when passed in path", () => {
@@ -83,5 +83,25 @@ test("pressKeys normalizes a key list and rejects an empty call", () => {
   assert.throws(
     () => normalizeBrowserSteps([{ action: "pressKeys" }]),
     /keys.*non-empty/i,
+  );
+});
+
+test("rewrites an old preview port but leaves other localhost apps alone", () => {
+  const base = "http://127.0.0.1:6000";
+  assert.equal(
+    normalizeLocalPreviewUrl(
+      "project-1",
+      "http://127.0.0.1:4317/api/projects/project-1/preview/index.html?test=1",
+      base,
+    ),
+    "http://127.0.0.1:6000/api/projects/project-1/preview/index.html?test=1",
+  );
+  assert.equal(
+    normalizeLocalPreviewUrl(
+      "project-1",
+      "http://127.0.0.1:5173/app.html",
+      base,
+    ),
+    "http://127.0.0.1:5173/app.html",
   );
 });

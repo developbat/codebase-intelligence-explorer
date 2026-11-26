@@ -65,6 +65,14 @@ export interface ProjectTask {
   completedAt?: string;
 }
 
+export interface ProjectTaskStageUsage {
+  intent?: { inputTokens: number; outputTokens: number; totalTokens: number };
+  planner?: { inputTokens: number; outputTokens: number; totalTokens: number };
+  agent?: { inputTokens: number; outputTokens: number; totalTokens: number };
+  reviewer?: { inputTokens: number; outputTokens: number; totalTokens: number };
+  costUsd?: number;
+}
+
 export interface ProjectTaskQueue {
   version: 1;
   projectId: string;
@@ -77,6 +85,7 @@ export interface ProjectTaskQueue {
   planPath: string;
   contextPath: string;
   digestPath: string;
+  stageUsage?: ProjectTaskStageUsage;
 }
 
 export interface ProjectTaskLoopOptions {
@@ -99,6 +108,9 @@ export interface ProjectTaskLoopOptions {
   liveBrowser?: boolean;
   /** Maximum independent tasks to run at once (default 2 in build mode). */
   parallelTasks?: number;
+  /** Token usage of the intent analyst for this run. */
+  intentUsage?: { inputTokens: number; outputTokens: number; totalTokens: number };
+  intentCostUsd?: number;
 }
 
 export interface ProjectTaskLoopResult {
@@ -107,4 +119,5 @@ export interface ProjectTaskLoopResult {
   completed: number;
   failed: number;
   stopped: boolean;
+  stages?: ProjectTaskStageUsage;
 }

@@ -2451,6 +2451,8 @@ app.post("/api/projects/:id/ai/loop/stream", async (req, res) => {
         tokenBudget: Number(req.body?.tokenBudget) || undefined,
         costBudgetUsd: Number(req.body?.costBudgetUsd) || undefined,
         intent,
+        intentUsage: intentTokenUsage,
+        intentCostUsd: intentCostUsd,
         history,
         liveBrowser: req.body?.liveBrowser === true,
       },

@@ -191,6 +191,26 @@ Rules:
 - If the preflight code already implements the requested rule, do not create an edit task that claims a flat bonus or missing guard; create a verification-only task or fold the verification into the behavior task.
 - Work in any programming language.`;
 
+/**
+ * Detect a short goal that still contains two independent UI behaviors.
+ * The planner is better at splitting these than the single-task path.
+ */
+export function looksMultiBehaviorGoal(goal: string): boolean {
+  const text = goal.trim();
+  if (text.length < 20) return false;
+  const targets = new Set(
+    (text.match(
+      /\b(?:hud|icon|ikon|button|buton|target|hedef|score|puan|streak|seri|timer|saat|color|renk|reng|layout|düzen|duzen|canvas|menu|menü|form|input|modal|toast|toolbar|header|footer|sidebar)\w*/gi,
+    ) ?? []).map((value) => value.toLowerCase()),
+  );
+  const verbs = new Set(
+    (text.match(
+      /\b(?:add|create|change|move|remove|fix|make|update|hide|show|replace|ekle|oluştur|değiştir|degistir|taşı|tasi|kaldır|kaldir|düzelt|duzelt|yap|güncelle|guncelle|gizle|göster|goster|yerleştir|yerlestir)\w*/gi,
+    ) ?? []).map((value) => value.toLowerCase()),
+  );
+  return targets.size >= 2 && verbs.size >= 2;
+}
+
 export function splitLargeGoal(goal: string, verification?: string): ProjectTask[] | null {
   if (goal.length < 160) return null;
   if (/```|\{\s*"|https?:\/\//.test(goal)) return null;
@@ -736,10 +756,12 @@ export async function planProjectTasks(
       ...emptyQueue(projectId, goal.trim()),
       tasks,
       updatedAt: nowIso(),
+      stageUsage: tokenUsage ? { planner: tokenUsage } : undefined,
     };
   }
 
   const queue = await createQueue(analysis.rootPath, projectId, goal.trim(), tasks);
+  if (tokenUsage) queue.stageUsage = { ...(queue.stageUsage ?? {}), planner: tokenUsage };
   await appendTaskContext(
     analysis.rootPath,
     `Plan · ${new Date().toLocaleString()}`,
@@ -1034,6 +1056,7 @@ export async function featurePreflightHints(
 interface UiSmokeResult {
   ok: boolean;
   summary: string;
+  screenshotPath?: string;
 }
 
 async function staticHtmlEntry(
@@ -1093,10 +1116,69 @@ export async function runUiEntrySmoke(
         } catch {}
       }
     }
+    const parseRgb = (value) => {
+      const match = (value || '').match(/rgba?\(([^)]+)\)/);
+      if (!match) return null;
+      const parts = match[1].split(',').map((part) => parseFloat(part));
+      if (parts.length < 3) return null;
+      const alpha = parts.length > 3 ? parts[3] : 1;
+      return alpha < 0.5 ? null : parts.slice(0, 3);
+    };
+    const luminance = (rgb) => {
+      const channel = (value) => {
+        const v = value / 255;
+        return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+      };
+      return 0.2126 * channel(rgb[0]) + 0.7152 * channel(rgb[1]) + 0.0722 * channel(rgb[2]);
+    };
+    const contrast = (a, b) => {
+      const l1 = Math.max(luminance(a), luminance(b));
+      const l2 = Math.min(luminance(a), luminance(b));
+      return (l1 + 0.05) / (l2 + 0.05);
+    };
+    const backgroundRgb = (el) => {
+      let node = el;
+      while (node) {
+        const rgb = parseRgb(getComputedStyle(node).backgroundColor);
+        if (rgb) return rgb;
+        node = node.parentElement;
+      }
+      return [7, 11, 18];
+    };
+    const visible = (el) => {
+      const rect = el.getBoundingClientRect();
+      const style = getComputedStyle(el);
+      return rect.width >= 2 && rect.height >= 2 && style.visibility !== 'hidden' && style.display !== 'none' && Number(style.opacity) !== 0;
+    };
+    let svgIcons = 0;
+    let invisibleIcons = 0;
+    for (const svg of document.querySelectorAll('svg')) {
+      if (!visible(svg)) continue;
+      const shape = svg.querySelector('path, circle, rect, polygon');
+      const fill = parseRgb(getComputedStyle(shape || svg).fill) || parseRgb(getComputedStyle(svg).color);
+      if (!fill) continue;
+      svgIcons += 1;
+      if (contrast(fill, backgroundRgb(svg)) < 1.3) invisibleIcons += 1;
+    }
+    let lowContrastText = 0;
+    let checkedText = 0;
+    for (const el of document.querySelectorAll('body *')) {
+      if (checkedText >= 300) break;
+      if (el.children.length > 0) continue;
+      const text = (el.textContent || '').trim();
+      if (!text || el.getAttribute('aria-hidden') === 'true' || !visible(el)) continue;
+      const fg = parseRgb(getComputedStyle(el).color);
+      if (!fg) continue;
+      checkedText += 1;
+      if (contrast(fg, backgroundRgb(el)) < 1.3) lowContrastText += 1;
+    }
     return JSON.stringify({
       buttons: buttons.length,
       canvas: Boolean(canvas),
       changed: before !== document.body.innerText,
+      svgIcons,
+      invisibleIcons,
+      lowContrastText,
     });
   })()`;
   const result = await runBrowserCheck(analysis.id, analysis.rootPath, {
@@ -1105,7 +1187,7 @@ export async function runUiEntrySmoke(
       { action: "expectVisible", selector: "body" },
       { action: "eval", value: script },
     ],
-    screenshot: false,
+    screenshot: true,
     timeoutMs: 15_000,
   }).catch(() => null);
   if (!result) return { ok: false, summary: "UI smoke could not run." };
@@ -1119,6 +1201,33 @@ export async function runUiEntrySmoke(
     return { ok: false, summary: `Console/page errors: ${errors.slice(0, 3).join(" · ")}` };
   }
   if (overflow) return { ok: false, summary: "The page has horizontal overflow." };
+  const invisibleIcons = Number(evalDetail.match(/"invisibleIcons":(\d+)/)?.[1] ?? 0);
+  if (invisibleIcons > 0) {
+    return {
+      ok: false,
+      summary: `${invisibleIcons} visible icon(s) have near-invisible contrast against the background.`,
+    };
+  }
+  const lowContrastText = Number(evalDetail.match(/"lowContrastText":(\d+)/)?.[1] ?? 0);
+  if (lowContrastText > 0) {
+    return {
+      ok: false,
+      summary: `${lowContrastText} visible text element(s) have near-invisible contrast.`,
+    };
+  }
+  const screenshotPath = result.screenshotPath;
+  if (screenshotPath) {
+    const stat = await fs
+      .stat(path.resolve(analysis.rootPath, screenshotPath))
+      .catch(() => null);
+    if (stat && stat.size < 5_000) {
+      return {
+        ok: false,
+        summary: `UI screenshot looks blank (${stat.size} bytes).`,
+        screenshotPath,
+      };
+    }
+  }
   if (interactive && !changed) {
     return {
       ok: false,
@@ -1127,7 +1236,10 @@ export async function runUiEntrySmoke(
   }
   return {
     ok: true,
-    summary: `UI smoke passed (${interactive ? "interactive" : "static"}).`,
+    summary: `UI smoke passed (${interactive ? "interactive" : "static"})${
+      screenshotPath ? ` · screenshot ${screenshotPath}` : ""
+    }.`,
+    screenshotPath,
   };
 }
 
@@ -1665,6 +1777,7 @@ function aggregateResult(
     changedFiles,
     ranCommands: commands,
     stoppedReason,
+    stages: queue.stageUsage,
     provider,
     model,
     createdAt: new Date().toISOString(),
@@ -1955,7 +2068,8 @@ export async function runProjectLoop(
     (intent?.kind === "edit" || intent?.kind === "scaffold" || intent?.kind === "run") &&
     (goal.length > 180 ||
       (goal.match(/[.!?;]+/g) ?? []).length >= 2 ||
-      /(?:^|\s)(?:ayrıca|hem|tek bir|sadece|bir de)\s/i.test(goal));
+      /(?:^|\s)(?:ayrıca|hem|tek bir|sadece|bir de)\s/i.test(goal) ||
+      looksMultiBehaviorGoal(goal));
   const intentSingle = workspaceMode !== "build" || (intent?.mode === "single" && !multiPartGoal);
   if (
     !queue ||
@@ -2102,6 +2216,15 @@ export async function runProjectLoop(
       }),
     };
   }
+  const priorStages = queue.stageUsage ?? {};
+  queue = {
+    ...queue,
+    stageUsage: {
+      ...priorStages,
+      intent: options.intentUsage ?? priorStages.intent,
+      costUsd: (priorStages.costUsd ?? 0) + (options.intentCostUsd ?? 0),
+    },
+  };
   queue = await saveQueue(analysis.rootPath, { ...queue, status: "running" });
   emit({ type: "start", provider: main.id, model: main.model });
   emit({ type: "task", queue });
@@ -2912,6 +3035,17 @@ export async function runProjectLoop(
       }
     }
 
+    const stageUsage = queue.stageUsage ?? {};
+    queue = {
+      ...queue,
+      stageUsage: {
+        ...stageUsage,
+        agent: addUsage(stageUsage.agent ?? emptyUsage(), result.tokenUsage),
+        reviewer: addUsage(stageUsage.reviewer ?? emptyUsage(), reviewUsage),
+        costUsd:
+          (stageUsage.costUsd ?? 0) + (attemptCost ?? 0) + (reviewCost ?? 0),
+      },
+    };
     const answerNote =
       inspectionAnswer &&
       result.stoppedReason !== "finished" &&
@@ -3420,6 +3554,22 @@ export async function runProjectLoop(
         : "completed";
   queue = await saveQueue(analysis.rootPath, { ...queue, status: finalStatus });
   emit({ type: "task", queue });
+  const stages = queue.stageUsage;
+  if (stages) {
+    const tokens = (usage: { totalTokens: number } | undefined) => usage?.totalTokens ?? 0;
+    emit({
+      type: "log",
+      entry: {
+        id: `log-${Date.now()}-stage-cost`,
+        at: nowIso(),
+        level: "info",
+        label: "Stage cost",
+        detail: `intent ${tokens(stages.intent)} · planner ${tokens(stages.planner)} · agent ${tokens(stages.agent)} · reviewer ${tokens(stages.reviewer)} tokens${
+          stages.costUsd ? ` · ${formatUsd(stages.costUsd)}` : ""
+        }`,
+      },
+    });
+  }
   const result = aggregateResult(goal.trim(), queue, executed, main.id, main.model);
   emit({ type: "done", result });
   return {
@@ -3428,6 +3578,7 @@ export async function runProjectLoop(
     completed: queue.tasks.filter((task) => task.status === "done").length,
     failed: queue.tasks.filter((task) => task.status === "failed" || task.status === "blocked").length,
     stopped: finalStatus === "stopped",
+    stages,
   };
 }
 

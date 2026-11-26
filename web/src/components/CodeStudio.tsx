@@ -156,7 +156,7 @@ import { AgentPlanCard } from "./AgentPlanCard";
 import { ShellTerminalView } from "./ShellTerminalView";
 import { TaskQueueCard } from "./TaskQueueCard";
 import { LibraryPicker } from "./LibraryPicker";
-import type { ProjectTaskQueue } from "../../../shared/tasks";
+import type { ProjectTaskQueue, ProjectTaskStageUsage } from "../../../shared/tasks";
 import type { ClarificationRequest, IntentAnalysis } from "../../../shared/intent";
 import type { BrowserCheckResult } from "../../../shared/browserCheck";
 import type { ProjectToolList } from "../../../shared/projectTools";
@@ -770,6 +770,7 @@ export function CodeStudio({
     provider?: string;
     model?: string;
     taskQueue?: ProjectTaskQueue;
+    stages?: ProjectTaskStageUsage;
     intent?: IntentAnalysis;
     changeReport?: ChangeReport;
     readMap?: AiReadMapEntry[];
@@ -3054,6 +3055,7 @@ export function CodeStudio({
           provider: result.provider,
           model: result.model,
           taskQueue: result.taskQueue,
+          stages: result.stages,
           intent: lastIntentRef.current ?? undefined,
           changeReport: result.changeReport,
           readMap: result.readMap,
@@ -4136,6 +4138,14 @@ export function CodeStudio({
                               "High usage: most of this is re-sent context. Use a reasoner for planning and a cheaper model for small edits.",
                             )}
                           </small>
+                        ) : null}
+                        {workflowMessage.stages ? (
+                          <div className="studio-stage-report">
+                            <span>intent <b>{formatTokens(workflowMessage.stages.intent?.totalTokens ?? 0)}</b></span>
+                            <span>planner <b>{formatTokens(workflowMessage.stages.planner?.totalTokens ?? 0)}</b></span>
+                            <span>agent <b>{formatTokens(workflowMessage.stages.agent?.totalTokens ?? 0)}</b></span>
+                            <span>reviewer <b>{formatTokens(workflowMessage.stages.reviewer?.totalTokens ?? 0)}</b></span>
+                          </div>
                         ) : null}
                       </div>
                     ) : null}

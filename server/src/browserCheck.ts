@@ -140,11 +140,39 @@ export async function browserExecutable(): Promise<string> {
   );
 }
 
-function previewUrl(projectId: string, requestedPath: string): string {
-  const base = (process.env.CIE_BROWSER_BASE || `http://127.0.0.1:${process.env.PORT || 4317}`).replace(
+export function localBaseUrl(): string {
+  return (process.env.CIE_BROWSER_BASE || `http://127.0.0.1:${process.env.PORT || 4317}`).replace(
     /\/+$/,
     "",
   );
+}
+
+/**
+ * Saved scenarios may contain an old preview port. Rewrite only our own
+ * `/api/projects/<id>/preview/...` URLs to the current server base; a dev
+ * server on another port is left untouched.
+ */
+export function normalizeLocalPreviewUrl(
+  projectId: string,
+  url: string | undefined,
+  base = localBaseUrl(),
+): string | undefined {
+  if (!url) return url;
+  try {
+    const parsed = new URL(url);
+    if (!["localhost", "127.0.0.1", "0.0.0.0", "::1", "[::1]"].includes(parsed.hostname)) {
+      return url;
+    }
+    const prefix = `/api/projects/${encodeURIComponent(projectId)}/preview/`;
+    if (!parsed.pathname.startsWith(prefix)) return url;
+    return `${base.replace(/\/+$/, "")}${parsed.pathname}${parsed.search}${parsed.hash}`;
+  } catch {
+    return url;
+  }
+}
+
+function previewUrl(projectId: string, requestedPath: string): string {
+  const base = localBaseUrl();
   const relative = (requestedPath || "index.html").replace(/^\/+/, "");
   const encoded = relative.split("/").map(encodeURIComponent).join("/");
   return `${base}/api/projects/${encodeURIComponent(projectId)}/preview/${encoded}`;
@@ -496,7 +524,11 @@ export async function runBrowserCheck(
         resourceErrors.push(`${response.status()} ${response.url()}`);
       }
     });
-    const url = browserCheckTarget(projectId, requestedPath, options.url);
+    const url = browserCheckTarget(
+      projectId,
+      requestedPath,
+      normalizeLocalPreviewUrl(projectId, options.url),
+    );
     const checkStartedAt = Date.now();
     const response = await page.goto(url, { waitUntil: "load", timeout: timeoutMs });
     if (response && !response.ok()) {

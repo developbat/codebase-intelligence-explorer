@@ -22031,6 +22031,22 @@ button.canvas-stat {
 }
 
 /* Per-run token report */
+.studio-stage-report {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-top: 6px;
+  margin-top: 4px;
+  border-top: 1px dashed var(--line);
+  color: #8fa9c9;
+  font-size: 8px;
+}
+
+.studio-stage-report b {
+  color: #c9dcf0;
+  font-weight: 600;
+}
+
 .studio-token-report {
   display: flex;
   flex-wrap: wrap;

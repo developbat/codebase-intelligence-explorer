@@ -1,5 +1,5 @@
 import type { ClarificationRequest, IntentAnalysis } from "./intent";
-import type { ProjectTaskQueue } from "./tasks";
+import type { ProjectTaskQueue, ProjectTaskStageUsage } from "./tasks";
 import type { ChangeReport } from "./types";
 import type { ExtractionTable } from "./extraction";
 
@@ -734,6 +734,8 @@ export interface AiAgentResult {
   extraction?: ExtractionTable;
   /** Skill names/keys used or selected in this run, for feedback scoring. */
   skillsUsed?: string[];
+  /** Per-stage token/cost trace for the loop run. */
+  stages?: ProjectTaskStageUsage;
 }
 
 export type AiPermissionKind = "write" | "command";
