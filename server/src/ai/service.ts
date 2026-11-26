@@ -4766,7 +4766,7 @@ ${lessons}` : "",
   let browserCheckCalls = 0;
   const browserCheckCache = new Map<string, number>();
   let browserCheckBlocked = false;
-  const maxBrowserChecks = 2;
+  const maxBrowserChecks = 4;
   let realBrowserChecks = 0;
   let syntheticBrowserChecks = 0;
   let realScenarioRuns = 0;
@@ -7846,6 +7846,15 @@ ${lessons}` : "",
       readOnlyStepsSinceChange += 1;
     } else if (!READ_ONLY_ACTIONS.has(step.action)) {
       readOnlyStepsSinceChange = 0;
+    }
+    if (
+      ok &&
+      !READ_ONLY_ACTIONS.has(step.action) &&
+      !VERIFICATION_ACTIONS.has(step.action)
+    ) {
+      // A write (or a mutating command) happened; a repeated browser check is
+      // legitimate again after the code changed.
+      browserCheckCache.clear();
     }
     if (
       readOnlyMode &&

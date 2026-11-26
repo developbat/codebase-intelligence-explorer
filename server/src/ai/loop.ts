@@ -841,7 +841,9 @@ export async function planProjectTasks(
   if (tasks.length === 1) {
     const behaviorTasks = options.intent ? tasksFromBehaviors(options.intent, goal) : [];
     const split =
-      behaviorTasks.length > 1 ? behaviorTasks : splitLargeGoal(goal, verification);
+      behaviorTasks.length > 1
+        ? behaviorTasks
+        : splitLargeGoal(goal, verification) ?? splitGoalSections(goal, verification);
     if (split && split.length > 1) {
       tasks = split;
       if (!options.dryRun) {
@@ -964,8 +966,13 @@ export function summaryAllowsNoChanges(summary: string): boolean {
   );
 }
 
-function summaryReportsBlocker(summary: string): boolean {
-  return /\b(blocker|blocked|cannot|can't|unable to|not present|does not appear|missing|failed to|verification failed|could not|not verified|unverified)\b|yapılamadı|başarısız|engellendi|eksik|bulunamadı|doğrulanmadı|doğrulanamadı|kanıtlanamadı|kanıtlanmadı|test edilmedi|çalıştırılmadı|calistirilmadi|kabul edilmedi|tamamlanamadı/i.test(
+export function reviewFileExcerpt(content: string, max = 3_000): string {
+  if (content.length <= max) return content;
+  return `${content.slice(0, max)}\n… [excerpt truncated; the file continues] …`;
+}
+
+export function summaryReportsBlocker(summary: string): boolean {
+  return /\b(blocker|blocked|cannot|can't|unable to|not present|does not appear|missing|failed to|verification failed|could not|not verified|unverified|unproven|not proven|incomplete|did not verify)\b|yapılamadı|başarısız|engellendi|eksik|bulunamadı|doğrulanmadı|doğrulanamadı|doğrulanamayan|kanıtlanamadı|kanıtlanmadı|kanıtlanamayan|test edilmedi|çalıştırılmadı|calistirilmadi|kabul edilmedi|tamamlanamadı|bloker/i.test(
     summary,
   );
 }
@@ -1943,6 +1950,71 @@ function tasksFromBehaviors(intent: IntentAnalysis, goal: string): ProjectTask[]
     createdAt: at,
     updatedAt: at,
   }));
+}
+
+/**
+ * Deterministic fallback for a large goal when the AI planner fails: split by
+ * markdown sections so a single fallback task cannot swallow the whole spec.
+ */
+export function splitGoalSections(goal: string, verification?: string): ProjectTask[] | null {
+  const sections: { title: string; body: string[] }[] = [];
+  let current: { title: string; body: string[] } | null = null;
+  for (const line of goal.split(/\r?\n/)) {
+    const heading = line.match(/^##\s+(.+?)\s*$/);
+    if (heading) {
+      if (current && current.body.join("\n").trim()) sections.push(current);
+      current = { title: heading[1].trim(), body: [] };
+    } else if (current) {
+      current.body.push(line);
+    }
+  }
+  if (current && current.body.join("\n").trim()) sections.push(current);
+  if (sections.length < 2) return null;
+
+  const isConstraint = /^(teknoloji|teknolojiler|dosya yapısı|dosya yapisi|constraints?|tech|stack|requirements?)/i;
+  const isVerify = /^(kontroller|kontrol|doğrulama|dogrulama|verification|tests?|acceptance)/i;
+  const constraints = sections
+    .filter((section) => isConstraint.test(section.title))
+    .map((section) => `${section.title}:\n${section.body.join("\n").trim()}`)
+    .join("\n\n");
+  const selected = sections.filter((section) => !isConstraint.test(section.title)).slice(0, 5);
+  if (selected.length < 2) return null;
+
+  const at = nowIso();
+  return selected.map((section, index) => {
+    const verify = isVerify.test(section.title);
+    const surface: ProjectTask["surface"] = verify
+      ? "other"
+      : /(görsel|gorsel|arayüz|arayuz|ui|style|tasarım|tasarim)/i.test(section.title)
+        ? "ui"
+        : /(oyun|game|mekanik|mechanic|movement|hareket)/i.test(section.title)
+          ? "game"
+          : "other";
+    return {
+      id: `task-${index + 1}`,
+      title: section.title.slice(0, 140),
+      detail: [section.body.join("\n").trim(), constraints ? `Project constraints:\n${constraints}` : ""]
+        .filter(Boolean)
+        .join("\n\n")
+        .slice(0, 4_000),
+      acceptance: verify
+        ? "Every item in this section is verified on the real page."
+        : `The behavior described in "${section.title}" works and is verified on the real page.`,
+      status: "pending",
+      effort: "standard",
+      role: "main",
+      action: verify ? "verify" : "update",
+      surface,
+      readOnly: verify ? true : undefined,
+      verificationOnly: verify ? true : undefined,
+      dependsOn: index === 0 ? [] : [`task-${index}`],
+      attempts: 0,
+      changedFiles: [],
+      commands: [],
+      createdAt: at,
+      updatedAt: at,
+    };
+  });
 }
 
 function isUiIntent(goal: string, intent: IntentAnalysis): boolean {
@@ -3102,18 +3174,20 @@ export async function runProjectLoop(
         options.intent?.kind === "run");
     const inspectionAnswer =
       inspectionTask && isInspectionAnswer(result.summary);
+    const summaryAllowsCompletion =
+      summaryAllowsNoChanges(result.summary) && !summaryReportsBlocker(result.summary);
     const writeWithoutChange =
       !inspectionTask &&
       taskLooksLikeWrite(task) &&
       result.changedFiles.length === 0 &&
       !mutatingCommand &&
-      !summaryAllowsNoChanges(result.summary);
+      !summaryAllowsCompletion;
     const verificationBlocker =
       !inspectionTask &&
       taskLooksLikeVerification(task) &&
       !taskLooksLikeWrite(task) &&
       summaryReportsBlocker(result.summary) &&
-      !summaryAllowsNoChanges(result.summary);
+      !summaryAllowsCompletion;
     const pendingWork = !inspectionTask && reportsRemainingWork(result.summary);
     const projectHasHtml =
       analysis.files.some((file) => /\.html?$/i.test(file.path)) ||
@@ -3222,7 +3296,7 @@ export async function runProjectLoop(
           // eslint-disable-next-line no-await-in-loop
           const file = await readSourceFile(analysis.rootPath, filePath).catch(() => null);
           if (!file) continue;
-          const content = file.content.slice(0, 3_000);
+          const content = reviewFileExcerpt(file.content);
           files.push({ path: filePath, content });
           chars += content.length;
           if (chars >= 12_000) break;
@@ -3233,7 +3307,7 @@ export async function runProjectLoop(
               {
                 role: "system" as const,
                 content:
-                  'You are a strict senior code reviewer. Review only the changed files shown and the agent\'s evidence. Reply with compact JSON only: {"verdict":"ok"|"issues","issues":["short issue"],"summary":"one sentence"}. Do not rewrite code. If a required scenario or verification passed, do not flag the feature as absent from a truncated excerpt; only flag concrete broken syntax, wrong behavior or missing wiring visible in the evidence.',
+                  'You are a strict senior code reviewer. Review only the changed files shown and the agent\'s evidence. Reply with compact JSON only: {"verdict":"ok"|"issues","issues":["short issue"],"summary":"one sentence"}. Do not rewrite code. File excerpts may end with "… [excerpt truncated; the file continues] …": never report a syntax error, missing closing brace/tag or an incomplete file solely because the excerpt ends there; that is a display cut, not the file. Only flag concrete broken syntax, wrong behavior or missing wiring visible before the marker, or runtime evidence.',
               },
               {
                 role: "user" as const,

@@ -14,6 +14,9 @@ import {
   taskLooksLikeInspection,
   taskLooksLikeVerification,
   taskLooksLikeWrite,
+  reviewFileExcerpt,
+  summaryReportsBlocker,
+  splitGoalSections,
 } from "./ai/loop";
 import {
   budgetExceeded,
@@ -24,6 +27,60 @@ import {
   reportsIncompleteWiring,
   reportsRemainingWork,
 } from "./ai/service";
+
+test("a failed planner still splits a large goal by its sections", () => {
+  const goal = [
+    "# NEON MAZE",
+    "Build a small game.",
+    "## Teknoloji",
+    "- HTML",
+    "- Vanilla JavaScript",
+    "## Oyun mekaniği",
+    "- Player moves with WASD",
+    "- Walls block movement",
+    "## Görsel tasarım",
+    "- Dark background",
+    "- Neon blue walls",
+    "## Arayüz",
+    "- Score",
+    "- Start button",
+    "## Kontroller",
+    "- Walls block the player",
+    "- Restart resets the game",
+  ].join("\n");
+  const tasks = splitGoalSections(goal);
+  assert.ok(tasks);
+  assert.equal(tasks.length, 4);
+  assert.ok(tasks.some((task) => /Oyun mekaniği/.test(task.title) && task.surface === "game"));
+  assert.ok(tasks.some((task) => /Görsel tasarım/.test(task.title) && task.surface === "ui"));
+  const verify = tasks.find((task) => task.action === "verify");
+  assert.ok(verify);
+  assert.equal(verify.readOnly, true);
+  // Tech constraints stay in every task detail.
+  assert.ok(tasks.every((task) => /Vanilla JavaScript/.test(task.detail)));
+});
+
+test("review excerpts are marked when truncated so reviewers do not invent syntax errors", () => {
+  const short = "body { color: red; }";
+  assert.equal(reviewFileExcerpt(short), short);
+  const truncated = reviewFileExcerpt("a".repeat(4_000));
+  assert.match(truncated, /excerpt truncated; the file continues/);
+  assert.equal(truncated.length < 4_000, true);
+});
+
+test("unverified Turkish summaries count as blockers", () => {
+  assert.equal(
+    summaryReportsBlocker(
+      "Kod değişikliği gerekmedi. Ancak S/ArrowDown yönleri için doğrulanamayan kısım (bloker).",
+    ),
+    true,
+  );
+  assert.equal(
+    summaryReportsBlocker("Tüm davranışlar doğrulandı; değişiklik gerekmedi."),
+    false,
+  );
+  assert.equal(summaryReportsBlocker("The feature is unverified; no proof collected."), true);
+});
 
 test("typecheck is preferred over build for automatic verification", () => {
   assert.equal(
