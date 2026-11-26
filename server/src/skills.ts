@@ -25,6 +25,7 @@ const MAX_PROMPT_SKILLS = 3;
 const MAX_PROMPT_CHARS_PER_SKILL = 3_000;
 const MAX_PROMPT_TOTAL_CHARS = 8_000;
 const SKILL_FILE = "SKILL.md";
+const FEEDBACK_FILE = "skill-feedback.json";
 const IGNORED_DIRECTORIES = new Set([".git", "node_modules", "__pycache__", ".venv", "venv"]);
 const IGNORED_FILES = new Set([".DS_Store", "Thumbs.db"]);
 const execFileAsync = promisify(execFile);
@@ -412,7 +413,23 @@ export async function getSkill(
   const record = records.find((item) => item.key === key);
   if (!record) throw new Error("Skill not found.");
   const raw = await fs.readFile(path.join(record.directory, SKILL_FILE), "utf8");
-  return { ...record, content: raw, body: parseSkillMd(raw).body };
+  const feedback = await readSkillFeedback(projectRoot);
+  const entry = feedback.skills[skillMentionSlug(record.name)];
+  return {
+    ...record,
+    content: raw,
+    body: parseSkillMd(raw).body,
+    feedback: entry
+      ? {
+          up: entry.up,
+          down: entry.down,
+          wins: entry.wins,
+          losses: entry.losses,
+          score: skillFeedbackScore(entry),
+          updatedAt: entry.updatedAt,
+        }
+      : undefined,
+  };
 }
 
 export async function setSkillEnabled(
@@ -561,6 +578,105 @@ export async function runSkillScript(
   }
 }
 
+interface SkillFeedbackEntry {
+  up: number;
+  down: number;
+  wins: number;
+  losses: number;
+  updatedAt: string;
+}
+
+interface SkillFeedbackFile {
+  version: 1;
+  skills: Record<string, SkillFeedbackEntry>;
+}
+
+function feedbackPath(projectRoot: string): string {
+  return path.join(projectRoot, ".cie", "agent", FEEDBACK_FILE);
+}
+
+function clampRating(value: number): number {
+  return Math.max(-3, Math.min(3, Math.round(value * 100) / 100));
+}
+
+export function skillFeedbackScore(entry: SkillFeedbackEntry | undefined): number {
+  if (!entry) return 0;
+  return clampRating(entry.up - entry.down * 1.5 + entry.wins * 0.25 - entry.losses * 0.5);
+}
+
+export async function readSkillFeedback(projectRoot: string): Promise<SkillFeedbackFile> {
+  try {
+    const parsed = JSON.parse(await fs.readFile(feedbackPath(projectRoot), "utf8")) as SkillFeedbackFile;
+    return { version: 1, skills: parsed.skills ?? {} };
+  } catch {
+    return { version: 1, skills: {} };
+  }
+}
+
+async function writeSkillFeedback(projectRoot: string, file: SkillFeedbackFile): Promise<void> {
+  const target = feedbackPath(projectRoot);
+  await fs.mkdir(path.dirname(target), { recursive: true });
+  const temp = `${target}.${process.pid}.${Date.now()}.tmp`;
+  await fs.writeFile(temp, JSON.stringify(file, null, 2), { encoding: "utf8", mode: 0o600 });
+  await fs.rename(temp, target);
+}
+
+function feedbackSlug(value: string): string {
+  const last = value.includes(":") ? value.split(":").pop() ?? value : value;
+  return skillMentionSlug(last);
+}
+
+function ensureEntry(file: SkillFeedbackFile, slug: string): SkillFeedbackEntry {
+  const key = feedbackSlug(slug);
+  const existing = file.skills[key];
+  if (existing) return existing;
+  const created: SkillFeedbackEntry = {
+    up: 0,
+    down: 0,
+    wins: 0,
+    losses: 0,
+    updatedAt: new Date().toISOString(),
+  };
+  file.skills[key] = created;
+  return created;
+}
+
+export async function recordSkillVote(
+  projectRoot: string,
+  slug: string,
+  vote: "up" | "down" | "clear",
+): Promise<{ up: number; down: number; wins: number; losses: number; score: number; updatedAt?: string }> {
+  const file = await readSkillFeedback(projectRoot);
+  const entry = ensureEntry(file, slug);
+  if (vote === "up") entry.up += 1;
+  else if (vote === "down") entry.down += 1;
+  else {
+    entry.up = 0;
+    entry.down = 0;
+  }
+  entry.updatedAt = new Date().toISOString();
+  await writeSkillFeedback(projectRoot, file);
+  return { ...entry, score: skillFeedbackScore(entry) };
+}
+
+export async function recordSkillOutcomes(
+  projectRoot: string,
+  skills: string[],
+  success: boolean,
+): Promise<void> {
+  const unique = [...new Set(skills.map(feedbackSlug).filter(Boolean))].slice(0, 8);
+  if (unique.length === 0) return;
+  const file = await readSkillFeedback(projectRoot);
+  const now = new Date().toISOString();
+  for (const slug of unique) {
+    const entry = ensureEntry(file, slug);
+    if (success) entry.wins += 1;
+    else entry.losses += 1;
+    entry.updatedAt = now;
+  }
+  await writeSkillFeedback(projectRoot, file);
+}
+
 export function renderSkillIndex(skills: SkillRecord[]): string {
   const enabled = skills.filter((skill) => skill.enabled);
   if (enabled.length === 0) return "";
@@ -643,7 +759,11 @@ const SKILL_SIGNALS: Record<string, { strong: string[]; weak: string[] }> = {
   },
 };
 
-function autoMatchedSkills(records: SkillRecord[], instruction: string): SkillRecord[] {
+function autoMatchedSkills(
+  records: SkillRecord[],
+  instruction: string,
+  feedback?: SkillFeedbackFile,
+): SkillRecord[] {
   const text = instruction.toLowerCase();
   const requestTokens = new Set(
     (text.match(/[a-z0-9çğıöşü_-]{3,}/g) ?? []).filter(
@@ -660,6 +780,8 @@ function autoMatchedSkills(records: SkillRecord[], instruction: string): SkillRe
       for (const signal of signals.strong) if (text.includes(signal)) score += 2;
       for (const signal of signals.weak) if (text.includes(signal)) score += 1;
       for (const token of requestTokens) if (description.includes(token)) score += 1;
+      const rating = skillFeedbackScore(feedback?.skills[slug]);
+      score += rating * 0.75;
       return { record, score };
     })
     .filter((entry) => entry.score >= 2)
@@ -680,6 +802,7 @@ export async function loadSkillsForPrompt(
   index: string;
 }> {
   const { records } = await scanSkills(projectRoot, projectId, options);
+  const feedback = await readSkillFeedback(projectRoot);
   const tokens = [...instruction.matchAll(/@([a-zA-Z0-9][\w.-]*)/g)].map((match) =>
     match[1].toLowerCase(),
   );
@@ -700,6 +823,7 @@ export async function loadSkillsForPrompt(
   const relevant = autoMatchedSkills(
     records.filter((record) => !mentioned.includes(record) && !requestedRecords.includes(record)),
     instruction,
+    feedback,
   );
   const ordered = [
     ...mentioned,

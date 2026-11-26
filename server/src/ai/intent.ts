@@ -11,7 +11,7 @@ import {
 import { chat } from "./providers";
 import { recordUsage } from "./usage";
 import { getPublicSettings, resolveAgentRole, resolveProvider } from "./settings";
-import { listSkills, skillMentionSlug } from "../skills";
+import { listSkills, readSkillFeedback, skillFeedbackScore, skillMentionSlug } from "../skills";
 import { pickAlternateAgentModel } from "./agents";
 import { healthKey, modelHealthByProviderModel } from "./modelStats";
 import { estimateUsageCost } from "./pricing";
@@ -704,10 +704,15 @@ export async function analyzeIntent(
   if (!instruction.trim()) throw new Error("An instruction is required.");
   const config = await resolveIntentModel(options);
   const skillList = await listSkills(analysis.rootPath, projectId).catch(() => null);
+  const skillFeedback = await readSkillFeedback(analysis.rootPath).catch(() => null);
   const skillIndex = (skillList?.skills ?? [])
     .filter((skill) => skill.enabled)
     .slice(0, 20)
-    .map((skill) => `${skillMentionSlug(skill.name)}: ${(skill.description || "No description.").slice(0, 140)}`)
+    .map((skill) => {
+      const slug = skillMentionSlug(skill.name);
+      const rating = skillFeedbackScore(skillFeedback?.skills[slug]);
+      return `${slug}${rating ? ` (rating ${rating > 0 ? "+" : ""}${rating})` : ""}: ${(skill.description || "No description.").slice(0, 140)}`;
+    })
     .join("\n");
   const messages = [
     { role: "system" as const, content: systemPrompt() },

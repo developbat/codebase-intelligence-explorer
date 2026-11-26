@@ -91,6 +91,7 @@ import type {
 import type {
   SkillAuditResponse,
   SkillCatalogResponse,
+  SkillFeedbackSummary,
   SkillDetail,
   SkillFileResponse,
   SkillInstallRequest,
@@ -399,6 +400,12 @@ export const api = {
     readFile: (id: string, key: string, filePath: string) =>
       request<SkillFileResponse>(
         `/api/projects/${id}/skills/${encodeURIComponent(key)}/file?path=${encodeURIComponent(filePath)}`,
+      ),
+
+    feedback: (id: string, key: string, vote: "up" | "down" | "clear") =>
+      request<SkillFeedbackSummary>(
+        `/api/projects/${id}/skills/${encodeURIComponent(key)}/feedback`,
+        { method: "POST", body: JSON.stringify({ vote }) },
       ),
   },
 

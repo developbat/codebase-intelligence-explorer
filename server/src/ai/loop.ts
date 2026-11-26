@@ -19,7 +19,8 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { getDataDir, loadAnalysis } from "../store";
 import { readSourceFile } from "../editor";
-import { loadSkillsForPrompt } from "../skills";
+import { loadSkillsForPrompt, recordSkillOutcomes } from "../skills";
+import { shouldForceRequirementsFirst } from "../skillPolicy";
 import { ensureDevServerForRequest } from "../processes";
 import { checkFileSyntax } from "../syntax";
 import { runBrowserCheck } from "../browserCheck";
@@ -533,6 +534,9 @@ export async function planProjectTasks(
             ].join(", ")}`
           : "",
         projectMap ? `Project map (use it for file and symbol ownership):\n${projectMap.slice(0, 14_000)}` : "",
+        shouldForceRequirementsFirst(goal, options.intent, false)
+          ? "This goal is short/underspecified. Apply the requirements-first approach: define explicit acceptance checks before implementation."
+          : "",
         "Write task titles, details and acceptance in English. Keep quoted user text, file paths and code identifiers unchanged.",
         `Verification command: ${verification ?? "none detected"}`,
         options.intent
@@ -1674,16 +1678,46 @@ function aggregateResult(
   };
 }
 
+function isUiIntent(goal: string, intent: IntentAnalysis): boolean {
+  const text = `${goal}\n${intent.understanding}\n${intent.areas.join(" ")}`.toLowerCase();
+  return /\b(ui|hud|icon|ikon|button|buton|css|style|stil|layout|düzen|duzen|color|renk|canvas|ekran|page|sayfa|responsive|mobil|görsel|gorsel)\b|\.(?:html?|css|jsx?|tsx?|vue|svelte)/i.test(
+    text,
+  );
+}
+
+function conventionalAcceptance(
+  goal: string,
+  intent: IntentAnalysis,
+  verification?: string,
+): string {
+  const parts: string[] = [];
+  if (isUiIntent(goal, intent)) {
+    parts.push(
+      "UI quality is verified on the real page: icon/label contrast, one-row alignment, no horizontal overflow, with screenshot or browser evidence.",
+    );
+  }
+  if (intent.kind === "edit" || intent.kind === "scaffold") {
+    parts.push("Existing behavior and scenarios still pass.");
+  }
+  if (verification) parts.push(`Verification (${verification}) passes.`);
+  if (intent.kind === "question" || intent.kind === "analyze") {
+    parts.push("The answer cites file:line evidence and no project files are changed.");
+  }
+  if (intent.kind === "run") {
+    parts.push("The command exits successfully and its output is reported.");
+  }
+  if (intent.needsExhaustiveEvidence) {
+    parts.push("Every requested item is listed and the total is verified.");
+  }
+  return parts.join(" ");
+}
+
 function conventionalGuidance(
   goal: string,
   intent: IntentAnalysis,
   verification?: string,
 ): string {
-  const text = `${goal}\n${intent.understanding}\n${intent.areas.join(" ")}`.toLowerCase();
-  const ui =
-    /\b(ui|hud|icon|ikon|button|buton|css|style|stil|layout|düzen|duzen|color|renk|canvas|ekran|page|sayfa|responsive|mobil|görsel|gorsel)\b|\.(?:html?|css|jsx?|tsx?|vue|svelte)/i.test(
-      text,
-    );
+  const ui = isUiIntent(goal, intent);
   const lines: string[] = [];
   if (ui) {
     lines.push(
@@ -1756,7 +1790,11 @@ export function intentTask(
           ? "The answer cites the evidence and states open questions."
           : readOnly
             ? "The question is answered with code-referenced evidence; no project files are changed."
-            : "The requested change is implemented and verified.",
+            : `The requested change is implemented and verified. ${conventionalAcceptance(
+                goal,
+                intent,
+                verification,
+              )}`.trim(),
     status: "pending",
     effort,
     role:
@@ -2280,6 +2318,7 @@ export async function runProjectLoop(
         startingUsage: current.tokenUsage,
         intent: options.intent,
         acceptance: current.acceptance,
+        goalText: queue.goal,
         workBriefText: cleanTaskDetail(current.detail) || current.title,
         history: options.history?.slice(-8),
         liveBrowser: options.liveBrowser === true,
@@ -2940,6 +2979,11 @@ export async function runProjectLoop(
         (verification ? { command: verification } : undefined),
       review,
     });
+    if (result.skillsUsed && result.skillsUsed.length > 0) {
+      await recordSkillOutcomes(analysis.rootPath, result.skillsUsed, status === "done").catch(
+        () => undefined,
+      );
+    }
     queue = await saveQueue(analysis.rootPath, queue);
     await appendTaskContext(
       analysis.rootPath,

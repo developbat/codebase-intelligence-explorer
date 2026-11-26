@@ -732,6 +732,8 @@ export interface AiAgentResult {
   readMap?: AiReadMapEntry[];
   /** Last complete extraction produced by extract_entities in this run. */
   extraction?: ExtractionTable;
+  /** Skill names/keys used or selected in this run, for feedback scoring. */
+  skillsUsed?: string[];
 }
 
 export type AiPermissionKind = "write" | "command";

@@ -127,7 +127,7 @@ import { findProjectIcon } from "./icons";
 import { discoverTests, runTests } from "./tests";
 import { listFolders } from "./fsbrowse";
 import { listProjectTemplates, scaffoldProject } from "./scaffold";
-import { getSkill, listSkills, readSkillFile, runSkillScript, setSkillEnabled } from "./skills";
+import { getSkill, listSkills, readSkillFile, recordSkillVote, runSkillScript, setSkillEnabled } from "./skills";
 import {
   installSkills,
   previewSkillSource,
@@ -1611,6 +1611,24 @@ app.post("/api/projects/:id/skills/install", async (req, res) => {
         enable: req.body?.enable === true,
       }),
     );
+  } catch (error) {
+    handleError(res, error, 400);
+  }
+});
+
+app.post("/api/projects/:id/skills/:key/feedback", async (req, res) => {
+  try {
+    const analysis = await loadAnalysis(req.params.id);
+    const key = req.params.key;
+    const vote = req.body?.vote === "up" || req.body?.vote === "down" || req.body?.vote === "clear"
+      ? (req.body.vote as "up" | "down" | "clear")
+      : null;
+    if (!vote) {
+      res.status(400).json({ error: "vote must be up, down or clear." });
+      return;
+    }
+    const skill = await getSkill(analysis.rootPath, req.params.id, key);
+    res.json(await recordSkillVote(analysis.rootPath, skill.name, vote));
   } catch (error) {
     handleError(res, error, 400);
   }

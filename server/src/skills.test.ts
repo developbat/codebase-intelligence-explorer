@@ -11,7 +11,11 @@ import {
   loadSkillsForPrompt,
   renderSkillIndex,
   readSkillFile,
+  readSkillFeedback,
+  recordSkillOutcomes,
+  recordSkillVote,
   runSkillScript,
+  skillFeedbackScore,
   renderSkillsForPrompt,
   setSkillEnabled,
   type EnabledSkill,
@@ -364,6 +368,36 @@ test("loads intent-selected skills by slug", async () => {
     );
     assert.deepEqual(result.selected, ["Alpha Helper"]);
     assert.ok(result.skills.some((skill) => skill.record.name === "Alpha Helper"));
+  } finally {
+    await fs.rm(cleanup, { recursive: true, force: true });
+  }
+});
+
+test("user feedback and outcomes influence skill auto-match", async () => {
+  const { project, dataDir, homeDir, cleanup } = await roots();
+  try {
+    await writeSkill(
+      path.join(project, ".cie", "skills"),
+      "ui-review",
+      "name: Runtime UI Debugging\ndescription: Diagnose invisible icons and HUD layout.",
+      "CHECK UI",
+    );
+    let result = await loadSkillsForPrompt(project, "feedback", "ui", { dataDir, homeDir });
+    assert.ok(result.relevant.includes("Runtime UI Debugging"));
+
+    await recordSkillVote(project, "runtime-ui-debugging", "up");
+    result = await loadSkillsForPrompt(project, "feedback", "ui", { dataDir, homeDir });
+    assert.ok(result.relevant.includes("Runtime UI Debugging"));
+
+    await recordSkillVote(project, "runtime-ui-debugging", "clear");
+    await recordSkillVote(project, "runtime-ui-debugging", "down");
+    result = await loadSkillsForPrompt(project, "feedback", "ui", { dataDir, homeDir });
+    assert.equal(result.relevant.includes("Runtime UI Debugging"), false);
+
+    await recordSkillOutcomes(project, ["Runtime UI Debugging"], true);
+    const file = await readSkillFeedback(project);
+    assert.equal(file.skills["runtime-ui-debugging"]?.wins, 1);
+    assert.ok(skillFeedbackScore(file.skills["runtime-ui-debugging"]) < 0);
   } finally {
     await fs.rm(cleanup, { recursive: true, force: true });
   }

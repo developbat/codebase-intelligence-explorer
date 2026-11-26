@@ -12,6 +12,8 @@ import {
   ShieldCheck,
   Sparkles,
   ExternalLink,
+  ThumbsDown,
+  ThumbsUp,
 } from "lucide-react";
 import type {
   SkillAuditStatus,
@@ -336,6 +338,22 @@ export function SkillsPanel({ projectId }: SkillsPanelProps) {
       );
     } finally {
       setInstallBusy(false);
+    }
+  }
+
+  async function voteSkill(skill: SkillDetail, vote: "up" | "down") {
+    if (busyKey) return;
+    setBusyKey(skill.key);
+    setAddMessage(null);
+    try {
+      const feedback = await api.skills.feedback(projectId, skill.key, vote);
+      setDetail((current) => (current && current.key === skill.key ? { ...current, feedback } : current));
+    } catch (requestError) {
+      setAddMessage(
+        requestError instanceof Error ? requestError.message : t("Could not save skill feedback."),
+      );
+    } finally {
+      setBusyKey(null);
     }
   }
 
@@ -801,6 +819,31 @@ export function SkillsPanel({ projectId }: SkillsPanelProps) {
                       <AlertTriangle size={9} /> {t("Contains scripts; not executed")}
                     </span>
                   ) : null}
+                </div>
+
+                <div className="skills-feedback">
+                  <span>{t("Was this skill useful?")}</span>
+                  <button
+                    className="ghost-button"
+                    onClick={() => void voteSkill(detail, "up")}
+                    disabled={busyKey === detail.key}
+                    title={t("Mark as useful")}
+                  >
+                    <ThumbsUp size={9} /> {detail.feedback?.up ?? 0}
+                  </button>
+                  <button
+                    className="ghost-button"
+                    onClick={() => void voteSkill(detail, "down")}
+                    disabled={busyKey === detail.key}
+                    title={t("Mark as not useful")}
+                  >
+                    <ThumbsDown size={9} /> {detail.feedback?.down ?? 0}
+                  </button>
+                  <small>
+                    {detail.feedback && (detail.feedback.up || detail.feedback.down || detail.feedback.wins || detail.feedback.losses)
+                      ? `${t("score")} ${detail.feedback.score > 0 ? "+" : ""}${detail.feedback.score}`
+                      : t("No feedback yet")}
+                  </small>
                 </div>
 
                 {detail.warning ? (

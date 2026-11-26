@@ -24,9 +24,19 @@ export interface SkillRecord {
   warning?: string;
 }
 
+export interface SkillFeedbackSummary {
+  up: number;
+  down: number;
+  wins: number;
+  losses: number;
+  score: number;
+  updatedAt?: string;
+}
+
 export interface SkillDetail extends SkillRecord {
   content: string;
   body: string;
+  feedback?: SkillFeedbackSummary;
 }
 
 export interface SkillSourceInfo {

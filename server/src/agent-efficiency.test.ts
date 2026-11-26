@@ -363,4 +363,6 @@ test("intentTask adds conventional UI checks for a terse prompt", () => {
   assert.match(task.detail, /UI quality/i);
   assert.match(task.detail, /Preserve existing behavior/i);
   assert.match(task.detail, /Verification:/i);
+  assert.match(task.acceptance ?? "", /UI quality is verified/i);
+  assert.match(task.acceptance ?? "", /Verification \(npm run build\) passes/i);
 });

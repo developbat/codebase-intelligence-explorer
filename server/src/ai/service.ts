@@ -122,6 +122,7 @@ import { AGENT_TOOL_GROUPS } from "../../../shared/intent";
 import { pickAlternateAgentModel } from "./agents";
 import { getPrompt, renderPrompt } from "./prompts";
 import { listSkills, loadSkillForRun, loadSkillsForPrompt, renderSkillsForPrompt, runSkillScript, setSkillEnabled } from "../skills";
+import { shouldForceRequirementsFirst } from "../skillPolicy";
 import {
   renderAgentToolCatalog,
   suggestToolsForInstruction,
@@ -3878,6 +3879,8 @@ export async function runAgentTask(
     forceWrite?: boolean;
     /** The task's explicit acceptance criteria, if the loop has them. */
     acceptance?: string;
+    /** Original user goal for short-prompt heuristics. */
+    goalText?: string;
     /** The loop already decided this is a read-only inspection task. */
     inspection?: boolean;
     /** Original user goal when `instruction` is wrapped task-loop boilerplate. */
@@ -3933,6 +3936,7 @@ export async function runAgentTask(
       : Number.POSITIVE_INFINITY;
   const createdAt = new Date().toISOString();
   const evidence: AiContextFile[] = [];
+  const usedSkills: string[] = [];
   const steps: AiAgentStep[] = [];
   const changedFiles: string[] = [];
   const ranCommands: string[] = [];
@@ -4433,8 +4437,17 @@ ${lessons}` : "",
     workspaceMode === "ask"
       ? "\n\nInspection profile: this task is read-only. Read at most 6 files, never re-read the same range, and finish with a compact report. Do not propose a large next-step list."
       : "";
+  const requestedSkills = [...(options.intent?.skills ?? [])];
+  const goalText = (options.goalText || instruction).trim();
+  if (
+    shouldForceRequirementsFirst(goalText, options.intent, options.microEdit === true) &&
+    !requestedSkills.includes("requirements-first")
+  ) {
+    requestedSkills.unshift("requirements-first");
+    log("info", "Requirements-first forced", "short/underspecified goal");
+  }
   const skillLoad = await loadSkillsForPrompt(analysis.rootPath, projectId, instruction, {
-    requested: options.intent?.skills,
+    requested: requestedSkills.slice(0, 3),
   }).catch(() => ({
     skills: [] as never[],
     mentions: [] as string[],
@@ -4443,6 +4456,7 @@ ${lessons}` : "",
     index: "",
   }));
   const enabledSkills = skillLoad.skills;
+  usedSkills.push(...skillLoad.selected, ...skillLoad.relevant);
   const mentionedSkill = skillLoad.mentions.length > 0;
   const relevantSkill = skillLoad.relevant.length > 0;
   const selectedSkill = skillLoad.selected.length > 0;
@@ -6211,6 +6225,9 @@ ${lessons}` : "",
       if (registeredResult) {
         observation = registeredResult.observation;
         ok = registeredResult.ok;
+        if (ok && action === "load_skill" && typeof args.key === "string") {
+          usedSkills.push(args.key);
+        }
       }
       if (!registeredResult) {
         actionCacheKeyValue = READ_ONLY_ACTIONS.has(action)
@@ -8096,6 +8113,7 @@ ${lessons}` : "",
     createdAt,
     plan: activePlan ?? plan,
     planPath,
+    skillsUsed: [...new Set(usedSkills)],
     usage: {
       inputChars,
       estimatedTokens: Math.ceil(inputChars / 4),

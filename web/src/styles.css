@@ -16378,6 +16378,32 @@ button.canvas-stat {
 }
 
 .skills-candidate small,
+.skills-feedback {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 7px;
+  padding-top: 7px;
+  border-top: 1px dashed var(--line);
+  color: #8fa9c9;
+  font-size: 8px;
+}
+
+.skills-feedback button {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 3px 6px;
+  font-size: 8px;
+}
+
+.skills-feedback small {
+  margin-left: auto;
+  color: #7f9bbd;
+  font-size: 7.5px;
+}
+
 .skills-candidate-warning {
   color: #6f89a7;
   font-size: 7px;
