@@ -87,6 +87,7 @@ export function narrowTaskForEditFirst(
     role: "main",
     attempts: 0,
     repairAttempts: repairs,
+    stepBudget: 6,
     tokenUsage: undefined,
     resultSummary: undefined,
     verification: undefined,

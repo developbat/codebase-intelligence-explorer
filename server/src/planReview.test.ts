@@ -109,4 +109,29 @@ test("auto-replan replaces a stale single task and preserves changed files in th
   assert.match(next.tasks[0].detail, /Previous attempt changed styles\.css/);
   assert.equal(next.planMeta?.reviewCount, 1);
   assert.equal(next.planMeta?.version, PLAN_VERSION);
+  // A replan must keep structured fields; otherwise forceWrite and the
+  // focused-edit profile are lost and the agent falls back to inspection.
+  assert.ok(next.tasks.every((task) => task.action === "update"));
+  assert.ok(next.tasks.every((task) => task.surface === "other"));
+
+  const explicit = applyPlanReview(stale, goal, {
+    verdict: "replan",
+    requirements: ["move"],
+    missing: [],
+    assumptions: [],
+    questions: [],
+    tasks: [
+      {
+        title: "Move the player",
+        detail: "Handle WASD.",
+        acceptance: "Player moves.",
+        effort: "standard",
+        action: "update",
+        surface: "game",
+      },
+    ],
+    source: "model",
+  });
+  assert.equal(explicit.tasks[0].action, "update");
+  assert.equal(explicit.tasks[0].surface, "game");
 });

@@ -1,6 +1,10 @@
 import crypto from "node:crypto";
 import type { AiTokenUsage } from "../../../shared/ai";
-import type { IntentAnalysis } from "../../../shared/intent";
+import type {
+  IntentAnalysis,
+  IntentBehaviorAction,
+  IntentBehaviorSurface,
+} from "../../../shared/intent";
 import type { ProjectTask, ProjectTaskEffort, ProjectTaskQueue } from "../../../shared/tasks";
 import { chat } from "./providers";
 import { resolveAgentRole } from "./settings";
@@ -12,13 +16,14 @@ export const PLAN_VERSION = 2;
 const PLAN_REVIEW_SYSTEM = `You are a strict plan reviewer for a coding agent. Compare the user goal, the existing task queue, the changed files and the last failure. Return JSON only.
 
 Schema:
-{"verdict":"ok"|"replan","requirements":["one per independent behavior"],"missing":["requirement not covered by the current tasks"],"assumptions":["safe assumption used instead of asking"],"questions":[{"question":"one product decision","options":[{"label":"short option","suffix":"text appended to the user's request if chosen"}]}],"tasks":[{"title":"imperative","detail":"exact work, files if known","acceptance":"how to verify","effort":"simple|standard|hard"}]}
+{"verdict":"ok"|"replan","requirements":["one per independent behavior"],"missing":["requirement not covered by the current tasks"],"assumptions":["safe assumption used instead of asking"],"questions":[{"question":"one product decision","options":[{"label":"short option","suffix":"text appended to the user's request if chosen"}]}],"tasks":[{"title":"imperative","detail":"exact work, files if known","acceptance":"how to verify","effort":"simple|standard|hard","action":"create|update|remove|move|verify|run|document|other","surface":"ui|api|data|config|docs|game|other"}]}
 
 Rules:
 - Return "ok" when the existing tasks still cover every required behavior and a retry of the failed/blocked task is the right next step.
 - Return "replan" when the tasks are stale, merged, missing a behavior, or produced by an older planner. Provide 2-6 tasks, one behavior each, with acceptance criteria.
 - Never split a single behavior into busywork. Never create verification-only or cleanup-only tasks.
 - Preserve completed work and changed files. A new task must inspect the current files, not undo working changes.
+- Always include action and surface on every task; never omit them.
 - Ask at most ONE question, and only when a wrong guess would implement the wrong product behavior. Provide 2-3 concrete product options with a suffix. Otherwise return an empty questions array and use a safe assumption.
 - Do not ask which files to inspect or where the code lives; the executor handles that.
 - Keep the user's exact qualifiers (only, never, smaller/larger, do not change X).
@@ -35,7 +40,9 @@ export interface PlanReviewResult {
   missing: string[];
   assumptions: string[];
   questions: PlanReviewQuestion[];
-  tasks: Array<Pick<ProjectTask, "title" | "detail" | "acceptance" | "effort">>;
+  tasks: Array<
+    Pick<ProjectTask, "title" | "detail" | "acceptance" | "effort" | "action" | "surface">
+  >;
   tokenUsage?: AiTokenUsage;
   costUsd?: number;
   source: "model" | "fallback";
@@ -143,27 +150,61 @@ function reviewQuestions(value: unknown): PlanReviewQuestion[] {
     .slice(0, 1);
 }
 
+const TASK_ACTIONS = new Set<IntentBehaviorAction>([
+  "create",
+  "update",
+  "remove",
+  "move",
+  "verify",
+  "run",
+  "document",
+  "other",
+]);
+const TASK_SURFACES = new Set<IntentBehaviorSurface>([
+  "ui",
+  "api",
+  "data",
+  "config",
+  "docs",
+  "game",
+  "other",
+]);
+
 function reviewTasks(value: unknown): PlanReviewResult["tasks"] {
   if (!Array.isArray(value)) return [];
   return value
     .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object")
-    .map((item): Pick<ProjectTask, "title" | "detail" | "acceptance" | "effort"> => ({
-      title:
-        typeof item.title === "string" && item.title.trim()
-          ? item.title.trim().slice(0, 140)
-          : "",
-      detail:
-        typeof item.detail === "string" && item.detail.trim()
-          ? item.detail.trim().slice(0, 3_000)
-          : "",
-      acceptance:
-        typeof item.acceptance === "string" && item.acceptance.trim()
-          ? item.acceptance.trim().slice(0, 800)
-          : "The behavior works and is verified on the real page.",
-      effort: (item.effort === "simple" || item.effort === "hard"
-        ? item.effort
-        : "standard") as ProjectTaskEffort,
-    }))
+    .map(
+      (
+        item,
+      ): Pick<ProjectTask, "title" | "detail" | "acceptance" | "effort" | "action" | "surface"> => ({
+        title:
+          typeof item.title === "string" && item.title.trim()
+            ? item.title.trim().slice(0, 140)
+            : "",
+        detail:
+          typeof item.detail === "string" && item.detail.trim()
+            ? item.detail.trim().slice(0, 3_000)
+            : "",
+        acceptance:
+          typeof item.acceptance === "string" && item.acceptance.trim()
+            ? item.acceptance.trim().slice(0, 800)
+            : "The behavior works and is verified on the real page.",
+        effort: (item.effort === "simple" || item.effort === "hard"
+          ? item.effort
+          : "standard") as ProjectTaskEffort,
+        action:
+          typeof item.action === "string" &&
+          TASK_ACTIONS.has(item.action as IntentBehaviorAction)
+            ? (item.action as IntentBehaviorAction)
+            : undefined,
+        surface:
+          typeof item.surface === "string" &&
+          TASK_SURFACES.has(item.surface as IntentBehaviorSurface)
+            ? (item.surface as IntentBehaviorSurface)
+            : undefined,
+      }),
+    )
     .filter((item) => item.title && item.detail)
     .slice(0, 6);
 }

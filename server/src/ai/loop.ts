@@ -215,28 +215,41 @@ export function applyPlanReview(
           detail: requirement,
           acceptance: `The requested behavior for "${requirement}" works and is verified.`,
           effort: "standard" as const,
+          action: "update" as const,
+          surface: "other" as const,
         }));
   const at = nowIso();
-  const tasks: ProjectTask[] = revised.map((task, index) => ({
-    id: `task-${done.length + index + 1}`,
-    title: task.title,
-    detail: note ? `${task.detail}\n\n${note}` : task.detail,
-    acceptance: task.acceptance,
-    status: "pending",
-    effort: task.effort,
-    role: "main",
-    dependsOn:
-      index === 0
-        ? done.length > 0
-          ? [done[done.length - 1].id]
-          : []
-        : [`task-${done.length + index}`],
-    attempts: 0,
-    changedFiles: [],
-    commands: [],
-    createdAt: at,
-    updatedAt: at,
-  }));
+  const tasks: ProjectTask[] = revised.map((task, index) => {
+    const inferredVerify = /(?:^|\s)(verify|test|typecheck|lint|build|do[gğ]rula|test et|derle)(?:\s|$)/i.test(
+      `${task.title} ${task.detail}`,
+    );
+    const action = task.action ?? (inferredVerify ? "verify" : "update");
+    const verify = action === "verify";
+    return {
+      id: `task-${done.length + index + 1}`,
+      title: task.title,
+      detail: note ? `${task.detail}\n\n${note}` : task.detail,
+      acceptance: task.acceptance,
+      status: "pending",
+      effort: task.effort,
+      role: "main",
+      action,
+      surface: task.surface ?? "other",
+      readOnly: verify ? true : undefined,
+      verificationOnly: verify ? true : undefined,
+      dependsOn:
+        index === 0
+          ? done.length > 0
+            ? [done[done.length - 1].id]
+            : []
+          : [`task-${done.length + index}`],
+      attempts: 0,
+      changedFiles: [],
+      commands: [],
+      createdAt: at,
+      updatedAt: at,
+    };
+  });
   return {
     ...queue,
     tasks: [...done, ...tasks],
@@ -522,8 +535,11 @@ function normalizeTasks(raw: unknown, goal: string, verification?: string): Proj
     const detail = typeof value.detail === "string" ? value.detail.trim() : "";
     if (!title || !detail) continue;
     const effort = normalizeEffort(value.effort);
-    const action = taskAction(value.action);
-    const surface = taskSurface(value.surface);
+    const inferredVerify = /(?:^|\s)(verify|test|typecheck|lint|build|do[gğ]rula|test et|derle)(?:\s|$)/i.test(
+      `${title} ${detail}`,
+    );
+    const action = taskAction(value.action) ?? (inferredVerify ? "verify" : "update");
+    const surface = taskSurface(value.surface) ?? "other";
     const previous = tasks[tasks.length - 1];
     tasks.push({
       id: `task-${tasks.length + 1}`,
@@ -872,8 +888,10 @@ export async function planProjectTasks(
   }
 
   const queue = await createQueue(analysis.rootPath, projectId, goal.trim(), tasks);
+  queue.intent = options.intent;
   queue.planMeta = createPlanMeta(goal);
   if (tokenUsage) queue.stageUsage = { ...(queue.stageUsage ?? {}), planner: tokenUsage };
+  await saveQueue(analysis.rootPath, queue);
   await appendTaskContext(
     analysis.rootPath,
     `Plan · ${new Date().toLocaleString()}`,
@@ -1416,7 +1434,7 @@ function taskInstruction(
     task.notes ? `Retry note: ${task.notes}` : "",
     resumeContract,
     runPreviewUrl
-      ? `The active project's dev server is already running at ${runPreviewUrl}. Open this URL in the preview; do not start a second server, do not ask which project, and do not switch projects. Use browser_check on this URL when you need UI evidence.`
+      ? `The active project's dev server is already running at ${runPreviewUrl}. The active project is already open in this workspace: use its files, the task notes and .cie/agent context instead of asking the user to choose a project or repeat information. Open this URL in the preview; do not start a second server and do not switch projects. Use browser_check on this URL when you need UI evidence.`
       : "",
     parallelNote ?? "",
     prior ? `Previous task summaries (use this before reading context.md):\n${prior}` : "",
@@ -1914,6 +1932,10 @@ function tasksFromBehaviors(intent: IntentAnalysis, goal: string): ProjectTask[]
     status: "pending",
     effort: "standard",
     role: "main",
+    action: behavior.action,
+    surface: behavior.surface,
+    readOnly: behavior.action === "verify" ? true : undefined,
+    verificationOnly: behavior.action === "verify" ? true : undefined,
     dependsOn: index === 0 ? [] : [`task-${index}`],
     attempts: 0,
     changedFiles: [],
@@ -2003,7 +2025,7 @@ export function intentTask(
     intent.kind === "question" ||
     intent.kind === "analyze" ||
     intent.kind === "run";
-  const effort =
+  const baseEffort: ProjectTaskEffort =
     workspaceMode === "ask"
       ? "simple"
       : workspaceMode !== "build"
@@ -2015,6 +2037,17 @@ export function intentTask(
             : intent.scope === "medium"
               ? "standard"
               : "hard";
+  // A long spec with several requirements is a real build even when the
+  // intent model calls it "small"; a 100k soft budget would stop it after the
+  // first write. Keep a standard floor for multi-feature build tasks.
+  const multiFeatureGoal =
+    (intent.behaviors?.length ?? 0) > 1 ||
+    goal.trim().length >= 800 ||
+    intent.scope === "large";
+  const effort: ProjectTaskEffort =
+    workspaceMode === "build" && !readOnly && multiFeatureGoal && baseEffort === "simple"
+      ? "standard"
+      : baseEffort;
   const assumptions = intent.assumptions.filter(
     (item) => !/Intent analyst could not parse|Intent analysis could not run/i.test(item),
   );
@@ -2026,7 +2059,7 @@ export function intentTask(
       : intent.kind === "run"
         ? "run"
         : "update");
-  const surface = behavior?.surface ?? "other";
+  const surface = behavior?.surface ?? (isUiIntent(goal, intent) ? "ui" : "other");
   const readOnlyTask =
     workspaceMode !== "build" || intent.kind === "question" || intent.kind === "analyze";
   return {
@@ -2239,7 +2272,14 @@ export async function runProjectLoop(
   const multiPartGoal =
     (intent?.kind === "edit" || intent?.kind === "scaffold" || intent?.kind === "run") &&
     (intent?.behaviors?.length ?? 0) > 1;
-  const intentSingle = workspaceMode !== "build" || (intent?.mode === "single" && !multiPartGoal);
+  // A long, low-confidence "single" goal is usually a full spec that the
+  // intent model collapsed into one behavior. Plan it properly instead of
+  // spending the whole budget on one monolithic task.
+  const lowConfidenceLargeGoal =
+    goal.trim().length >= 800 && (intent?.confidence ?? 1) < 0.8;
+  const intentSingle =
+    workspaceMode !== "build" ||
+    (intent?.mode === "single" && !multiPartGoal && !lowConfidenceLargeGoal);
   if (
     !queue ||
     options.replan ||
@@ -2252,6 +2292,7 @@ export async function runProjectLoop(
       queue = await createQueue(analysis.rootPath, projectId, goal.trim(), [
         intentTask(goal, intent, verification, workspaceMode),
       ]);
+      queue.intent = intent;
       queue.planMeta = createPlanMeta(goal);
       await appendTaskContext(
         analysis.rootPath,
@@ -2682,7 +2723,7 @@ export async function runProjectLoop(
         forceFast: budgetEffort === "simple",
         forceWrite,
         inspection: inspectionRun,
-        maxSteps: microEdit ? 4 : taskStepBudget(budgetEffort),
+        maxSteps: microEdit ? 4 : current.stepBudget ?? taskStepBudget(budgetEffort),
         tokenBudget,
         softTokenBudget: softTaskTokenBudget(budgetEffort),
         costBudgetUsd,
@@ -3438,11 +3479,21 @@ export async function runProjectLoop(
               : "produced no file change";
       const latestTask = queue.tasks.find((item) => item.id === task.id) ?? task;
       const repairAttempts = latestTask.repairAttempts ?? 0;
+      // A soft budget hit after code was written is not a reason to replay the
+      // whole task: the files and changed-file evidence are already there. Keep
+      // the work, stop the replay, and let a narrow verification/continue run
+      // pick it up. Only a zero-change attempt gets one narrowed retry.
+      const softBudgetWithWork =
+        softBudgetHit &&
+        (result.changedFiles.length > 0 || (latestTask.changedFiles?.length ?? 0) > 0);
+      const softBudgetRetries = softBudgetHit ? repairAttempts : 0;
 
       // Recover inside the same run instead of leaving a "Continue" button:
       // narrow the task, keep completed work, and retry with an edit-first
       // budget. Bounded globally so a broken goal cannot loop forever.
       if (
+        !softBudgetWithWork &&
+        softBudgetRetries < 1 &&
         repairAttempts < RECOVERY_POLICY.maxRepairsPerTask &&
         autoRepairs < RECOVERY_POLICY.maxRepairsPerRun &&
         lifetimeTokens < hardTaskTokens
@@ -3451,16 +3502,20 @@ export async function runProjectLoop(
         const repaired =
           softBudgetHit && !readBudgetStalled && !noEditTokenBurn
             ? {
-                ...latestTask,
+                ...narrowTaskForEditFirst(
+                  latestTask,
+                  "soft token budget reached without any file change",
+                ),
                 status: "pending" as const,
                 attempts: 0,
                 repairAttempts: repairAttempts + 1,
                 tokenUsage: undefined,
                 resultSummary: undefined,
                 verification: undefined,
+                stepBudget: 6,
                 notes: [
                   latestTask.notes,
-                  "Soft token budget reached. Continue from the current files, finish the smallest missing behavior and verify it. Do not restart, re-read old ranges or rewrite completed work.",
+                  "Soft token budget reached. This is a narrow retry: use the files already read, make the smallest missing edit, then finish. Do not restart, re-read old ranges or rewrite completed work.",
                 ]
                   .filter(Boolean)
                   .join("\n"),
@@ -3531,11 +3586,24 @@ export async function runProjectLoop(
         continue;
       }
 
+      if (softBudgetWithWork) {
+        emit({
+          type: "log",
+          entry: {
+            id: `log-${Date.now()}-retry-skipped-${task.id}`,
+            at: nowIso(),
+            level: "warn",
+            label: "Retry skipped",
+            detail: `${task.id} hit the soft budget after editing ${latestTask.changedFiles.join(", ")}. The work is preserved; the full task was not replayed.`,
+          },
+        });
+      }
       queue = markTask(queue, task.id, {
         status: "blocked",
         completedAt: nowIso(),
-        notes:
-          lifetimeTokens >= hardTaskTokens
+        notes: softBudgetWithWork
+          ? `Soft budget reached after editing ${latestTask.changedFiles.join(", ") || "the project"}. Completed work and changed files are preserved; the full task was NOT replayed. Verify the changes or continue with a narrower request.`
+          : lifetimeTokens >= hardTaskTokens
             ? `Blocked to control cost: ${lifetimeTokens.toLocaleString()} tokens spent across attempts (limit ${hardTaskTokens.toLocaleString()}). The last attempt ${reason}. Split the goal into smaller single-behavior tasks or retry with a narrower scope and the exact verification recipe.`
             : `Blocked: the previous attempt ${reason} after ${taskSpentTokens.toLocaleString()} tokens. Automatic recovery was tried ${repairAttempts} time(s) and stopped to prevent an endless loop. Split this goal into smaller single-behavior tasks, or retry manually with a narrower scope.`,
       });

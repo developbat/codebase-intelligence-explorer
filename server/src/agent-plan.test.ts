@@ -50,6 +50,16 @@ test("plan preview recognizes run-only and destructive instructions", () => {
 });
 
 
+test("negative boilerplate does not turn an edit into a question", () => {
+  const plan = buildAgentPlan(
+    analysis,
+    "Do not ask which project. Never repeat the task notes. Implement player movement with WASD and arrow keys.",
+    { verificationCommand: "npm test" },
+  );
+  assert.notEqual(plan.intent, "question");
+  assert.equal(plan.needsWrite, true);
+});
+
 test("permission denial produces a read-only fallback plan", () => {
   const plan = buildAgentPlan(analysis, "add users get service", {
     verificationCommand: "npx tsc --noEmit",

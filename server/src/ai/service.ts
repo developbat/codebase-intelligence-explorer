@@ -1896,6 +1896,19 @@ const ACTION_INTENT =
 const QUESTION_INTENT =
   /\b(nasıl|neden|niçin|nedir|ne|mi|mı|mu|mü|how|why|what|where|which|explain|açıkla|anlat)\b/i;
 
+/**
+ * Boilerplate safety lines ("do not ask which project", "never do later
+ * tasks") must not decide the action plan. Drop only negated sentences so a
+ * positive edit sentence in the same paragraph still classifies correctly.
+ */
+function withoutNegativeInstructions(text: string): string {
+  const kept = text
+    .split(/(?<=[.!?])\s+|\n+/)
+    .map((sentence) => sentence.trim())
+    .filter((sentence) => sentence.length > 0 && !/\b(do not|don't|never)\b/i.test(sentence));
+  return kept.length > 0 ? kept.join(" ") : text.trim();
+}
+
 const READ_ONLY_ACTIONS = new Set([
   "list_files",
   "search_code",
@@ -3542,18 +3555,19 @@ export function buildAgentPlan(
   } = {},
 ): AiAgentPlan {
   const trimmed = instruction.trim();
+  const classified = withoutNegativeInstructions(trimmed);
   const question =
     options.askMode === true ||
-    QUESTION_INTENT.test(trimmed) ||
-    trimmed.endsWith("?");
-  const editIntent = !question && ACTION_INTENT.test(trimmed);
+    QUESTION_INTENT.test(classified) ||
+    classified.endsWith("?");
+  const editIntent = !question && ACTION_INTENT.test(classified);
   const runIntent =
     !question &&
-    /\b(run|çalıştır|test et|build|derle|typecheck|lint|doğrula|verify)\b/i.test(trimmed) &&
+    /\b(run|çalıştır|test et|build|derle|typecheck|lint|doğrula|verify)\b/i.test(classified) &&
     !editIntent;
   const scaffoldIntent =
     !question &&
-    /\b(scaffold|sıfırdan|from scratch|new project|yeni proje|proje oluştur)\b/i.test(trimmed);
+    /\b(scaffold|sıfırdan|from scratch|new project|yeni proje|proje oluştur)\b/i.test(classified);
 
   const tokens = [...new Set(trimmed.toLowerCase().match(/[a-z0-9çğıöşü_]{3,}/g) ?? [])];
   const stems = new Set(tokens);
@@ -4206,7 +4220,7 @@ export async function runAgentTask(
   const actionPlan = resolveActionPlan(actionPlanSource, options.intent);
   let plan = options.intent
     ? buildPlanFromIntent(options.intent, options.activeFile, verificationCommand, actionPlan)
-    : buildAgentPlan(analysis, instruction, {
+    : buildAgentPlan(analysis, actionPlanSource, {
         activeFile: options.activeFile,
         askMode: readOnlyMode,
         verificationCommand,

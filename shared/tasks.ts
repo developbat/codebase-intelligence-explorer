@@ -31,6 +31,8 @@ export interface ProjectTask {
   verificationOnly?: boolean;
   /** Mechanical small edit; use the micro prompt/step budget. */
   microEdit?: boolean;
+  /** Per-attempt model-turn cap override (used by narrow repairs). */
+  stepBudget?: number;
   dependsOn: string[];
   provider?: string;
   model?: string;
@@ -107,6 +109,8 @@ export interface ProjectTaskQueue {
   contextPath: string;
   digestPath: string;
   stageUsage?: ProjectTaskStageUsage;
+  /** The intent that created this queue; reused when the queue is resumed. */
+  intent?: IntentAnalysis;
   planMeta?: {
     version: number;
     goalHash: string;
