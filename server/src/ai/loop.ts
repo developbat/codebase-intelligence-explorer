@@ -20,6 +20,7 @@ import path from "node:path";
 import { getDataDir, loadAnalysis } from "../store";
 import { readSourceFile } from "../editor";
 import { loadSkillsForPrompt, recordSkillOutcomes } from "../skills";
+import { createPlanMeta, reviewProjectPlan, shouldReviewPlan } from "./planReview";
 import { shouldForceRequirementsFirst } from "../skillPolicy";
 import { ensureDevServerForRequest } from "../processes";
 import { checkFileSyntax } from "../syntax";
@@ -240,6 +241,52 @@ export function splitMultiBehaviorGoal(goal: string): ProjectTask[] | null {
     createdAt: at,
     updatedAt: at,
   }));
+}
+
+export function applyPlanReview(
+  queue: ProjectTaskQueue,
+  goal: string,
+  review: Awaited<ReturnType<typeof reviewProjectPlan>>,
+): ProjectTaskQueue {
+  const done = queue.tasks.filter((task) => task.status === "done");
+  const changed = [...new Set(queue.tasks.flatMap((task) => task.changedFiles))];
+  const note = changed.length
+    ? `Previous attempt changed ${changed.join(", ")}. Inspect the current files and do not undo working changes.`
+    : "";
+  const revised = review.tasks.length > 0 ? review.tasks : splitMultiBehaviorGoal(goal) ?? [];
+  if (revised.length === 0) {
+    return {
+      ...queue,
+      planMeta: createPlanMeta(goal, review, (queue.planMeta?.reviewCount ?? 0) + 1),
+    };
+  }
+  const at = nowIso();
+  const tasks: ProjectTask[] = revised.map((task, index) => ({
+    id: `task-${done.length + index + 1}`,
+    title: task.title,
+    detail: note ? `${task.detail}\n\n${note}` : task.detail,
+    acceptance: task.acceptance,
+    status: "pending",
+    effort: task.effort,
+    role: "main",
+    dependsOn:
+      index === 0
+        ? done.length > 0
+          ? [done[done.length - 1].id]
+          : []
+        : [`task-${done.length + index}`],
+    attempts: 0,
+    changedFiles: [],
+    commands: [],
+    createdAt: at,
+    updatedAt: at,
+  }));
+  return {
+    ...queue,
+    tasks: [...done, ...tasks],
+    status: "idle",
+    planMeta: createPlanMeta(goal, review, (queue.planMeta?.reviewCount ?? 0) + 1),
+  };
 }
 
 export function splitLargeGoal(goal: string, verification?: string): ProjectTask[] | null {
@@ -788,10 +835,12 @@ export async function planProjectTasks(
       tasks,
       updatedAt: nowIso(),
       stageUsage: tokenUsage ? { planner: tokenUsage } : undefined,
+      planMeta: createPlanMeta(goal),
     };
   }
 
   const queue = await createQueue(analysis.rootPath, projectId, goal.trim(), tasks);
+  queue.planMeta = createPlanMeta(goal);
   if (tokenUsage) queue.stageUsage = { ...(queue.stageUsage ?? {}), planner: tokenUsage };
   await appendTaskContext(
     analysis.rootPath,
@@ -2136,6 +2185,7 @@ export async function runProjectLoop(
       queue = await createQueue(analysis.rootPath, projectId, goal.trim(), [
         intentTask(goal, intent, verification, workspaceMode),
       ]);
+      queue.planMeta = createPlanMeta(goal);
       await appendTaskContext(
         analysis.rootPath,
         `Plan · ${new Date().toLocaleString()}`,
@@ -2155,6 +2205,56 @@ export async function runProjectLoop(
         intent,
         history: options.history,
       });
+    }
+  }
+
+  if (
+    workspaceMode === "build" &&
+    shouldReviewPlan(queue, goal, {
+      replan: options.replan === true,
+      workspaceMode,
+    })
+  ) {
+    const review = await reviewProjectPlan(goal, queue, {
+      projectId,
+      signal,
+      intent,
+      history: options.history,
+      provider: options.provider,
+      model: options.model,
+    }).catch(() => null);
+    if (review) {
+      const priorStages = queue.stageUsage ?? {};
+      queue = {
+        ...queue,
+        stageUsage: {
+          ...priorStages,
+          planReview: addUsage(priorStages.planReview ?? emptyUsage(), review.tokenUsage),
+          costUsd: (priorStages.costUsd ?? 0) + (review.costUsd ?? 0),
+        },
+      };
+      emit({
+        type: "log",
+        entry: {
+          id: `log-${Date.now()}-plan-review`,
+          at: nowIso(),
+          level: review.verdict === "ok" ? "info" : "warn",
+          label: "Plan reviewed",
+          detail: `${review.verdict}${review.missing.length ? ` · missing: ${review.missing.join("; ").slice(0, 240)}` : ""}${
+            review.assumptions.length ? ` · assumptions: ${review.assumptions.join("; ").slice(0, 240)}` : ""
+          }`,
+        },
+      });
+      if (review.verdict === "replan") {
+        queue = applyPlanReview(queue, goal, review);
+      } else {
+        queue = {
+          ...queue,
+          planMeta: createPlanMeta(goal, review, (queue.planMeta?.reviewCount ?? 0) + 1),
+        };
+      }
+      queue = await saveQueue(analysis.rootPath, queue);
+      emit({ type: "task", queue });
     }
   }
 
@@ -3626,7 +3726,7 @@ export async function runProjectLoop(
         at: nowIso(),
         level: "info",
         label: "Stage cost",
-        detail: `intent ${tokens(stages.intent)} · planner ${tokens(stages.planner)} · agent ${tokens(stages.agent)} · reviewer ${tokens(stages.reviewer)} tokens · verify ${stages.verify?.checks ?? 0} checks/${stages.verify?.durationMs ?? 0}ms${
+        detail: `intent ${tokens(stages.intent)} · planner ${tokens(stages.planner)} · planReview ${tokens(stages.planReview)} · agent ${tokens(stages.agent)} · reviewer ${tokens(stages.reviewer)} tokens · verify ${stages.verify?.checks ?? 0} checks/${stages.verify?.durationMs ?? 0}ms${
           stages.costUsd ? ` · ${formatUsd(stages.costUsd)}` : ""
         }`,
       },

@@ -2928,7 +2928,6 @@ export function CodeStudio({
     appendUser = true,
     runOptions: {
       retryFailed?: boolean;
-      replan?: boolean;
       skipClarify?: boolean;
       workspaceMode?: AiWorkspaceMode;
       provider?: AiProviderId;
@@ -3056,7 +3055,6 @@ export function CodeStudio({
             parallelTasks: modeForRun === "build" ? 2 : 1,
             workspaceMode: modeForRun,
             retryFailed: runOptions.retryFailed === true,
-            replan: runOptions.replan === true,
             clarified: runOptions.skipClarify === true,
             history: history.slice(-8),
             liveBrowser,
@@ -4234,6 +4232,7 @@ export function CodeStudio({
                           <div className="studio-stage-report">
                             <span>intent <b>{formatTokens(workflowMessage.stages.intent?.totalTokens ?? 0)}</b></span>
                             <span>planner <b>{formatTokens(workflowMessage.stages.planner?.totalTokens ?? 0)}</b></span>
+                            <span>plan review <b>{formatTokens(workflowMessage.stages.planReview?.totalTokens ?? 0)}</b></span>
                             <span>agent <b>{formatTokens(workflowMessage.stages.agent?.totalTokens ?? 0)}</b></span>
                             <span>reviewer <b>{formatTokens(workflowMessage.stages.reviewer?.totalTokens ?? 0)}</b></span>
                             <span>verify <b>{workflowMessage.stages.verify?.checks ?? 0}</b> checks · {workflowMessage.stages.verify?.durationMs ?? 0} ms</span>
@@ -4394,10 +4393,6 @@ export function CodeStudio({
                   onRetryFailed={() => {
                     if (chatBusy || !taskQueue) return;
                     void askProject(taskQueue.goal, false, { retryFailed: true, skipClarify: true });
-                  }}
-                  onReplan={() => {
-                    if (chatBusy || !taskQueue) return;
-                    void askProject(taskQueue.goal, false, { replan: true, skipClarify: true });
                   }}
                   onUpdateTask={updateQueueTask}
                   onDeleteTask={deleteQueueTask}
@@ -5781,14 +5776,6 @@ export function CodeStudio({
                       if (!taskQueue) return;
                       void askProject(taskQueue.goal, false, {
                         retryFailed: true,
-                        skipClarify: true,
-                        workspaceMode: "build",
-                      });
-                    }}
-                    onReplan={() => {
-                      if (!taskQueue) return;
-                      void askProject(taskQueue.goal, false, {
-                        replan: true,
                         skipClarify: true,
                         workspaceMode: "build",
                       });

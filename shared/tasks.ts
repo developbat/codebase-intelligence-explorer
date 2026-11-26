@@ -70,6 +70,7 @@ export interface ProjectTaskStageUsage {
   planner?: { inputTokens: number; outputTokens: number; totalTokens: number };
   agent?: { inputTokens: number; outputTokens: number; totalTokens: number };
   reviewer?: { inputTokens: number; outputTokens: number; totalTokens: number };
+  planReview?: { inputTokens: number; outputTokens: number; totalTokens: number; costUsd?: number };
   verify?: {
     checks: number;
     durationMs: number;
@@ -92,6 +93,17 @@ export interface ProjectTaskQueue {
   contextPath: string;
   digestPath: string;
   stageUsage?: ProjectTaskStageUsage;
+  planMeta?: {
+    version: number;
+    goalHash: string;
+    reviewedAt: string;
+    verdict: "ok" | "replan";
+    requirements: string[];
+    missing: string[];
+    assumptions: string[];
+    /** How many AI plan reviews have run for this queue. */
+    reviewCount?: number;
+  };
 }
 
 export interface ProjectTaskLoopOptions {
