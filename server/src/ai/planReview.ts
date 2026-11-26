@@ -168,10 +168,16 @@ function reviewTasks(value: unknown): PlanReviewResult["tasks"] {
     .slice(0, 6);
 }
 
-function fallbackReview(goal: string, queue: ProjectTaskQueue): PlanReviewResult {
-  const requirements = queue.planMeta?.requirements.length
-    ? queue.planMeta.requirements
-    : [goal.trim()];
+function fallbackReview(
+  goal: string,
+  queue: ProjectTaskQueue,
+  intent?: IntentAnalysis,
+): PlanReviewResult {
+  const requirements = intent?.behaviors?.length
+    ? intent.behaviors.map((behavior) => `${behavior.target}${behavior.details ? `: ${behavior.details}` : ""}`)
+    : queue.planMeta?.requirements.length
+      ? queue.planMeta.requirements
+      : [goal.trim()];
   if (queue.tasks.length <= 1 && requirements.length >= 2) {
     return {
       verdict: "replan",
@@ -203,7 +209,7 @@ export async function reviewProjectPlan(
     provider: options.provider,
     model: options.model,
   }).catch(() => null);
-  if (!config) return fallbackReview(goal, queue);
+  if (!config) return fallbackReview(goal, queue, options.intent);
   const tasks = queue.tasks
     .map(
       (task) =>
@@ -302,6 +308,6 @@ export async function reviewProjectPlan(
     }
     return result;
   } catch {
-    return { ...fallbackReview(goal, queue), tokenUsage };
+    return { ...fallbackReview(goal, queue, options.intent), tokenUsage };
   }
 }
