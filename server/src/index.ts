@@ -71,7 +71,8 @@ import { withToolTimeout } from "./ai/tools/sandbox";
 import type { AgentToolContext } from "./ai/tools/types";
 import { getPrompt, getPromptVersion, listPrompts, renderPrompt, resetPrompt, savePrompt } from "./ai/prompts";
 import { resolvePermission } from "./ai/permissions";
-import { analyzeIntent, resolveContinuationGoal } from "./ai/intent";
+import { analyzeIntent } from "./ai/intent";
+import { decideTaskRelation } from "./ai/taskRelation";
 import { listPlans, readPlan } from "./plans";
 import type { IntentAnalysis } from "../../shared/intent";
 import type { AiWorkspaceMode } from "../../shared/ai";
@@ -2375,6 +2376,8 @@ app.post("/api/projects/:id/ai/loop/stream", async (req, res) => {
   let intentTotalTokens: number | undefined;
   let intentTokenUsage: { inputTokens: number; outputTokens: number; totalTokens: number } | undefined;
   let intentCostUsd: number | undefined;
+  let retryFailed = req.body?.retryFailed === true;
+  let clarified = req.body?.clarified === true;
   let history = Array.isArray(req.body?.history)
     ? (req.body.history as unknown[])
         .filter(
@@ -2387,22 +2390,22 @@ app.post("/api/projects/:id/ai/loop/stream", async (req, res) => {
         )
         .slice(-8)
     : undefined;
-  const continuation = resolveContinuationGoal(goal, history);
-  if (continuation) {
-    goal = continuation.goal;
-    history = continuation.history;
-    write({
-      type: "log",
-      entry: {
-        id: `log-${Date.now()}-continuation`,
-        at: new Date().toISOString(),
-        level: "info",
-        label: "Continuation resolved",
-        detail: "The short command was resolved to the previous substantive request; the old message is not stacked again.",
-      },
-    });
-  }
   const existing = await getProjectTaskQueue(req.params.id).catch(() => null);
+  const relation = decideTaskRelation({ instruction: goal, history, queue: existing });
+  goal = relation.goal;
+  history = relation.history ?? history;
+  if (relation.retryFailed) retryFailed = true;
+  if (relation.clarified) clarified = true;
+  write({
+    type: "log",
+    entry: {
+      id: `log-${Date.now()}-relation`,
+      at: new Date().toISOString(),
+      level: "info",
+      label: "Request relation",
+      detail: `${relation.relation} · ${relation.reason}`,
+    },
+  });
   const resuming =
     Boolean(existing) &&
     existing!.goal.trim() === goal.trim() &&
@@ -2519,8 +2522,8 @@ app.post("/api/projects/:id/ai/loop/stream", async (req, res) => {
         maxMinutes: Number(req.body?.maxMinutes) || undefined,
         parallelTasks: Number(req.body?.parallelTasks) || undefined,
         replan: req.body?.replan === true,
-        retryFailed: req.body?.retryFailed === true,
-        clarified: req.body?.clarified === true,
+        retryFailed,
+        clarified,
         workspaceMode: ["ask", "plan", "build", "research"].includes(req.body?.workspaceMode)
           ? (req.body.workspaceMode as AiWorkspaceMode)
           : undefined,
