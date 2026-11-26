@@ -71,7 +71,7 @@ import { withToolTimeout } from "./ai/tools/sandbox";
 import type { AgentToolContext } from "./ai/tools/types";
 import { getPrompt, getPromptVersion, listPrompts, renderPrompt, resetPrompt, savePrompt } from "./ai/prompts";
 import { resolvePermission } from "./ai/permissions";
-import { analyzeIntent } from "./ai/intent";
+import { analyzeIntent, resolveContinuationGoal } from "./ai/intent";
 import { listPlans, readPlan } from "./plans";
 import type { IntentAnalysis } from "../../shared/intent";
 import type { AiWorkspaceMode } from "../../shared/ai";
@@ -2331,7 +2331,7 @@ app.post("/api/projects/:id/tasks/plan", async (req, res) => {
 });
 
 app.post("/api/projects/:id/ai/loop/stream", async (req, res) => {
-  const goal = typeof req.body?.instruction === "string" ? req.body.instruction : "";
+  let goal = typeof req.body?.instruction === "string" ? req.body.instruction : "";
   if (!goal.trim()) {
     res.status(400).json({ error: "A task goal is required." });
     return;
@@ -2375,7 +2375,7 @@ app.post("/api/projects/:id/ai/loop/stream", async (req, res) => {
   let intentTotalTokens: number | undefined;
   let intentTokenUsage: { inputTokens: number; outputTokens: number; totalTokens: number } | undefined;
   let intentCostUsd: number | undefined;
-  const history = Array.isArray(req.body?.history)
+  let history = Array.isArray(req.body?.history)
     ? (req.body.history as unknown[])
         .filter(
           (message): message is { role: "user" | "assistant"; content: string } =>
@@ -2387,6 +2387,21 @@ app.post("/api/projects/:id/ai/loop/stream", async (req, res) => {
         )
         .slice(-8)
     : undefined;
+  const continuation = resolveContinuationGoal(goal, history);
+  if (continuation) {
+    goal = continuation.goal;
+    history = continuation.history;
+    write({
+      type: "log",
+      entry: {
+        id: `log-${Date.now()}-continuation`,
+        at: new Date().toISOString(),
+        level: "info",
+        label: "Continuation resolved",
+        detail: "The short command was resolved to the previous substantive request; the old message is not stacked again.",
+      },
+    });
+  }
   const existing = await getProjectTaskQueue(req.params.id).catch(() => null);
   const resuming =
     Boolean(existing) &&

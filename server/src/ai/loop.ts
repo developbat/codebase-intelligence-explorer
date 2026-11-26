@@ -21,6 +21,7 @@ import { getDataDir, loadAnalysis } from "../store";
 import { readSourceFile } from "../editor";
 import { loadSkillsForPrompt, recordSkillOutcomes } from "../skills";
 import { createPlanMeta, reviewProjectPlan, shouldReviewPlan } from "./planReview";
+import { isContinuationInstruction } from "./intent";
 import { shouldForceRequirementsFirst } from "../skillPolicy";
 import { ensureDevServerForRequest } from "../processes";
 import { checkFileSyntax } from "../syntax";
@@ -2304,6 +2305,7 @@ export function intentTask(
   const patch =
     workspaceMode === "build" &&
     !readOnly &&
+    !isContinuationInstruction(goal) &&
     intent.kind === "edit" &&
     (intent.scope === "trivial" || intent.scope === "small") &&
     (intent.behaviors?.length ?? 0) <= 1 &&
@@ -2542,6 +2544,7 @@ export async function runProjectLoop(
     goal.trim().length >= 800 && (intent?.confidence ?? 1) < 0.8;
   const patchGoal =
     workspaceMode === "build" &&
+    !isContinuationInstruction(goal) &&
     intent?.kind === "edit" &&
     (intent?.scope === "trivial" || intent?.scope === "small") &&
     (intent?.behaviors?.length ?? 0) <= 1 &&
@@ -3040,7 +3043,10 @@ ${collapsed.tasks[0].checklist
         maxSteps: microEdit ? 4 : current.stepBudget ?? taskStepBudget(budgetEffort),
         tokenBudget,
         softTokenBudget: current.buildSession
-          ? Math.max(softTaskTokenBudget(budgetEffort), 240_000)
+          ? Math.max(
+              softTaskTokenBudget(budgetEffort),
+              (current.checklist?.length ?? 0) >= 4 ? 300_000 : 240_000,
+            )
           : softTaskTokenBudget(budgetEffort),
         costBudgetUsd,
         budgetMode: settings?.taskBudgetMode ?? "off",

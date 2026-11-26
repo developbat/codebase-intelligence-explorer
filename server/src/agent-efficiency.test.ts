@@ -31,7 +31,38 @@ import {
   reportsIncompleteWiring,
   reportsRemainingWork,
 } from "./ai/service";
-import { extractNumberedListIntent } from "./ai/intent";
+import {
+  extractNumberedListIntent,
+  isContinuationInstruction,
+  resolveContinuationGoal,
+} from "./ai/intent";
+
+test("a short continuation resolves to the previous substantive request", () => {
+  assert.equal(isContinuationInstruction("listeyi yap"), true);
+  assert.equal(isContinuationInstruction("devam et"), true);
+  assert.equal(isContinuationInstruction("anahtarın rengini değiştir"), false);
+  const bigList = [
+    "oyunda listedeki güncellemelerin yapılmasını istiyorum:",
+    "1. Bölüm sistemi",
+    "Tek labirent yerine 5 farklı bölüm oluştur.",
+    "2. Savaş sistemi",
+    "Space ile ateş edilsin.",
+    "3. Envanter",
+    "Toplanan nesneler envantere eklensin.",
+  ].join("\n");
+  const history = [
+    { role: "user" as const, content: "önceki bir mesaj" },
+    { role: "assistant" as const, content: "tamam" },
+    { role: "user" as const, content: bigList },
+    { role: "assistant" as const, content: "anladım" },
+  ];
+  const resolved = resolveContinuationGoal("listeyi yap", history);
+  assert.ok(resolved);
+  assert.equal(resolved.goal, bigList);
+  // The referenced message and later assistant reply are not stacked again.
+  assert.equal(resolved.history.length, 2);
+  assert.equal(resolved.history[1].content, "tamam");
+});
 
 test("a numbered list is extracted deterministically without an intent call", () => {
   const analysis = {

@@ -845,6 +845,39 @@ async function applyProjectMismatchGuard(
   return mismatch ?? intent;
 }
 
+const CONTINUATION_PATTERN =
+  /^(listeyi|listeyi yap|listeyi uygula|listeyi uygula|yap|yapalım|yapalim|devam|devam et|uygula|onayla|başla|basla|tamam|ok|do it|continue|go ahead|apply it|the list|bunu yap|bunu uygula|hepsini yap|tümünü yap|tumunu yap)\b/i;
+
+export function isContinuationInstruction(instruction: string): boolean {
+  const text = instruction.trim();
+  return text.length > 0 && text.length <= 40 && CONTINUATION_PATTERN.test(text);
+}
+
+/**
+ * Resolve a short reference ("listeyi yap", "devam et") to the last
+ * substantive user request so the previous list/plan is not re-typed,
+ * re-analyzed or stacked with the new message.
+ */
+export function resolveContinuationGoal(
+  instruction: string,
+  history?: { role: "user" | "assistant"; content: string }[],
+): { goal: string; history: { role: "user" | "assistant"; content: string }[] } | null {
+  if (!isContinuationInstruction(instruction) || !history || history.length === 0) return null;
+  for (let index = history.length - 1; index >= 0; index -= 1) {
+    const message = history[index];
+    if (message.role !== "user") continue;
+    const content = message.content.trim();
+    if (content.length < 40) continue;
+    const taskLike =
+      /\b(yap|yapıl|ekle|ekley|oluştur|olustur|güncelle|guncelle|değiştir|degistir|istiyorum|add|implement|update|create|build|make|change)\b/i.test(
+        content,
+      ) || /^\s*\d{1,2}[.)]\s+/m.test(content);
+    if (!taskLike) continue;
+    return { goal: content, history: history.slice(0, index) };
+  }
+  return null;
+}
+
 export function extractNumberedListIntent(
   instruction: string,
   analysis: AnalysisResult,
