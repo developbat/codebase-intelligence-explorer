@@ -492,8 +492,11 @@ export async function planProjectTasks(
   const [projectMap, preflightHints, skillLoad] = await Promise.all([
     ensureProjectMap(analysis).catch(() => ""),
     featurePreflightHints(analysis, goal).catch(() => []),
-    loadSkillsForPrompt(analysis.rootPath, projectId, goal).catch(() => ({
+    loadSkillsForPrompt(analysis.rootPath, projectId, goal, {
+      requested: options.intent?.skills,
+    }).catch(() => ({
       relevant: [] as string[],
+      selected: [] as string[],
     })),
   ]);
   const goalTokens = [...new Set((goal.toLowerCase().match(/[a-z0-9_]{3,}/g) ?? []))].filter(
@@ -524,8 +527,10 @@ export async function planProjectTasks(
         preflightHints.length > 0
           ? `Existing-code preflight (the requested behavior may already exist; verify before planning and never create an edit task that re-adds it):\n${preflightHints.join("\n")}`
           : "",
-        skillLoad.relevant.length > 0
-          ? `Relevant skills (reference only; fold their guidance into task details/acceptance when useful): ${skillLoad.relevant.join(", ")}`
+        [...new Set([...(skillLoad.selected ?? []), ...skillLoad.relevant])].length > 0
+          ? `Relevant skills (reference only; fold their guidance into task details/acceptance when useful): ${[
+              ...new Set([...(skillLoad.selected ?? []), ...skillLoad.relevant]),
+            ].join(", ")}`
           : "",
         projectMap ? `Project map (use it for file and symbol ownership):\n${projectMap.slice(0, 14_000)}` : "",
         "Write task titles, details and acceptance in English. Keep quoted user text, file paths and code identifiers unchanged.",

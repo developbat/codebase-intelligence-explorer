@@ -89,6 +89,7 @@ import type {
   ToolchainReport,
 } from "../../shared/toolchains";
 import type {
+  SkillAuditResponse,
   SkillCatalogResponse,
   SkillDetail,
   SkillFileResponse,
@@ -341,6 +342,11 @@ export const api = {
         `/api/projects/${id}/skills/search?q=${encodeURIComponent(query)}${
           owner ? `&owner=${encodeURIComponent(owner)}` : ""
         }`,
+      ),
+
+    audits: (id: string, skillId: string) =>
+      request<SkillAuditResponse>(
+        `/api/projects/${id}/skills/audit?id=${encodeURIComponent(skillId)}`,
       ),
 
     previewSource: (id: string, source: string, ref?: string) =>

@@ -11,6 +11,7 @@ import {
 import { chat } from "./providers";
 import { recordUsage } from "./usage";
 import { getPublicSettings, resolveAgentRole, resolveProvider } from "./settings";
+import { listSkills, skillMentionSlug } from "../skills";
 import { pickAlternateAgentModel } from "./agents";
 import { healthKey, modelHealthByProviderModel } from "./modelStats";
 import { estimateUsageCost } from "./pricing";
@@ -47,6 +48,8 @@ interface IntentOptions {
   activeFile?: string;
   /** The user already answered a clarification question; do not ask again. */
   clarified?: boolean;
+  /** Compact enabled-skill index shown to the intent analyst. */
+  skillIndex?: string;
   history?: { role: "user" | "assistant"; content: string }[];
   signal?: AbortSignal;
 }
@@ -104,7 +107,7 @@ function systemPrompt(): string {
   return `You are the intent analyst for a coding agent. Read the user request in any language (typos are possible) and the project facts. Return JSON only. Never write code.
 
 Schema:
-{"kind":"edit|question|run|scaffold|analyze","understanding":"one sentence in the user's language","language":"tr|en|zh|...","needsClarification":true|false,"question":"question in the user's language","options":[{"label":"short option in the user's language","suffix":"text appended to the user's original instruction when this option is chosen"}],"scope":"trivial|small|medium|large","mode":"single|loop","areas":["exact project-relative file paths"],"verification":"none|browser|test|build","context":"none|focused|project","history":"none|recent|extended","toolGroups":["core","edit","command","document","web","git","browser","skills","media","mobile","notes","tools"],"approach":"one-sentence strategy using tools and how to verify completeness","needsExhaustiveEvidence":true|false,"assumptions":["short assumptions"]}
+{"kind":"edit|question|run|scaffold|analyze","understanding":"one sentence in the user's language","language":"tr|en|zh|...","needsClarification":true|false,"question":"question in the user's language","options":[{"label":"short option in the user's language","suffix":"text appended to the user's original instruction when this option is chosen"}],"scope":"trivial|small|medium|large","mode":"single|loop","areas":["exact project-relative file paths"],"verification":"none|browser|test|build","context":"none|focused|project","history":"none|recent|extended","toolGroups":["core","edit","command","document","web","git","browser","skills","media","mobile","notes","tools"],"skills":["skill-slug"],"approach":"one-sentence strategy using tools and how to verify completeness","needsExhaustiveEvidence":true|false,"assumptions":["short assumptions"]}
 
 Rules:
 - Restate the user's goal accurately in "understanding". Paraphrase it, do not copy it. Describe what the user wants, not an investigation plan. Do not invent features or fields.
@@ -124,6 +127,7 @@ Rules:
 - "context": none only for greetings, thanks, or general knowledge that does not depend on this project; focused when the request targets specific files, a small edit or a document; project for broader project questions or changes. If unsure, use project.
 - "history": none for a standalone request; recent when the request refers to the last turns ("again", "same", "on it", "bunu", "tekrar"); extended when it refers to older discussion. If unsure, use recent.
 - "toolGroups": choose the minimum tool families the executor needs. Core read/search tools are always available, so omit "core". Use edit for writing, command for running/verifying, document for attachments/PDF/Office/CSV/images, web for HTTP/web research, git for Git operations, browser for browser verification, skills for saved tools/skills, media for graphics/video, mobile for simulators, notes for saved research, tools for toolchain installation. If a capability is genuinely needed, include its group; when unsure, include it rather than omitting a required tool. For a greeting or general chat return [].
+- "skills": choose 0-3 slugs from the Available skills list only when the task clearly matches. Prefer an empty array over a weak match. Never invent a slug.
 - "approach": choose the most efficient evidence strategy for this request. For complete lists/counts/audits, propose searching for the relevant markers and collecting all matches with count/offset; do not rely on a partial read.
 - "needsExhaustiveEvidence": true when the user asks for a complete list, count, audit or "all" items; otherwise false.
 - If the project already has an implementation for the requested feature (the existing-symbol hints show it), do not ask how that feature should work. Extend the existing behavior; ask only about a genuinely new product choice.
@@ -239,6 +243,9 @@ async function userPrompt(
           .join("\n")}`
       : "",
     await attachmentFacts(analysis, instruction),
+    options.skillIndex
+      ? `Available skills (reference; choose 0-3 slugs for "skills" only when clearly relevant):\n${options.skillIndex}`
+      : "",
     `User request:\n${instruction.trim()}`,
   ]
     .filter(Boolean)
@@ -295,6 +302,15 @@ export function parseIntentResponse(
             .slice(0, 10),
         ),
       ]
+    : [];
+  const skills = Array.isArray(parsed.skills)
+    ? [
+        ...new Set(
+          parsed.skills
+            .filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+            .map((item) => item.trim().toLowerCase().slice(0, 80)),
+        ),
+      ].slice(0, 3)
     : [];
   const approach =
     typeof parsed.approach === "string" && parsed.approach.trim()
@@ -372,6 +388,7 @@ export function parseIntentResponse(
       context,
       history,
       toolGroups,
+      skills,
       approach,
       needsExhaustiveEvidence,
       assumptions,
@@ -686,9 +703,18 @@ export async function analyzeIntent(
   const analysis = await loadAnalysis(projectId);
   if (!instruction.trim()) throw new Error("An instruction is required.");
   const config = await resolveIntentModel(options);
+  const skillList = await listSkills(analysis.rootPath, projectId).catch(() => null);
+  const skillIndex = (skillList?.skills ?? [])
+    .filter((skill) => skill.enabled)
+    .slice(0, 20)
+    .map((skill) => `${skillMentionSlug(skill.name)}: ${(skill.description || "No description.").slice(0, 140)}`)
+    .join("\n");
   const messages = [
     { role: "system" as const, content: systemPrompt() },
-    { role: "user" as const, content: await userPrompt(analysis, instruction, options) },
+    {
+      role: "user" as const,
+      content: await userPrompt(analysis, instruction, { ...options, skillIndex }),
+    },
   ];
   let tokenUsage = { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
   const addUsage = (a: typeof tokenUsage, b: typeof tokenUsage): typeof tokenUsage => ({
@@ -744,6 +770,7 @@ export async function analyzeIntent(
         context: options.activeFile ? "focused" : "project",
         history: "recent",
         toolGroups: [],
+        skills: [],
         approach: "",
         needsExhaustiveEvidence: false,
         assumptions: [
@@ -815,6 +842,7 @@ export async function analyzeIntent(
           context: "project",
           history: "recent",
           toolGroups: [],
+          skills: [],
           approach: "",
           needsExhaustiveEvidence: false,
           assumptions: ["Intent analyst could not parse its reply; proceeding with one focused task."],

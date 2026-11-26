@@ -134,7 +134,7 @@ import {
   removeInstalledSkill,
   updateInstalledSkill,
 } from "./skillInstall";
-import { searchSkillCatalog } from "./skillSearch";
+import { getSkillAudits, searchSkillCatalog } from "./skillSearch";
 import { searchCode } from "./search";
 import { subscribeProjectEvents } from "./watcher";
 import { isWithin } from "./scanner";
@@ -1566,6 +1566,15 @@ app.get("/api/projects/:id/skills/search", async (req, res) => {
     const query = typeof req.query.q === "string" ? req.query.q : "";
     const owner = typeof req.query.owner === "string" ? req.query.owner : undefined;
     res.json(await searchSkillCatalog(query, { owner }));
+  } catch (error) {
+    handleError(res, error, 400);
+  }
+});
+
+app.get("/api/projects/:id/skills/audit", async (req, res) => {
+  try {
+    const id = typeof req.query.id === "string" ? req.query.id : "";
+    res.json(await getSkillAudits(id));
   } catch (error) {
     handleError(res, error, 400);
   }

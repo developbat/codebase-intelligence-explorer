@@ -216,3 +216,28 @@ test("explicit remove/keep instructions become edits instead of clarification re
   assert.equal(intent.kind, "edit");
   assert.equal(intent.needsClarification, false);
 });
+
+test("intent selects at most three unique skill slugs", () => {
+  const intent = parseIntentResponse(
+    JSON.stringify({
+      kind: "edit",
+      understanding: "Fix the HUD icons",
+      language: "en",
+      needsClarification: false,
+      scope: "small",
+      mode: "single",
+      areas: ["index.html"],
+      verification: "browser",
+      toolGroups: ["edit", "browser"],
+      skills: ["runtime-ui-debugging", "RUNTIME-UI-DEBUGGING", "safe-change", "root-cause-debugging", "extra"],
+      approach: "Inspect the HUD and verify computed style.",
+    }),
+    analysis,
+    "fix the HUD icons",
+  );
+  assert.deepEqual(intent.skills, [
+    "runtime-ui-debugging",
+    "safe-change",
+    "root-cause-debugging",
+  ]);
+});

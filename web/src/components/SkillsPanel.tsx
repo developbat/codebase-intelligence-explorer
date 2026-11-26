@@ -14,6 +14,7 @@ import {
   ExternalLink,
 } from "lucide-react";
 import type {
+  SkillAuditStatus,
   SkillCatalogItem,
   SkillDetail,
   SkillInstallScope,
@@ -70,6 +71,7 @@ export function SkillsPanel({ projectId }: SkillsPanelProps) {
   const [catalogResults, setCatalogResults] = useState<SkillCatalogItem[] | null>(null);
   const [catalogBusy, setCatalogBusy] = useState(false);
   const [catalogError, setCatalogError] = useState<string | null>(null);
+  const [catalogAudits, setCatalogAudits] = useState<Record<string, SkillAuditStatus[]>>({});
   const [installBusy, setInstallBusy] = useState(false);
   const [addMessage, setAddMessage] = useState<string | null>(null);
   const [scriptBusy, setScriptBusy] = useState(false);
@@ -270,6 +272,7 @@ export function SkillsPanel({ projectId }: SkillsPanelProps) {
     try {
       const result = await api.skills.search(projectId, value);
       setCatalogResults(result.skills);
+      void loadCatalogAudits(result.skills.slice(0, 5));
     } catch (requestError) {
       setCatalogError(
         requestError instanceof Error ? requestError.message : t("Could not search the skill catalog."),
@@ -277,6 +280,25 @@ export function SkillsPanel({ projectId }: SkillsPanelProps) {
     } finally {
       setCatalogBusy(false);
     }
+  }
+
+  async function loadCatalogAudits(items: SkillCatalogItem[]) {
+    const entries = await Promise.all(
+      items.map(async (item) => {
+        try {
+          const result = await api.skills.audits(projectId, item.id);
+          return [item.id, result.audits] as const;
+        } catch {
+          return [item.id, []] as const;
+        }
+      }),
+    );
+    setCatalogAudits((current) => ({ ...current, ...Object.fromEntries(entries) }));
+  }
+
+  function auditLabel(provider: string): string {
+    if (provider === "Gen Agent Trust Hub") return "Trust";
+    return provider;
   }
 
   async function previewCatalogSkill(item: SkillCatalogItem) {
@@ -443,6 +465,19 @@ export function SkillsPanel({ projectId }: SkillsPanelProps) {
                         <small>
                           {item.source} · {formatInstalls(item.installs)}
                         </small>
+                        {catalogAudits[item.id]?.length ? (
+                          <span className="skills-audit">
+                            {catalogAudits[item.id].map((audit) => (
+                              <span
+                                key={audit.provider}
+                                className={`skills-audit-badge ${audit.status}`}
+                                title={`${audit.provider}: ${audit.status}`}
+                              >
+                                {auditLabel(audit.provider)} {audit.status}
+                              </span>
+                            ))}
+                          </span>
+                        ) : null}
                       </div>
                       <div className="skills-catalog-actions">
                         <a href={item.url} target="_blank" rel="noreferrer" title={t("Open on skills.sh")}>

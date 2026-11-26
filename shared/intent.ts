@@ -45,6 +45,8 @@ export interface IntentAnalysis {
   context: IntentContext;
   history: IntentHistory;
   toolGroups: AgentToolGroup[];
+  /** Skill slugs the intent analyst selected for this run (0-3). */
+  skills?: string[];
   approach: string;
   needsExhaustiveEvidence: boolean;
   assumptions: string[];

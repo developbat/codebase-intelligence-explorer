@@ -16234,6 +16234,42 @@ button.canvas-stat {
   font-size: 7.5px;
 }
 
+.skills-audit {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  margin-top: 3px;
+}
+
+.skills-audit-badge {
+  font-size: 6.5px;
+  line-height: 1.2;
+  padding: 1px 4px;
+  border-radius: 999px;
+  border: 1px solid #2b3d50;
+  color: #8fa9c9;
+  background: #0b1a29;
+  text-transform: capitalize;
+}
+
+.skills-audit-badge.pass {
+  border-color: #285b3d;
+  color: #7ee7a6;
+  background: #0d2318;
+}
+
+.skills-audit-badge.warn {
+  border-color: #6b4f1e;
+  color: #ffd166;
+  background: #2a210f;
+}
+
+.skills-audit-badge.fail {
+  border-color: #7a2333;
+  color: #ff9aa8;
+  background: #2a1119;
+}
+
 .skills-catalog-actions {
   display: flex;
   align-items: center;

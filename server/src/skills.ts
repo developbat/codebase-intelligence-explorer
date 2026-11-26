@@ -41,6 +41,8 @@ interface SkillSource {
 interface SkillsOptions {
   dataDir?: string;
   homeDir?: string;
+  /** Slugs selected by the intent analyst for this run. */
+  requested?: string[];
 }
 
 interface SkillState {
@@ -670,7 +672,13 @@ export async function loadSkillsForPrompt(
   projectId: string,
   instruction: string,
   options: SkillsOptions = {},
-): Promise<{ skills: EnabledSkill[]; mentions: string[]; relevant: string[]; index: string }> {
+): Promise<{
+  skills: EnabledSkill[];
+  mentions: string[];
+  relevant: string[];
+  selected: string[];
+  index: string;
+}> {
   const { records } = await scanSkills(projectRoot, projectId, options);
   const tokens = [...instruction.matchAll(/@([a-zA-Z0-9][\w.-]*)/g)].map((match) =>
     match[1].toLowerCase(),
@@ -679,11 +687,26 @@ export async function loadSkillsForPrompt(
     const slug = skillMentionSlug(record.name);
     return tokens.includes(slug) || tokens.includes(record.name.toLowerCase().replace(/\s+/g, "-"));
   });
+  const requested = [...new Set((options.requested ?? []).map((item) => item.trim().toLowerCase()).filter(Boolean))];
+  const requestedRecords = requested.length
+    ? records.filter(
+        (record) =>
+          record.enabled &&
+          (requested.includes(skillMentionSlug(record.name)) ||
+            requested.includes(record.key.toLowerCase()) ||
+            requested.includes(record.name.toLowerCase())),
+      )
+    : [];
   const relevant = autoMatchedSkills(
-    records.filter((record) => !mentioned.includes(record)),
+    records.filter((record) => !mentioned.includes(record) && !requestedRecords.includes(record)),
     instruction,
   );
-  const ordered = [...mentioned, ...relevant, ...records.filter((record) => record.enabled)];
+  const ordered = [
+    ...mentioned,
+    ...requestedRecords,
+    ...relevant,
+    ...records.filter((record) => record.enabled),
+  ];
   const seen = new Set<string>();
   const skills: EnabledSkill[] = [];
   for (const record of ordered) {
@@ -701,6 +724,7 @@ export async function loadSkillsForPrompt(
     skills,
     mentions: mentioned.map((record) => record.name),
     relevant: relevant.map((record) => record.name),
+    selected: requestedRecords.map((record) => record.name),
     index: renderSkillIndex(records),
   };
 }

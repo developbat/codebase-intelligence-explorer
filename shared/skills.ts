@@ -126,3 +126,16 @@ export interface SkillCatalogResponse {
   query: string;
   skills: SkillCatalogItem[];
 }
+
+export type SkillAuditState = "pass" | "warn" | "fail" | "unknown";
+
+export interface SkillAuditStatus {
+  provider: string;
+  status: SkillAuditState;
+}
+
+export interface SkillAuditResponse {
+  id: string;
+  audits: SkillAuditStatus[];
+  url: string;
+}

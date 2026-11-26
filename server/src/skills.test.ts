@@ -346,3 +346,25 @@ test("auto-matches a relevant skill from the request text", async () => {
     await fs.rm(cleanup, { recursive: true, force: true });
   }
 });
+
+test("loads intent-selected skills by slug", async () => {
+  const { project, dataDir, homeDir, cleanup } = await roots();
+  try {
+    await writeSkill(
+      path.join(project, ".cie", "skills"),
+      "alpha",
+      "name: Alpha Helper\ndescription: Helps with alpha tasks.",
+      "ALPHA BODY",
+    );
+    const result = await loadSkillsForPrompt(
+      project,
+      "project-requested",
+      "normal question",
+      { dataDir, homeDir, requested: ["alpha-helper"] },
+    );
+    assert.deepEqual(result.selected, ["Alpha Helper"]);
+    assert.ok(result.skills.some((skill) => skill.record.name === "Alpha Helper"));
+  } finally {
+    await fs.rm(cleanup, { recursive: true, force: true });
+  }
+});

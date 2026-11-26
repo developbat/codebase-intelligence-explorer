@@ -1,4 +1,9 @@
-import type { SkillCatalogItem, SkillCatalogResponse } from "../../shared/skills";
+import type {
+  SkillAuditResponse,
+  SkillAuditState,
+  SkillCatalogItem,
+  SkillCatalogResponse,
+} from "../../shared/skills";
 
 const SEARCH_URL = "https://skills.sh/api/search";
 const MAX_RESULTS = 20;
@@ -11,6 +16,8 @@ interface CacheEntry {
 }
 
 const cache = new Map<string, CacheEntry>();
+const auditCache = new Map<string, { at: number; value: SkillAuditResponse }>();
+const AUDIT_CACHE_TTL_MS = 10 * 60_000;
 
 function text(value: unknown, max = 200): string {
   if (typeof value !== "string") return "";
@@ -105,7 +112,72 @@ export async function searchSkillCatalog(
   return value;
 }
 
-/** Test seam: clear the in-memory search cache. */
+const AUDIT_PROVIDERS = ["Gen Agent Trust Hub", "Socket", "Snyk"];
+
+function auditState(value: string): SkillAuditState {
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "pass") return "pass";
+  if (normalized === "warn") return "warn";
+  if (normalized === "fail" || normalized === "error") return "fail";
+  return "unknown";
+}
+
+/**
+ * Read-only audit badges for one catalog skill.
+ *
+ * skills.sh does not expose a public audit JSON endpoint, so this reads the
+ * skill page and extracts the three provider badges. A failed fetch returns an
+ * empty/unknown result instead of blocking discovery.
+ */
+export async function getSkillAudits(
+  id: string,
+  options: { fetchImpl?: typeof fetch; now?: number } = {},
+): Promise<SkillAuditResponse> {
+  const skillId = text(id, 240).replace(/^\/+|\/+$/g, "");
+  if (!skillId || skillId.includes("..") || !/^[A-Za-z0-9._\/-]+$/.test(skillId)) {
+    throw new Error("A valid catalog skill id is required.");
+  }
+  const now = options.now ?? Date.now();
+  const cached = auditCache.get(skillId);
+  if (cached && now - cached.at < AUDIT_CACHE_TTL_MS) return cached.value;
+  const doFetch = options.fetchImpl ?? fetch;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 8_000);
+  let html = "";
+  try {
+    const response = await doFetch(`https://skills.sh/${skillId}`, {
+      headers: { accept: "text/html", "user-agent": "BAD-IDE/skill-search" },
+      signal: controller.signal,
+    });
+    if (response.ok) html = await response.text();
+  } catch {
+    html = "";
+  } finally {
+    clearTimeout(timer);
+  }
+  const audits: SkillAuditResponse["audits"] = [];
+  for (const provider of AUDIT_PROVIDERS) {
+    const index = html.indexOf(provider);
+    if (index < 0) continue;
+    const window = html.slice(index, index + 900);
+    const match = window.match(/>\s*(Pass|Warn|Fail|Error)\s*</i);
+    audits.push({ provider, status: match ? auditState(match[1]) : "unknown" });
+  }
+  const value: SkillAuditResponse = {
+    id: skillId,
+    audits,
+    url: `https://skills.sh/${skillId}`,
+  };
+  auditCache.set(skillId, { at: now, value });
+  if (auditCache.size > MAX_CACHE_ENTRIES) {
+    const oldest = [...auditCache.entries()].sort((left, right) => left[1].at - right[1].at)[0];
+    if (oldest) auditCache.delete(oldest[0]);
+  }
+  return value;
+}
+
+/** Test seam: clear the in-memory search and audit caches. */
 export function clearSkillSearchCache(): void {
   cache.clear();
+  auditCache.clear();
 }

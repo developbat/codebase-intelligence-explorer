@@ -4433,12 +4433,19 @@ ${lessons}` : "",
     workspaceMode === "ask"
       ? "\n\nInspection profile: this task is read-only. Read at most 6 files, never re-read the same range, and finish with a compact report. Do not propose a large next-step list."
       : "";
-  const skillLoad = await loadSkillsForPrompt(analysis.rootPath, projectId, instruction).catch(
-    () => ({ skills: [] as never[], mentions: [] as string[], relevant: [] as string[], index: "" }),
-  );
+  const skillLoad = await loadSkillsForPrompt(analysis.rootPath, projectId, instruction, {
+    requested: options.intent?.skills,
+  }).catch(() => ({
+    skills: [] as never[],
+    mentions: [] as string[],
+    relevant: [] as string[],
+    selected: [] as string[],
+    index: "",
+  }));
   const enabledSkills = skillLoad.skills;
   const mentionedSkill = skillLoad.mentions.length > 0;
   const relevantSkill = skillLoad.relevant.length > 0;
+  const selectedSkill = skillLoad.selected.length > 0;
   const includeSkills =
     !testTask &&
     options.microEdit !== true &&
@@ -4446,7 +4453,8 @@ ${lessons}` : "",
       contextMode === "project" ||
       toolGroups.includes("skills") ||
       mentionedSkill ||
-      relevantSkill);
+      relevantSkill ||
+      selectedSkill);
   const skillsPrompt = includeSkills ? renderSkillsForPrompt(enabledSkills) : "";
   const capabilityIndex = options.microEdit === true ? "" : skillLoad.index || "";
   if (skillLoad.mentions.length > 0) {
@@ -4454,6 +4462,9 @@ ${lessons}` : "",
   }
   if (skillLoad.relevant.length > 0) {
     log("info", "Skill auto-match", `${skillLoad.relevant.join(", ")} · matched from the request`);
+  }
+  if (skillLoad.selected.length > 0) {
+    log("info", "Skill selected by intent", skillLoad.selected.join(", "));
   }
   if (enabledSkills.length > 0) {
     log(

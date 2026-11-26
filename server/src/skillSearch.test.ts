@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { clearSkillSearchCache, searchSkillCatalog } from "./skillSearch";
+import { clearSkillSearchCache, getSkillAudits, searchSkillCatalog } from "./skillSearch";
 
 function jsonResponse(body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -77,4 +77,25 @@ test("rejects a too-short query before calling the network", async () => {
   }) as unknown as typeof fetch;
   await assert.rejects(() => searchSkillCatalog("u", { fetchImpl }), /at least 2/i);
   assert.equal(calls, 0);
+});
+
+test("parses security audit badges from a catalog skill page", async () => {
+  clearSkillSearchCache();
+  const html = [
+    '<div><span>Gen Agent Trust Hub</span><span class="badge">Pass</span></div>',
+    '<div><span>Socket</span><span class="badge">Pass</span></div>',
+    '<div><span>Snyk</span><span class="badge">Warn</span></div>',
+  ].join("");
+  const fetchImpl = (async () => new Response(html, { status: 200 })) as unknown as typeof fetch;
+  const result = await getSkillAudits("vercel-labs/skills/find-skills", { fetchImpl });
+  assert.equal(result.audits.length, 3);
+  assert.deepEqual(
+    result.audits.map((audit) => [audit.provider, audit.status]),
+    [
+      ["Gen Agent Trust Hub", "pass"],
+      ["Socket", "pass"],
+      ["Snyk", "warn"],
+    ],
+  );
+  await assert.rejects(() => getSkillAudits("../secret", { fetchImpl }), /valid catalog skill id/i);
 });
