@@ -22031,6 +22031,41 @@ button.canvas-stat {
 }
 
 /* Per-run token report */
+.studio-pipeline-trace {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--line);
+  font-size: 8px;
+}
+
+.studio-pipeline-title {
+  color: #5eead4;
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+}
+
+.studio-pipeline-row {
+  display: grid;
+  grid-template-columns: 64px 1fr;
+  gap: 6px;
+  color: #8fa9c9;
+}
+
+.studio-pipeline-row b {
+  color: #bcd6ef;
+  font-weight: 600;
+}
+
+.studio-pipeline-row span {
+  color: #d9e8f7;
+  overflow-wrap: anywhere;
+}
+
 .studio-stage-report {
   display: flex;
   flex-wrap: wrap;

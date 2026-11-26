@@ -608,6 +608,95 @@ function lspEditorExtensions(projectId: string, filePath: string) {
   return [hover, completion, lintGutter(), diagnostics];
 }
 
+function PipelineTrace({
+  message,
+}: {
+  message: {
+    intent?: IntentAnalysis;
+    taskQueue?: ProjectTaskQueue;
+    logs?: AiAgentLogEntry[];
+  };
+}) {
+  const intent = message.intent;
+  const logs = message.logs ?? [];
+  const prompt = logs.find(
+    (entry) => entry.label === "Prompt selected" || entry.label === "Context plan",
+  )?.detail;
+  const skillNames = [
+    ...new Set(
+      logs
+        .filter(
+          (entry) =>
+            entry.label === "Skill selected by intent" || entry.label === "Skill auto-match",
+        )
+        .flatMap((entry) =>
+          (entry.detail ?? "")
+            .split("·")[0]
+            .split(",")
+            .map((name) => name.trim())
+            .filter(Boolean),
+        ),
+    ),
+  ];
+  const suggestions = logs.find((entry) => entry.label === "Capability suggestions")?.detail;
+  if (!intent && !message.taskQueue && !prompt && skillNames.length === 0) return null;
+  return (
+    <div className="studio-pipeline-trace">
+      <div className="studio-pipeline-title">Pipeline</div>
+      {intent ? (
+        <div className="studio-pipeline-row">
+          <b>Intent</b>
+          <span>
+            {intent.kind} · {intent.scope} · {intent.mode} · {intent.verification} ·{" "}
+            {intent.context}
+          </span>
+        </div>
+      ) : null}
+      {intent?.understanding ? (
+        <div className="studio-pipeline-row">
+          <b>Goal</b>
+          <span>{intent.understanding}</span>
+        </div>
+      ) : null}
+      {intent?.toolGroups?.length ? (
+        <div className="studio-pipeline-row">
+          <b>Tools</b>
+          <span>{intent.toolGroups.join(", ")}</span>
+        </div>
+      ) : null}
+      {suggestions ? (
+        <div className="studio-pipeline-row">
+          <b>Suggested</b>
+          <span>{suggestions}</span>
+        </div>
+      ) : null}
+      {skillNames.length ? (
+        <div className="studio-pipeline-row">
+          <b>Skills</b>
+          <span>{skillNames.join(", ")}</span>
+        </div>
+      ) : null}
+      {prompt ? (
+        <div className="studio-pipeline-row">
+          <b>Prompt</b>
+          <span>{prompt}</span>
+        </div>
+      ) : null}
+      {message.taskQueue?.tasks?.length ? (
+        <div className="studio-pipeline-row">
+          <b>Plan</b>
+          <span>
+            {message.taskQueue.tasks
+              .slice(0, 8)
+              .map((task) => task.title)
+              .join(" → ")}
+          </span>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export function CodeStudio({
   analysis,
   aiSettings,
@@ -4145,10 +4234,12 @@ export function CodeStudio({
                             <span>planner <b>{formatTokens(workflowMessage.stages.planner?.totalTokens ?? 0)}</b></span>
                             <span>agent <b>{formatTokens(workflowMessage.stages.agent?.totalTokens ?? 0)}</b></span>
                             <span>reviewer <b>{formatTokens(workflowMessage.stages.reviewer?.totalTokens ?? 0)}</b></span>
+                            <span>verify <b>{workflowMessage.stages.verify?.checks ?? 0}</b> checks · {workflowMessage.stages.verify?.durationMs ?? 0} ms</span>
                           </div>
                         ) : null}
                       </div>
                     ) : null}
+                    <PipelineTrace message={workflowMessage} />
                     {workflowMessage.logs && workflowMessage.logs.length > 0 ? (
                       <details className="studio-workflow-trace">
                         <summary>

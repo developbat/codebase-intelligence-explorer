@@ -1,12 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { IntentAnalysis } from "../../shared/intent";
+import type { AiAgentStep } from "../../shared/ai";
 import {
   blockDependentsOf,
   intentTask,
   isInspectionAnswer,
   looksMultiBehaviorGoal,
   shouldRetryWithEditFirst,
+  splitMultiBehaviorGoal,
+  summarizeVerificationSteps,
   taskBudgetForEffort,
   taskStepBudget,
   taskLooksLikeInspection,
@@ -378,4 +381,24 @@ test("detects short multi-behavior UI goals for the planner", () => {
   assert.equal(looksMultiBehaviorGoal("buton rengini koyu mavi yap"), false);
   assert.equal(looksMultiBehaviorGoal("add a search box"), false);
   assert.equal(looksMultiBehaviorGoal("hedefi taşı"), false);
+});
+
+test("splits a multi-behavior goal into one task per clause", () => {
+  const tasks = splitMultiBehaviorGoal("HUD ikonlarını düzelt ve hedefi sağ üste taşı");
+  assert.ok(tasks);
+  assert.equal(tasks.length, 2);
+  assert.match(tasks[0].detail, /HUD ikonlarını düzelt/);
+  assert.match(tasks[1].detail, /hedefi sağ üste taşı/);
+  assert.deepEqual(tasks[1].dependsOn, [tasks[0].id]);
+  assert.equal(splitMultiBehaviorGoal("buton rengini koyu mavi yap"), null);
+});
+
+test("summarizes successful verification steps for the stage trace", () => {
+  const steps = [
+    { index: 1, action: "browser_check", args: {}, observation: "", ok: true, durationMs: 1200 },
+    { index: 2, action: "run_test_scenario", args: {}, observation: "", ok: true, durationMs: 800 },
+    { index: 3, action: "browser_check", args: {}, observation: "", ok: false, durationMs: 500 },
+    { index: 4, action: "read_file", args: {}, observation: "", ok: true, durationMs: 30 },
+  ] as AiAgentStep[];
+  assert.deepEqual(summarizeVerificationSteps(steps), { checks: 2, durationMs: 2000 });
 });

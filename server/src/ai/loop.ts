@@ -23,6 +23,7 @@ import { loadSkillsForPrompt, recordSkillOutcomes } from "../skills";
 import { shouldForceRequirementsFirst } from "../skillPolicy";
 import { ensureDevServerForRequest } from "../processes";
 import { checkFileSyntax } from "../syntax";
+import { pngStats } from "../pngStats";
 import { runBrowserCheck } from "../browserCheck";
 import { requestIsRunPreview } from "../../../shared/projectMatch";
 import {
@@ -209,6 +210,36 @@ export function looksMultiBehaviorGoal(goal: string): boolean {
     ) ?? []).map((value) => value.toLowerCase()),
   );
   return targets.size >= 2 && verbs.size >= 2;
+}
+
+/**
+ * Deterministic last resort when the planner returns one task for a goal that
+ * clearly contains two independent UI behaviors.
+ */
+export function splitMultiBehaviorGoal(goal: string): ProjectTask[] | null {
+  if (!looksMultiBehaviorGoal(goal)) return null;
+  const parts = goal
+    .split(/\s+(?:ve|and|ayrıca|ayrica|;)\s+/i)
+    .map((part) => part.trim().replace(/[.,;]+$/, ""))
+    .filter((part) => part.split(/\s+/).filter(Boolean).length >= 2)
+    .slice(0, 4);
+  if (parts.length < 2) return null;
+  const at = nowIso();
+  return parts.map((part, index) => ({
+    id: `task-${index + 1}`,
+    title: part.slice(0, 140),
+    detail: part,
+    acceptance: `The behavior described in "${part.slice(0, 120)}" works and is verified on the real page.`,
+    status: "pending",
+    effort: "standard",
+    role: "main",
+    dependsOn: index === 0 ? [] : [`task-${index}`],
+    attempts: 0,
+    changedFiles: [],
+    commands: [],
+    createdAt: at,
+    updatedAt: at,
+  }));
 }
 
 export function splitLargeGoal(goal: string, verification?: string): ProjectTask[] | null {
@@ -715,8 +746,8 @@ export async function planProjectTasks(
   }
 
   if (tasks.length === 1) {
-    const split = splitLargeGoal(goal, verification);
-    if (split) {
+    const split = splitLargeGoal(goal, verification) ?? splitMultiBehaviorGoal(goal);
+    if (split && split.length > 1) {
       tasks = split;
       if (!options.dryRun) {
         await appendTaskContext(
@@ -1227,6 +1258,14 @@ export async function runUiEntrySmoke(
         screenshotPath,
       };
     }
+    const pixels = await pngStats(path.resolve(analysis.rootPath, screenshotPath)).catch(() => null);
+    if (pixels && (pixels.uniqueColors < 4 || pixels.nonUniformRatio < 0.02)) {
+      return {
+        ok: false,
+        summary: `UI screenshot is nearly uniform (${pixels.uniqueColors} colors).`,
+        screenshotPath,
+      };
+    }
   }
   if (interactive && !changed) {
     return {
@@ -1631,6 +1670,20 @@ export function shouldRetryWithEditFirst(
  * screenshot/visibility check alone does not prove buttons, canvas keys or
  * forms work.
  */
+export function summarizeVerificationSteps(
+  steps: AiAgentStep[],
+): { checks: number; durationMs: number } {
+  const checks = steps.filter(
+    (step) =>
+      step.ok &&
+      ["browser_check", "run_test_scenario", "game_check"].includes(step.action),
+  );
+  return {
+    checks: checks.length,
+    durationMs: checks.reduce((total, step) => total + (step.durationMs || 0), 0),
+  };
+}
+
 export function isInteractiveUiCheck(step: AiAgentStep): boolean {
   if (!step.ok) return false;
   if (step.action === "run_test_scenario") return true;
@@ -3042,6 +3095,15 @@ export async function runProjectLoop(
         ...stageUsage,
         agent: addUsage(stageUsage.agent ?? emptyUsage(), result.tokenUsage),
         reviewer: addUsage(stageUsage.reviewer ?? emptyUsage(), reviewUsage),
+        verify: (() => {
+          const current = summarizeVerificationSteps(result.steps);
+          return {
+            checks: (stageUsage.verify?.checks ?? 0) + current.checks,
+            durationMs: (stageUsage.verify?.durationMs ?? 0) + current.durationMs,
+            tokens: emptyUsage(),
+            costUsd: 0,
+          };
+        })(),
         costUsd:
           (stageUsage.costUsd ?? 0) + (attemptCost ?? 0) + (reviewCost ?? 0),
       },
@@ -3564,7 +3626,7 @@ export async function runProjectLoop(
         at: nowIso(),
         level: "info",
         label: "Stage cost",
-        detail: `intent ${tokens(stages.intent)} · planner ${tokens(stages.planner)} · agent ${tokens(stages.agent)} · reviewer ${tokens(stages.reviewer)} tokens${
+        detail: `intent ${tokens(stages.intent)} · planner ${tokens(stages.planner)} · agent ${tokens(stages.agent)} · reviewer ${tokens(stages.reviewer)} tokens · verify ${stages.verify?.checks ?? 0} checks/${stages.verify?.durationMs ?? 0}ms${
           stages.costUsd ? ` · ${formatUsd(stages.costUsd)}` : ""
         }`,
       },

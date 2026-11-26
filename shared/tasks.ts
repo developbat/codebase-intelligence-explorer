@@ -70,6 +70,12 @@ export interface ProjectTaskStageUsage {
   planner?: { inputTokens: number; outputTokens: number; totalTokens: number };
   agent?: { inputTokens: number; outputTokens: number; totalTokens: number };
   reviewer?: { inputTokens: number; outputTokens: number; totalTokens: number };
+  verify?: {
+    checks: number;
+    durationMs: number;
+    tokens: { inputTokens: number; outputTokens: number; totalTokens: number };
+    costUsd?: number;
+  };
   costUsd?: number;
 }
 
