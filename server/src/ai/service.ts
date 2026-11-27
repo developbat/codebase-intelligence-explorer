@@ -42,6 +42,9 @@ import { getDataDir, loadAnalysis, saveAnalysis } from "../store";
 import { loadProjectRules } from "../projectRules";
 import { formatFileMentions, readFileMentions } from "./fileMentions";
 import { beginCheckpoint } from "../checkpoints";
+import { findDuplicateFiles, formatBytes, summarizeStorage } from "../duplicates";
+import { buildCalendarEvent, calendarFileName } from "../calendar";
+import { addReminder, completeReminder, listReminders } from "../reminders";
 import { analyzeProject } from "../analyzer";
 import { isWithin } from "../scanner";
 import { formatProjectFile } from "../formatter";
@@ -2086,6 +2089,9 @@ const READ_ONLY_ACTIONS = new Set([
   "csv_query",
   "git_blame",
   "list_project_tools",
+  "find_duplicates",
+  "storage_summary",
+  "list_reminders",
   "browser_check",
   "game_check",
   "graphic_check",
@@ -5493,6 +5499,12 @@ export async function runAgentTask(
       "run_command",
       "run_background",
       "stop_background",
+      "find_duplicates",
+      "storage_summary",
+      "create_reminder",
+      "list_reminders",
+      "complete_reminder",
+      "create_calendar_event",
       "finish",
     ];
     const action = validActions.includes(rawAction as AiAgentAction)
@@ -5587,6 +5599,12 @@ export async function runAgentTask(
         run_command: "Running command…",
         run_background: "Starting background server…",
         stop_background: "Stopping background server…",
+        find_duplicates: "Scanning duplicate files…",
+        storage_summary: "Summarizing storage…",
+        create_reminder: "Saving reminder…",
+        list_reminders: "Reading reminders…",
+        complete_reminder: "Completing reminder…",
+        create_calendar_event: "Creating calendar event…",
       };
       log("tool", toolLabel[action] ?? `Running ${action}…`, agentActionTarget(args));
     }
@@ -7970,6 +7988,132 @@ export async function runAgentTask(
         observation = `Stopped background job ${jobId} (${job.command}). Status: ${job.status}.`;
         ok = true;
         log("info", "Background server stopped", job.command);
+      } else if (action === "find_duplicates") {
+        const report = findDuplicateFiles(analysis.files, {
+          path: typeof args.path === "string" ? args.path : undefined,
+          minBytes: Number(args.minBytes) || undefined,
+          maxGroups: Number(args.maxGroups) || undefined,
+        });
+        observation =
+          report.groups.length === 0
+            ? `No duplicate files found (${report.scanned} files scanned).`
+            : `Duplicate scan: ${report.scanned} files · ${report.groups.length} groups · ${report.duplicateFiles} duplicate file(s) · ${formatBytes(report.wastedBytes)} wasted.\n\n${report.groups
+                .slice(0, 10)
+                .map(
+                  (group) =>
+                    `### ${formatBytes(group.bytes)} · ${group.hash.slice(0, 12)}\n${group.paths
+                      .map((filePath) => `- ${filePath}`)
+                      .join("\n")}`,
+                )
+                .join("\n\n")}`;
+        ok = true;
+        log("success", "Duplicate scan complete", `${report.groups.length} groups`);
+      } else if (action === "storage_summary") {
+        const report = summarizeStorage(analysis.files, {
+          path: typeof args.path === "string" ? args.path : undefined,
+          top: Number(args.top) || undefined,
+        });
+        observation = [
+          `Project storage: ${report.scanned} files · ${formatBytes(report.totalBytes)} total.`,
+          ...report.folders.map(
+            (folder) => `- ${folder.path}: ${formatBytes(folder.bytes)} (${folder.files} files)`,
+          ),
+        ].join("\n");
+        ok = true;
+        log("info", "Storage summarized", `${report.scanned} files`);
+      } else if (action === "create_reminder") {
+        const title = String(args.title ?? "").trim();
+        if (!title) throw new Error("A reminder title is required.");
+        const reminderAllowed = await requirePermission(
+          "write",
+          "create_reminder",
+          title,
+          "Save a reminder or follow-up task in the local B.A.D IDE store.",
+          { preview: String(args.notes ?? "").slice(0, 500) },
+        );
+        if (!reminderAllowed) throw new Error("The user denied permission to save this reminder.");
+        const reminder = await addReminder({
+          title,
+          notes: typeof args.notes === "string" ? args.notes : undefined,
+          dueAt: typeof args.dueAt === "string" ? args.dueAt : undefined,
+          kind: args.kind === "task" ? "task" : "reminder",
+        });
+        observation = [
+          `Saved ${reminder.kind} ${reminder.id}: ${reminder.title}`,
+          reminder.dueAt ? `Due: ${reminder.dueAt}` : "No due date.",
+          reminder.notes ? `Notes: ${reminder.notes}` : "",
+        ]
+          .filter(Boolean)
+          .join("\n");
+        ok = true;
+        log("success", "Reminder saved", reminder.title);
+      } else if (action === "list_reminders") {
+        const items = await listReminders({
+          includeCompleted: args.includeCompleted === true,
+          kind: args.kind === "task" ? "task" : args.kind === "reminder" ? "reminder" : undefined,
+        });
+        observation =
+          items.length === 0
+            ? "No reminders or follow-up tasks are stored."
+            : items
+                .slice(0, 30)
+                .map(
+                  (item) =>
+                    `- [${item.completedAt ? "x" : " "}] ${item.title} · ${item.kind} · ${item.id}${
+                      item.dueAt ? ` · due ${item.dueAt}` : ""
+                    }${item.notes ? ` · ${item.notes.slice(0, 160)}` : ""}`,
+                )
+                .join("\n");
+        ok = true;
+        log("info", "Reminders listed", `${items.length} item(s)`);
+      } else if (action === "complete_reminder") {
+        const id = typeof args.id === "string" ? args.id : "";
+        const title = typeof args.title === "string" ? args.title : "";
+        if (!id && !title) throw new Error("A reminder id or exact title is required.");
+        const completeAllowed = await requirePermission(
+          "write",
+          "complete_reminder",
+          id || title,
+          "Mark a local reminder or follow-up task as completed.",
+        );
+        if (!completeAllowed) throw new Error("The user denied permission to complete this reminder.");
+        const result = await completeReminder({ id, title });
+        observation = result.alreadyCompleted
+          ? `Already completed: ${result.reminder.title} (${result.reminder.id}).`
+          : `Completed ${result.reminder.title} (${result.reminder.id}).`;
+        ok = true;
+        log("success", "Reminder completed", result.reminder.title);
+      } else if (action === "create_calendar_event") {
+        const title = String(args.title ?? "").trim();
+        const start = String(args.start ?? "").trim();
+        if (!title || !start) throw new Error("An event title and start date are required.");
+        const event = buildCalendarEvent({
+          title,
+          start,
+          end: typeof args.end === "string" ? args.end : undefined,
+          location: typeof args.location === "string" ? args.location : undefined,
+          description: typeof args.description === "string" ? args.description : undefined,
+        });
+        const target = calendarFileName(
+          title,
+          typeof args.path === "string" ? args.path : undefined,
+        );
+        const calendarAllowed = await requirePermission(
+          "write",
+          "create_calendar_event",
+          target,
+          "Write a portable .ics calendar event into the project.",
+          { preview: `${title} · ${event.start} → ${event.end}` },
+        );
+        if (!calendarAllowed) throw new Error("The user denied permission to create this event.");
+        await checkpoint?.remember(target);
+        const written = await writeSourceFile(projectId, analysis.rootPath, target, event.content);
+        changedFiles.push(written.filePath);
+        evidence.push({ path: written.filePath, label: "Calendar event" });
+        invalidateReadCaches([written.filePath]);
+        observation = `Created calendar event: ${written.filePath}\n${event.start} → ${event.end}\nImport the .ics file into your calendar app.`;
+        ok = true;
+        log("success", "Calendar event created", written.filePath);
       }
       }
       if (actionCacheKeyValue && !cachedAction && ok) {

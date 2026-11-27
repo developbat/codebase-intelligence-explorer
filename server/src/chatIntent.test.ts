@@ -125,6 +125,10 @@ test("capability gate narrows model, context, tools and research", () => {
   assert.equal(debugging.mode, "project");
   assert.ok(debugging.skillSlugs.includes("root-cause-debugging"));
 
+  assert.equal(planChat("aynı dosyadan var mı?").mode, "action");
+  assert.equal(planChat("disk kullanımı ne kadar?").mode, "action");
+  assert.equal(planChat("hatırlatıcılarım neler?").mode, "action");
+
   const action = planChat("duvar patlatma özelliği ekle");
   assert.equal(action.mode, "action");
   assert.equal(action.needsTools, true);

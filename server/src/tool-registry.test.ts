@@ -60,6 +60,11 @@ test("argument schemas accept path aliases and reject missing/typed values", () 
   assert.equal(validateToolArgs("run_background", { command: "node server.js" }), null);
   assert.match(validateToolArgs("run_background", {}) ?? "", /requires one of: command/);
   assert.match(validateToolArgs("stop_background", {}) ?? "", /requires one of: jobId/);
+  assert.equal(validateToolArgs("find_duplicates", { path: "assets" }), null);
+  assert.equal(validateToolArgs("storage_summary", { top: 5 }), null);
+  assert.equal(validateToolArgs("create_reminder", { title: "Send report" }), null);
+  assert.equal(validateToolArgs("list_reminders", {}), null);
+  assert.match(validateToolArgs("create_calendar_event", { title: "Review" }) ?? "", /requires one of: start/);
 });
 
 test("capability suggestions follow the request and selected groups", () => {

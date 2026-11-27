@@ -23,6 +23,10 @@ const SKILL_SIGNALS: { slug: string; pattern: RegExp }[] = [
 
 const WRITE_ACTIONS = new Set(["create", "update", "remove", "move", "run"]);
 
+/** Requests that need a local utility tool rather than a read-only answer. */
+const UTILITY_TOOL_SIGNAL =
+  /(?:aynı|ayni|duplicate|kopya|mükerrer|mukerrer).{0,30}(?:dosya|file).{0,24}(?:var mı|var mi|find|bul|kontrol|check)|(?:disk|depolama|storage).{0,24}(?:kullanım|kullanim|usage|dolu|space|alan|analiz)|(?:hatırlat|hatirlat|reminder).{0,30}(?:ekle|oluştur|olustur|listele|göster|goster|neler|var mı|var mi|tamamla|add|create|list|show)|(?:takvim|calendar).{0,30}(?:ekle|oluştur|olustur|etkinlik|event|toplantı|toplanti|add|create)|(?:dosya|file).{0,24}(?:listesi|listele|list|göster|show)/i;
+
 export type ChatQuestionKind = "meta" | "recent-work" | "project" | "general";
 export type ChatMode = ChatQuestionKind | "action" | "research";
 
@@ -85,7 +89,9 @@ export function planChat(
     (/\b(?:nasıl|nasil|how)\b/i.test(instruction) &&
       !/\b(?:lütfen|lutfen|please|can you|could you|would you)\b/i.test(instruction));
   const actionRequest =
-    hasWriteBehavior || (ACTION_VERBS.test(text) && !explanatoryQuestion);
+    hasWriteBehavior ||
+    UTILITY_TOOL_SIGNAL.test(text) ||
+    (ACTION_VERBS.test(text) && !explanatoryQuestion);
 
   if (kind === "recent-work") {
     return {

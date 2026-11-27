@@ -597,6 +597,60 @@ const TOOL_SPECS: AgentToolSpec[] = [
     args: { required: [["jobId", "id"]], types: { jobId: "string" } },
   },
   {
+    action: "find_duplicates",
+    groups: ["core"],
+    example: '{"action":"find_duplicates","args":{"path":"assets","minBytes":1024}}',
+    description: "Find duplicate files in the analyzed project by content hash.",
+    whenToUse: "Use when the user asks whether the same file exists more than once or wants duplicate cleanup candidates.",
+    args: { types: { path: "string", minBytes: "number", maxGroups: "number" } },
+  },
+  {
+    action: "storage_summary",
+    groups: ["core"],
+    example: '{"action":"storage_summary","args":{"top":12}}',
+    description: "Summarize project folder sizes from the analysis index.",
+    whenToUse: "Use when the user asks what is taking space or which folders/files are largest.",
+    args: { types: { path: "string", top: "number" } },
+  },
+  {
+    action: "create_reminder",
+    groups: ["core"],
+    example: '{"action":"create_reminder","args":{"title":"Send the report","dueAt":"2026-11-30T09:00:00Z"}}',
+    description: "Save a reminder or follow-up task in the local B.A.D IDE reminder store.",
+    whenToUse: "Use when the user asks to remember something, set a reminder, or create a personal task.",
+    permission: "write",
+    args: { required: [["title"]], types: { title: "string", dueAt: "string", notes: "string", kind: "string" } },
+  },
+  {
+    action: "list_reminders",
+    groups: ["core"],
+    example: '{"action":"list_reminders","args":{"includeCompleted":false}}',
+    description: "List local reminders and follow-up tasks, optionally including completed ones.",
+    whenToUse: "Use when the user asks what is pending, what they asked to remember, or to review tasks.",
+    args: { types: { includeCompleted: "boolean", kind: "string" } },
+  },
+  {
+    action: "complete_reminder",
+    groups: ["core"],
+    example: '{"action":"complete_reminder","args":{"title":"Send the report"}}',
+    description: "Complete a local reminder or follow-up task by id or exact title.",
+    whenToUse: "Use when the user says a reminder/task is done.",
+    permission: "write",
+    args: { types: { id: "string", title: "string" } },
+  },
+  {
+    action: "create_calendar_event",
+    groups: ["edit"],
+    example: '{"action":"create_calendar_event","args":{"title":"Release review","start":"2026-12-01T14:00:00Z","end":"2026-12-01T15:00:00Z"}}',
+    description: "Create a portable .ics calendar event in the project.",
+    whenToUse: "Use when the user asks to add a meeting/event to their calendar; produces a file they can import.",
+    permission: "write",
+    args: {
+      required: [["title"], ["start"]],
+      types: { title: "string", start: "string", end: "string", location: "string", description: "string", path: "string" },
+    },
+  },
+  {
     action: "run_project_tool",
     groups: ["command"],
     example: '{"action":"run_project_tool","args":{"name":"ui-check","input":{"url":"http://localhost:3000"}}}',
@@ -990,6 +1044,20 @@ const TOOL_ALIASES: Record<string, string[]> = {
   read_file: ["oku", "read", "dosya", "file", "kod", "source"],
   extract_entities: ["buton", "button", "listele", "list", "say", "count", "renk", "color", "route", "input"],
   audit_content: ["asset", "link", "markdown", "içerik", "icerik", "content", "audit", "denetle"],
+  find_duplicates: [
+    "duplicate", "dupe", "kopya", "aynı dosya", "ayni dosya", "tekrar", "mükerrer", "mukerrer",
+  ],
+  storage_summary: [
+    "storage", "disk", "depolama", "yer", "alan", "space", "boyut", "büyük dosya", "buyuk dosya",
+  ],
+  create_reminder: ["reminder", "hatırlat", "hatirlat", "hatırlatma", "hatirlatma", "todo"],
+  list_reminders: [
+    "reminders", "hatırlatmalar", "hatirlatmalar", "görevler", "gorevler", "tasks", "todo",
+  ],
+  complete_reminder: ["tamamla", "complete", "done", "bitti", "yapıldı", "yapildi"],
+  create_calendar_event: [
+    "calendar", "takvim", "etkinlik", "event", "toplantı", "toplanti", "meeting", "randevu",
+  ],
 };
 
 const SUGGESTION_STOPWORDS = new Set([

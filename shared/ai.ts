@@ -674,6 +674,12 @@ export type AiAgentAction =
   | "run_command"
   | "run_background"
   | "stop_background"
+  | "find_duplicates"
+  | "storage_summary"
+  | "create_reminder"
+  | "list_reminders"
+  | "complete_reminder"
+  | "create_calendar_event"
   | "finish";
 
 export interface AiAgentLogEntry {
