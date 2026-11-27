@@ -26783,3 +26783,75 @@ button.canvas-stat {
 .studio-right-body > .studio-side-tools {
   padding: 10px 12px;
 }
+
+.topbar-updates-button {
+  position: relative;
+}
+
+.topbar-update-dot {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  width: 7px;
+  height: 7px;
+  border: 1px solid #0b121c;
+  border-radius: 50%;
+  background: #34d399;
+  box-shadow: 0 0 8px rgba(52, 211, 153, 0.8);
+}
+
+/* @file mention picker above the Code Studio composer */
+.studio-mention-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 180px;
+  overflow-y: auto;
+  padding: 6px;
+  border: 1px solid rgba(110, 168, 254, 0.32);
+  border-radius: 10px;
+  background: #0b121c;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+}
+
+.studio-mention-head {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 5px 4px;
+  color: #8fb4e8;
+  font-size: 9px;
+  font-weight: 600;
+}
+
+.studio-mention-list > button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 24px;
+  padding: 3px 7px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: #cfe2ff;
+  font-family: var(--mono);
+  font-size: 9px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.studio-mention-list > button:hover {
+  background: rgba(59, 130, 246, 0.14);
+}
+
+.studio-mention-list > button span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.studio-mention-list > small {
+  padding: 4px 7px;
+  color: #8ba8ce;
+  font-size: 9px;
+}

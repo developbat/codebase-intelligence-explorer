@@ -47,6 +47,7 @@ import { formatNumber } from "./lib/constants";
 import { useI18n } from "./i18n";
 import { activeProvider } from "./lib/ai";
 import { updateStudioPrefs, useStudioPrefs } from "./lib/prefs";
+import { desktopUpdates, type DesktopUpdateState } from "./desktopUpdates";
 import type { GitChangedFile, GitCommit, GraphNode, ProjectTemplateId } from "../../shared/types";
 
 const LAST_PROJECT_KEY = "cie:last-project";
@@ -146,6 +147,40 @@ export default function App() {
   );
   const [settingsModelsAdd, setSettingsModelsAdd] = useState(false);
   const [settingsFocus, setSettingsFocus] = useState<"updates" | null>(null);
+  const [desktopUpdate, setDesktopUpdate] = useState<DesktopUpdateState | null>(null);
+
+  useEffect(() => {
+    const bridge = desktopUpdates();
+    if (!bridge) return;
+    let active = true;
+    const apply = (state: DesktopUpdateState) => {
+      if (active) setDesktopUpdate(state);
+    };
+    void bridge.getState().then(apply).catch(() => undefined);
+    const off = bridge.onState(apply);
+    const timer = window.setTimeout(() => {
+      void bridge
+        .getState()
+        .then((state) => {
+          if (!active || state.status !== "idle") return;
+          return Promise.race([
+            bridge.check(),
+            new Promise<never>((_, reject) =>
+              window.setTimeout(() => reject(new Error("update check timeout")), 20_000),
+            ),
+          ]);
+        })
+        .then((state) => {
+          if (state) apply(state);
+        })
+        .catch(() => undefined);
+    }, 2_000);
+    return () => {
+      active = false;
+      off();
+      window.clearTimeout(timer);
+    };
+  }, []);
   const [gitStatus, setGitStatus] = useState<GitStatus | null>(null);
   const [changeReport, setChangeReport] = useState<ChangeReport | null>(null);
   const [gitLoading, setGitLoading] = useState(false);
@@ -1019,18 +1054,31 @@ export default function App() {
           ) : null}
           {analysis ? <IndexStatusBadge projectId={analysis.id} /> : null}
           <button
-            className="ghost-button topbar-updates-button"
+            className={`ghost-button topbar-updates-button${
+              desktopUpdate?.status === "available" || desktopUpdate?.status === "downloaded"
+                ? " has-update"
+                : ""
+            }`}
             onClick={() => {
               setSettingsTab("general");
               setSettingsFocus("updates");
               setSettingsModelsAdd(false);
               setSettingsOpen(true);
             }}
-            title={t("Check for updates")}
+            title={
+              desktopUpdate?.status === "available"
+                ? `${t("Update available")}: ${desktopUpdate.latestVersion ?? ""}`
+                : desktopUpdate?.status === "downloaded"
+                  ? t("Update downloaded. Restart to finish installing.")
+                  : t("Check for updates")
+            }
             aria-label={t("Check for updates")}
           >
             <RefreshCw size={14} />
             <span>{t("Updates")}</span>
+            {desktopUpdate?.status === "available" || desktopUpdate?.status === "downloaded" ? (
+              <i className="topbar-update-dot" aria-hidden="true" />
+            ) : null}
           </button>
           <button
             className="ghost-button topbar-settings-button"

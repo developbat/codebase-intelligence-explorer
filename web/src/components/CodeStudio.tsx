@@ -73,6 +73,7 @@ import { linter, lintGutter } from "@codemirror/lint";
 import { diffLines } from "diff";
 import {
   AlertTriangle,
+  AtSign,
   Bot,
   Check,
   CheckCheck,
@@ -850,6 +851,8 @@ export function CodeStudio({
   const [permissionBusy, setPermissionBusy] = useState(false);
   const permissionRequest = permissionQueue[0] ?? null;
   const [chatInput, setChatInput] = useState("");
+  const [mentionQuery, setMentionQuery] = useState<string | null>(null);
+  const chatTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const [studioMode, setStudioMode] = useState<AiWorkspaceMode>(() => {
     const stored = localStorage.getItem(`cie:studio-mode:${analysis.id}`);
     return stored === "plan" ? "plan" : "build";
@@ -1528,6 +1531,15 @@ export function CodeStudio({
         .filter((filePath) => /(^|\/)AGENTS\.md$/i.test(filePath)),
     [analysis.files],
   );
+  const mentionMatches = useMemo(() => {
+    if (mentionQuery === null) return [] as string[];
+    const query = mentionQuery.toLowerCase();
+    return analysis.files
+      .map((file) => file.path)
+      .filter((filePath) => !filePath.startsWith(".cie/"))
+      .filter((filePath) => !query || filePath.toLowerCase().includes(query))
+      .slice(0, 8);
+  }, [analysis.files, mentionQuery]);
   const inventory = useMemo(() => {
     const counts = { html: 0, js: 0, css: 0, php: 0, python: 0, other: 0 };
     for (const file of analysis.files) {
@@ -3032,6 +3044,32 @@ export function CodeStudio({
     }
   }
 
+  function updateMentionQuery(value: string, cursor: number): void {
+    const before = value.slice(0, Math.max(0, cursor));
+    const match = before.match(/(?:^|[\s(])@([\w./-]*)$/);
+    setMentionQuery(match ? match[1] : null);
+  }
+
+  function insertMention(filePath: string): void {
+    const textarea = chatTextareaRef.current;
+    const cursor = textarea?.selectionStart ?? chatInput.length;
+    const before = chatInput.slice(0, cursor);
+    const match = before.match(/(?:^|[\s(])@([\w./-]*)$/);
+    if (!match) {
+      setMentionQuery(null);
+      return;
+    }
+    const tokenStart = cursor - match[1].length - 1;
+    const next = `${chatInput.slice(0, tokenStart)}@${filePath} ${chatInput.slice(cursor)}`;
+    setChatInput(next);
+    setMentionQuery(null);
+    window.requestAnimationFrame(() => {
+      textarea?.focus();
+      const position = tokenStart + filePath.length + 2;
+      textarea?.setSelectionRange(position, position);
+    });
+  }
+
   async function askProject(
     question = chatInput,
     appendUser = true,
@@ -3047,6 +3085,7 @@ export function CodeStudio({
   ) {
     const modeForRun = runOptions.workspaceMode ?? studioMode;
     if (!active || (!question.trim() && !attachment) || chatBusy) return;
+    setMentionQuery(null);
     setConfirmation(null);
     const runProvider = runOptions.provider ?? active.provider;
     const runModel = runOptions.model ?? active.model;
@@ -4833,16 +4872,66 @@ export function CodeStudio({
             </div>
           ) : null}
 
+          {mentionQuery !== null ? (
+            <div className="studio-mention-list" role="listbox" aria-label={t("Mention a file")}>
+              <div className="studio-mention-head">
+                <AtSign size={11} /> {t("Mention a file")}
+              </div>
+              {mentionMatches.length > 0 ? (
+                mentionMatches.map((filePath) => (
+                  <button
+                    key={filePath}
+                    type="button"
+                    onMouseDown={(event) => {
+                      event.preventDefault();
+                      insertMention(filePath);
+                    }}
+                  >
+                    <FileCode2 size={11} />
+                    <span>{filePath}</span>
+                  </button>
+                ))
+              ) : (
+                <small>{t("No matching files")}</small>
+              )}
+            </div>
+          ) : null}
           <div className="studio-composer-input-wrap">
             <textarea
+              ref={chatTextareaRef}
               value={chatInput}
               onChange={(event) => {
                 setChatInput(event.target.value);
+                updateMentionQuery(event.target.value, event.target.selectionStart ?? 0);
                 if (clarification && event.target.value !== clarification.original) {
                   setClarification(null);
                 }
               }}
+              onClick={(event) =>
+                updateMentionQuery(
+                  event.currentTarget.value,
+                  event.currentTarget.selectionStart ?? 0,
+                )
+              }
+              onKeyUp={(event) =>
+                updateMentionQuery(
+                  event.currentTarget.value,
+                  event.currentTarget.selectionStart ?? 0,
+                )
+              }
               onKeyDown={(event) => {
+                if (mentionQuery !== null) {
+                  if (event.key === "Escape") {
+                    event.preventDefault();
+                    setMentionQuery(null);
+                    return;
+                  }
+                  if (event.key === "Enter" && mentionMatches.length > 0) {
+                    event.preventDefault();
+                    insertMention(mentionMatches[0]);
+                    return;
+                  }
+                }
                 if (event.key === "Enter" && !event.shiftKey) {
                   event.preventDefault();
                   void askProject();
