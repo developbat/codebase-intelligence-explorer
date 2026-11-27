@@ -26500,30 +26500,33 @@ button.canvas-stat {
   line-height: 1.55;
 }
 
+.chat-studio-composer textarea {
+  min-height: 84px;
+  max-height: 180px;
+  padding-bottom: 54px;
+}
+
+.studio-bottom-controls > textarea {
+  padding-bottom: 96px;
+}
+
 .chat-studio-composer .studio-composer-bottom,
 .studio-bottom-controls .studio-composer-bottom {
   position: absolute;
-  left: 22px;
-  right: 22px;
-  bottom: 18px;
+  left: 16px;
+  right: 12px;
+  bottom: 14px;
   z-index: 2;
   margin: 0;
   flex-wrap: wrap;
 }
 
-.chat-studio-composer .studio-composer-bottom {
-  padding-right: 96px;
-}
-
-.chat-studio-composer > .chat-studio-send {
-  position: absolute;
-  right: 20px;
-  bottom: 16px;
-  z-index: 3;
-}
-
-.studio-bottom-controls > textarea {
-  padding-bottom: 96px;
+.chat-studio-composer .chat-studio-send {
+  height: 38px;
+  min-width: 88px;
+  padding: 0 14px;
+  border-radius: 10px;
+  font-size: 10.5px;
 }
 
 /* Keep Image/Video prompt pinned to the bottom while the media area scrolls */
@@ -26539,27 +26542,41 @@ button.canvas-stat {
   padding: 12px 14px 18px;
 }
 
-.video-studio-main .studio-bottom-controls > textarea {
-  width: 92%;
-  max-width: 92%;
-  margin: 0 auto;
-  display: block;
+/* Image/Video prompt card: controls are a footer inside the same card */
+.image-studio-main > .studio-bottom-controls {
+  flex: none;
+  margin: 8px 12px 12px;
+  padding: 0;
+  border: 1px solid rgba(139, 168, 206, 0.26);
+  border-radius: 13px;
+  background: #0b121c;
+  overflow: hidden;
 }
 
-/* Chat send is intentionally larger and flush to the right edge */
-.chat-studio-composer > .chat-studio-send {
-  right: 12px;
-  bottom: 12px;
-  height: 38px;
-  min-width: 88px;
-  padding: 0 14px;
-  border-radius: 10px;
-  font-size: 10.5px;
+.image-studio-main > .studio-bottom-controls > textarea {
+  width: 100%;
+  min-height: 84px;
+  max-height: 180px;
+  padding: 14px 16px 12px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  resize: none;
 }
 
-.chat-studio-composer .studio-composer-bottom {
-  left: 16px;
-  right: 16px;
-  bottom: 14px;
-  padding-right: 104px;
+.image-studio-main > .studio-bottom-controls > textarea:focus {
+  border: 0;
+  box-shadow: none;
+}
+
+.image-studio-main > .studio-bottom-controls .studio-composer-bottom {
+  position: static;
+  left: auto;
+  right: auto;
+  bottom: auto;
+  margin: 0;
+  padding: 8px 12px;
+  border-top: 1px solid rgba(139, 168, 206, 0.18);
+  background: rgba(9, 14, 23, 0.72);
+  flex-wrap: wrap;
 }

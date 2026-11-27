@@ -463,7 +463,7 @@ export function ChatStudio({
                 void send();
               }
             }}
-            rows={3}
+            rows={2}
             placeholder={t("Ask anything, paste a URL, or describe what you need…")}
             disabled={busy || !model}
           />
