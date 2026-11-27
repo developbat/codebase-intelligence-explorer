@@ -10746,6 +10746,7 @@ button.canvas-stat {
   align-items: center;
   gap: 5px;
   min-width: 0;
+  margin-left: auto;
 }
 
 .studio-workflow-actions > button {
@@ -24638,6 +24639,45 @@ button.canvas-stat {
   display: flex;
   align-items: center;
   gap: 6px;
+}
+
+.studio-input-actions {
+  position: absolute;
+  right: 64px;
+  bottom: 10px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: min(320px, 45%);
+}
+
+.studio-search-inline {
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(139, 168, 206, 0.26);
+  border-radius: 8px;
+  background: rgba(11, 18, 28, 0.92);
+  color: #b9d4f3;
+  cursor: pointer;
+}
+
+.studio-search-inline:hover {
+  border-color: rgba(110, 168, 254, 0.55);
+  color: #e3f0ff;
+}
+
+.studio-input-actions .studio-model-trigger.compact {
+  height: 32px;
+  max-width: 210px;
+  font-size: 10px;
+  background: rgba(11, 18, 28, 0.92);
+}
+
+.studio-input-actions .studio-model-trigger-provider {
+  font-size: 8.5px;
 }
 
 .studio-input-tools .studio-attach-inline {

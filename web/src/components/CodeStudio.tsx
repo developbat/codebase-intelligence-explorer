@@ -3456,6 +3456,201 @@ export function CodeStudio({
     window.addEventListener("blur", onUp);
   }
 
+  function renderModelPicker() {
+    return (
+           active ? (
+              <div className="studio-model-wrap">
+                <button
+                  className="studio-model-trigger compact"
+                  onClick={() => {
+                    if (modelPickerOpen) setPendingContinue(null);
+                    openModelPicker();
+                  }}
+                  title={`${providerDisplayName(active.provider)} · ${active.model}`}
+                >
+                  <span className="studio-model-trigger-model">{active.model || t("Select a model")}</span>
+                  <span className="studio-model-trigger-provider">
+                    {aiSettings?.autoSwitchModels === false
+                      ? t("Manual")
+                      : modelChain.length > 0
+                        ? `${t("Custom")} · ${modelChain.length}`
+                        : t("Auto")}
+                  </span>
+                  <ChevronDown size={11} />
+                </button>
+                {modelPickerOpen ? (
+                  <>
+                    <div
+                      className="studio-model-backdrop"
+                      onClick={() => {
+                        setModelPickerOpen(false);
+                        setPendingContinue(null);
+                      }}
+                    />
+                    <div className="studio-model-popover" onClick={(event) => event.stopPropagation()}>
+                      <div className="studio-model-popover-head">
+                        <div className="studio-model-popover-title">
+                          <span>{t("Code model")}</span>
+                          <strong>{t("Choose a provider and model")}</strong>
+                        </div>
+                        <button
+                          onClick={() => {
+                            setModelPickerOpen(false);
+                            openSettings("models", true);
+                          }}
+                        >
+                          {t("Add provider")}
+                        </button>
+                      </div>
+                      <div className="studio-model-provider-tabs">
+                        {configuredProviders.map((provider) => (
+                          <button
+                            key={provider.id}
+                            className={provider.id === pickerProvider ? "is-active" : ""}
+                            onClick={() => {
+                              setModelCatalogProvider(provider.id);
+                              setModelDraft(provider.model);
+                              setModelCatalog([]);
+                              void loadModels(provider.id);
+                            }}
+                          >
+                            <span>{provider.name}</span>
+                          </button>
+                        ))}
+                      </div>
+                      <div className={`studio-model-picked-row ${modelChain.length === 0 ? "is-auto" : ""}`}>
+                        <span className="studio-model-picked-label">{t("Selected")}</span>
+                        {modelChain.length === 0 ? (
+                          <span className="studio-model-picked-auto">
+                            {t("Auto selection")}
+                          </span>
+                        ) : (
+                          modelChain.map((item, index) => (
+                            <span
+                              key={`${item.provider}::${item.model}`}
+                              className="studio-model-picked-chip"
+                              title={`${item.provider}/${item.model}`}
+                            >
+                              <b>{index + 1}</b>
+                              <span>
+                                {item.provider}/{item.model}
+                              </span>
+                              <button
+                                onClick={() => void removeModelFromChain(index)}
+                                disabled={chainBusy}
+                                aria-label={t("Remove")}
+                              >
+                                <X size={9} />
+                              </button>
+                            </span>
+                          ))
+                        )}
+                        {modelChain.length > 0 ? (
+                          <button
+                            className="studio-model-picked-clear"
+                            onClick={() => void saveModelChain([])}
+                            disabled={chainBusy}
+                          >
+                            {t("Auto")}
+                          </button>
+                        ) : null}
+                      </div>
+                      <div className="studio-model-list-head">
+                        <span className="studio-model-section-label">
+                          {t("Available models")}
+                          {modelCatalog.length > 0 ? ` · ${modelCatalog.length}` : ""}
+                        </span>
+                        <div>
+                          <button
+                            className="ghost-button"
+                            onClick={() => {
+                              const provider = modelCatalogProvider ?? active?.provider;
+                              if (provider) void loadModels(provider, true);
+                            }}
+                            disabled={modelCatalogBusy}
+                            title={t("Refresh model list")}
+                          >
+                            {modelCatalogBusy ? <Loader2 size={11} className="spin" /> : <RefreshCw size={11} />}
+                          </button>
+                        </div>
+                      </div>
+                      {modelCatalog.length > 0 ? (
+                        <div className="studio-model-rows">
+                          {modelCatalog.slice(0, 120).map((model) => {
+                            const provider = pickerProvider;
+                            const selected = isModelSelected(provider, model);
+                            const isActive =
+                              active?.provider === provider && active?.model === model;
+                            return (
+                              <div
+                                key={model}
+                                className={`studio-model-row ${selected ? "is-selected" : ""} ${isActive ? "is-active" : ""}`}
+                              >
+                                <button
+                                  className="studio-model-row-toggle"
+                                  onClick={() => {
+                                    if (provider) void toggleModelInChain(provider, model);
+                                  }}
+                                  title={selected ? t("Remove from selected models") : t("Add to selected models")}
+                                >
+                                  <span className="studio-model-row-check">
+                                    {selected ? <Check size={10} /> : <Plus size={10} />}
+                                  </span>
+                                  <span className="studio-model-row-name">{model}</span>
+                                </button>
+                                <button
+                                  className="studio-model-row-use"
+                                  onClick={() => provider && selectCodeModel(provider, model)}
+                                  disabled={isActive}
+                                >
+                                  {isActive ? <Check size={10} /> : null}
+                                  {isActive ? t("Active") : t("Use")}
+                                </button>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      ) : pickerProvider === "local" ? (
+                        <div className="studio-model-empty">
+                          {t("Start Ollama and pull a model; downloaded local models appear here automatically.")}
+                        </div>
+                      ) : (
+                        <div className="studio-model-empty">
+                          {t("Fetch the provider model list or type a model id.")}
+                        </div>
+                      )}
+                      <details className="studio-model-advanced">
+                        <summary>{t("Advanced: enter a model id")}</summary>
+                        <div className="studio-model-input-row">
+                          <input
+                            value={modelDraft}
+                            onChange={(event) => setModelDraft(event.target.value)}
+                            placeholder={t("Model id")}
+                            spellCheck={false}
+                          />
+                          <button
+                            onClick={() => {
+                              const provider = modelCatalogProvider ?? active?.provider;
+                              if (provider && modelDraft.trim()) void toggleModelInChain(provider, modelDraft.trim());
+                            }}
+                            disabled={!modelDraft.trim()}
+                          >
+                            {t("Add to selected")}
+                          </button>
+                        </div>
+                      </details>
+                    </div>
+                  </>
+                ) : null}
+              </div>
+            ) : (
+              <button className="action-button" onClick={() => openSettings("models")}>
+                <Sparkles size={12} /> {t("Configure AI")}
+              </button>
+            )
+    );
+  }
+
   return (
     <div
       ref={studioRef}
@@ -3800,206 +3995,10 @@ export function CodeStudio({
 
             <section className="studio-workflow">
         <div className="studio-workflow-head">
-          <div className="studio-workflow-title">
-            <strong>{analysis.projectName}</strong>
-          </div>
           <div className="studio-workflow-actions">
             <button onClick={() => openSettings("reports")} title={t("Open the task report")}>
               <ListChecks size={12} /> {t("Reports")}
             </button>
-            <button onClick={() => setIndexSearchOpen(true)} title={t("Search the project index")}>
-              <Search size={12} /> {t("Search project")}
-            </button>
-            {active ? (
-              <div className="studio-model-wrap">
-                <button
-                  className="studio-model-trigger compact"
-                  onClick={() => {
-                    if (modelPickerOpen) setPendingContinue(null);
-                    openModelPicker();
-                  }}
-                  title={`${providerDisplayName(active.provider)} · ${active.model}`}
-                >
-                  <span className="studio-model-trigger-model">{active.model || t("Select a model")}</span>
-                  <span className="studio-model-trigger-provider">
-                    {aiSettings?.autoSwitchModels === false
-                      ? t("Manual")
-                      : modelChain.length > 0
-                        ? `${t("Custom")} · ${modelChain.length}`
-                        : t("Auto")}
-                  </span>
-                  <ChevronDown size={11} />
-                </button>
-                {modelPickerOpen ? (
-                  <>
-                    <div
-                      className="studio-model-backdrop"
-                      onClick={() => {
-                        setModelPickerOpen(false);
-                        setPendingContinue(null);
-                      }}
-                    />
-                    <div className="studio-model-popover" onClick={(event) => event.stopPropagation()}>
-                      <div className="studio-model-popover-head">
-                        <div className="studio-model-popover-title">
-                          <span>{t("Code model")}</span>
-                          <strong>{t("Choose a provider and model")}</strong>
-                        </div>
-                        <button
-                          onClick={() => {
-                            setModelPickerOpen(false);
-                            openSettings("models", true);
-                          }}
-                        >
-                          {t("Add provider")}
-                        </button>
-                      </div>
-                      <div className="studio-model-provider-tabs">
-                        {configuredProviders.map((provider) => (
-                          <button
-                            key={provider.id}
-                            className={provider.id === pickerProvider ? "is-active" : ""}
-                            onClick={() => {
-                              setModelCatalogProvider(provider.id);
-                              setModelDraft(provider.model);
-                              setModelCatalog([]);
-                              void loadModels(provider.id);
-                            }}
-                          >
-                            <span>{provider.name}</span>
-                          </button>
-                        ))}
-                      </div>
-                      <div className={`studio-model-picked-row ${modelChain.length === 0 ? "is-auto" : ""}`}>
-                        <span className="studio-model-picked-label">{t("Selected")}</span>
-                        {modelChain.length === 0 ? (
-                          <span className="studio-model-picked-auto">
-                            {t("Auto selection")}
-                          </span>
-                        ) : (
-                          modelChain.map((item, index) => (
-                            <span
-                              key={`${item.provider}::${item.model}`}
-                              className="studio-model-picked-chip"
-                              title={`${item.provider}/${item.model}`}
-                            >
-                              <b>{index + 1}</b>
-                              <span>
-                                {item.provider}/{item.model}
-                              </span>
-                              <button
-                                onClick={() => void removeModelFromChain(index)}
-                                disabled={chainBusy}
-                                aria-label={t("Remove")}
-                              >
-                                <X size={9} />
-                              </button>
-                            </span>
-                          ))
-                        )}
-                        {modelChain.length > 0 ? (
-                          <button
-                            className="studio-model-picked-clear"
-                            onClick={() => void saveModelChain([])}
-                            disabled={chainBusy}
-                          >
-                            {t("Auto")}
-                          </button>
-                        ) : null}
-                      </div>
-                      <div className="studio-model-list-head">
-                        <span className="studio-model-section-label">
-                          {t("Available models")}
-                          {modelCatalog.length > 0 ? ` · ${modelCatalog.length}` : ""}
-                        </span>
-                        <div>
-                          <button
-                            className="ghost-button"
-                            onClick={() => {
-                              const provider = modelCatalogProvider ?? active?.provider;
-                              if (provider) void loadModels(provider, true);
-                            }}
-                            disabled={modelCatalogBusy}
-                            title={t("Refresh model list")}
-                          >
-                            {modelCatalogBusy ? <Loader2 size={11} className="spin" /> : <RefreshCw size={11} />}
-                          </button>
-                        </div>
-                      </div>
-                      {modelCatalog.length > 0 ? (
-                        <div className="studio-model-rows">
-                          {modelCatalog.slice(0, 120).map((model) => {
-                            const provider = pickerProvider;
-                            const selected = isModelSelected(provider, model);
-                            const isActive =
-                              active?.provider === provider && active?.model === model;
-                            return (
-                              <div
-                                key={model}
-                                className={`studio-model-row ${selected ? "is-selected" : ""} ${isActive ? "is-active" : ""}`}
-                              >
-                                <button
-                                  className="studio-model-row-toggle"
-                                  onClick={() => {
-                                    if (provider) void toggleModelInChain(provider, model);
-                                  }}
-                                  title={selected ? t("Remove from selected models") : t("Add to selected models")}
-                                >
-                                  <span className="studio-model-row-check">
-                                    {selected ? <Check size={10} /> : <Plus size={10} />}
-                                  </span>
-                                  <span className="studio-model-row-name">{model}</span>
-                                </button>
-                                <button
-                                  className="studio-model-row-use"
-                                  onClick={() => provider && selectCodeModel(provider, model)}
-                                  disabled={isActive}
-                                >
-                                  {isActive ? <Check size={10} /> : null}
-                                  {isActive ? t("Active") : t("Use")}
-                                </button>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      ) : pickerProvider === "local" ? (
-                        <div className="studio-model-empty">
-                          {t("Start Ollama and pull a model; downloaded local models appear here automatically.")}
-                        </div>
-                      ) : (
-                        <div className="studio-model-empty">
-                          {t("Fetch the provider model list or type a model id.")}
-                        </div>
-                      )}
-                      <details className="studio-model-advanced">
-                        <summary>{t("Advanced: enter a model id")}</summary>
-                        <div className="studio-model-input-row">
-                          <input
-                            value={modelDraft}
-                            onChange={(event) => setModelDraft(event.target.value)}
-                            placeholder={t("Model id")}
-                            spellCheck={false}
-                          />
-                          <button
-                            onClick={() => {
-                              const provider = modelCatalogProvider ?? active?.provider;
-                              if (provider && modelDraft.trim()) void toggleModelInChain(provider, modelDraft.trim());
-                            }}
-                            disabled={!modelDraft.trim()}
-                          >
-                            {t("Add to selected")}
-                          </button>
-                        </div>
-                      </details>
-                    </div>
-                  </>
-                ) : null}
-              </div>
-            ) : (
-              <button className="action-button" onClick={() => openSettings("models")}>
-                <Sparkles size={12} /> {t("Configure AI")}
-              </button>
-            )}
           </div>
         </div>
 
@@ -4960,6 +4959,17 @@ export function CodeStudio({
                 if (file) void attachTaskFile(file);
               }}
             />
+            <div className="studio-input-actions">
+              <button
+                className="studio-search-inline"
+                onClick={() => setIndexSearchOpen(true)}
+                title={t("Search the project index")}
+                aria-label={t("Search project")}
+              >
+                <Search size={15} />
+              </button>
+              {renderModelPicker()}
+            </div>
             {chatBusy ? (
               <button
                 className="studio-send-button is-stop studio-send-inline"
@@ -4984,25 +4994,6 @@ export function CodeStudio({
             )}
           </div>
 
-          <div className="studio-composer-footer">
-            <div className="studio-composer-actions">
-              {studioMode === "plan" ? (
-                <button
-                  className="studio-footer-link"
-                  onClick={() => void openFile(".cie/agent/PLAN.md")}
-                  title={t("Project plan")}
-                >
-                  <ListChecks size={13} />
-                  <span>{t("Project plan")}</span>
-                </button>
-              ) : null}
-              {chatMessages.length > 0 ? (
-                <button className="studio-composer-clear" onClick={clearActiveChat}>
-                  {t("Clear")}
-                </button>
-              ) : null}
-            </div>
-          </div>
         </div>
             ) : footerTab === "console" ? (
 <div className="studio-bottom">

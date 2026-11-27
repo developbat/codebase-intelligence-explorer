@@ -15,6 +15,7 @@ import {
   runAgentTask,
   runCodingTask,
   answerGeneralChat,
+  agentSeedContext,
   reviewChanges,
   summarizeProject,
   summarizeScope,
@@ -65,6 +66,7 @@ import {
 } from "./tasks";
 import type { ProjectTask } from "../../shared/tasks";
 import { ensureProjectBrain, getProjectBrainView, refreshProjectBrain, compactProjectBrainBrief } from "./projectBrain";
+import { ensureProjectMap } from "./projectMap";
 import { compactDiagnosisBrief, diagnoseProject, diagnosisPaths, loadDiagnosis } from "./ai/diagnosis";
 import { getPublicSettings, resolveAgentRole, resolveProvider, updateAiSettings } from "./ai/settings";
 import { allToolSpecs } from "./ai/toolRegistry";
@@ -75,7 +77,8 @@ import { getPrompt, getPromptVersion, listPrompts, renderPrompt, resetPrompt, sa
 import { resolvePermission } from "./ai/permissions";
 import { analyzeIntent, shouldRequestIntentConfirmation } from "./ai/intent";
 import { decideTaskRelation } from "./ai/taskRelation";
-import { isPureRecentWorkQuestion, isRecentWorkQuestion, renderRecentWorkAnswer, summarizeWorkState } from "./ai/workState";
+import { isPureRecentWorkQuestion, renderRecentWorkAnswer, summarizeWorkState } from "./ai/workState";
+import { classifyChatQuestion, isChatQuestion, type ChatQuestionKind } from "./ai/chatIntent";
 import { listPlans, readPlan } from "./plans";
 import type { IntentAnalysis } from "../../shared/intent";
 import type { AiWorkspaceMode } from "../../shared/ai";
@@ -1844,6 +1847,39 @@ async function projectWorkState(projectId: string): Promise<string> {
   return summarizeWorkState(queue, taskHistory);
 }
 
+/**
+ * Select chat context by question kind instead of sending every cache:
+ * meta/general gets no project dump, recent work gets task records, project
+ * questions get brain + map + targeted snippets.
+ */
+async function buildQuestionChatContext(
+  projectId: string,
+  question: string,
+  kind: ChatQuestionKind,
+): Promise<string> {
+  if (kind === "meta" || kind === "general") return "";
+  const workState = await projectWorkState(projectId);
+  if (kind === "recent-work") return workState;
+  const analysis = await loadAnalysis(projectId).catch(() => null);
+  if (!analysis) return workState;
+  const [brain, map, snippets] = await Promise.all([
+    ensureProjectBrain(analysis)
+      .then((value) => compactProjectBrainBrief(value))
+      .catch(() => ""),
+    ensureProjectMap(analysis).catch(() => ""),
+    agentSeedContext(analysis, question, undefined, null).catch(() => ""),
+  ]);
+  return [
+    workState,
+    brain ? `Project brain:\n${brain}` : "",
+    map ? `Project map:\n${map.slice(0, 4_000)}` : "",
+    snippets ? `Relevant project snippets:\n${snippets.slice(0, 4_000)}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n\n")
+    .slice(0, 12_000);
+}
+
 app.post("/api/projects/:id/ai/chat", async (req, res) => {
   try {
     const question = typeof req.body?.question === "string" ? req.body.question.trim() : "";
@@ -2589,22 +2625,26 @@ app.post("/api/projects/:id/ai/loop/stream", async (req, res) => {
     return;
   }
 
-  if (
-    intent?.kind === "question" &&
-    (intent.context === "none" || isRecentWorkQuestion(goal, intent))
-  ) {
+  if (intent && isChatQuestion(intent, goal)) {
     try {
-      const recentWorkQuestion = isRecentWorkQuestion(goal, intent);
+      const chatKind = classifyChatQuestion(goal, intent);
+      const recentWorkQuestion = chatKind === "recent-work";
+      const chatDetail =
+        chatKind === "recent-work"
+          ? "Answered from recent task records; no model, tools or task queue."
+          : chatKind === "meta"
+            ? "Assistant profile answer; no project dump, tools or task queue."
+            : chatKind === "project"
+              ? "Project context selected from brain, map and targeted snippets; no tools or task queue."
+              : "General chat answer; no tools or task queue.";
       write({
         type: "log",
         entry: {
           id: `log-${Date.now()}-work-state`,
           at: new Date().toISOString(),
           level: "info",
-          label: recentWorkQuestion ? "Work-state answer" : "Direct chat",
-          detail: recentWorkQuestion
-            ? "Answered from recent task records; no tools or task queue."
-            : "Answered without the project task loop.",
+          label: `Chat answer · ${chatKind}`,
+          detail: chatDetail,
         },
       });
       const language = typeof req.body?.language === "string" ? req.body.language : "en";
@@ -2634,6 +2674,7 @@ app.post("/api/projects/:id/ai/loop/stream", async (req, res) => {
           },
         });
       } else {
+        const chatContext = await buildQuestionChatContext(req.params.id, goal, chatKind);
         write({
           type: "start",
           provider:
@@ -2647,7 +2688,7 @@ app.post("/api/projects/:id/ai/loop/stream", async (req, res) => {
           model: typeof req.body?.model === "string" ? req.body.model : undefined,
           language: typeof req.body?.language === "string" ? req.body.language : undefined,
           intent,
-          workState: await projectWorkState(req.params.id),
+          workState: chatContext || undefined,
           history,
           onToken: (chunk) => write({ type: "token", text: chunk }),
         });

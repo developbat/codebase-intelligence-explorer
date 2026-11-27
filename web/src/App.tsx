@@ -877,12 +877,7 @@ export default function App() {
         </div>
 
         <div className="breadcrumbs">
-          {product === "studio" ? (
-            <span className="breadcrumb-item">
-              <Code2 size={12} className="breadcrumb-sep" />
-              <span className="is-current">{analysis?.projectName ?? t("Project")}</span>
-            </span>
-          ) : product === "chat" ? (
+          {product === "studio" ? null : product === "chat" ? (
             <span className="breadcrumb-item">
               <MessageSquare size={12} className="breadcrumb-sep" />
               <span className="is-current">{t("Chat Studio")}</span>
