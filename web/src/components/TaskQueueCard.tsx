@@ -323,17 +323,10 @@ export function TaskQueueCard({
         >
           {t("Context notes")}: <code>{queue.contextPath.split("/").pop()}</code>
         </button>
-        {failed > 0 && onRetryFailed ? (
-          <button
-            className="task-queue-retry"
-            onClick={(event) => {
-              event.preventDefault();
-              onRetryFailed();
-            }}
-            disabled={queue.status === "running"}
-          >
-            {t(queue.status === "stopped" ? "Continue remaining tasks" : "Retry failed tasks")}
-          </button>
+        {failed > 0 ? (
+          <span className="task-queue-retry-note">
+            {t("Replaying the same goal is disabled. Write a narrower task or open Reports.")}
+          </span>
         ) : null}
 
       </div>

@@ -10,6 +10,8 @@ import {
   featurePreflightHints,
   isInteractiveUiCheck,
   softTaskTokenBudget,
+  hardTaskTokenCap,
+  retryBudgetExhausted,
   summarizeToolIssues,
   summaryAllowsNoChanges,
   summaryClaimsAlreadyPresent,
@@ -490,4 +492,36 @@ test("already generates/produces claims require no-change evidence", () => {
     ),
     true,
   );
+});
+
+test("manual retry is refused after the lifetime token cap", () => {
+  const standard = {
+    id: "task-1",
+    title: "Build",
+    detail: "",
+    status: "blocked",
+    effort: "standard",
+    role: "main",
+    dependsOn: [],
+    attempts: 2,
+    changedFiles: ["game.js"],
+    commands: [],
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:01:00.000Z",
+    lifetimeTokens: 526_438,
+  } as never;
+  assert.equal(hardTaskTokenCap(standard), 320_000);
+  assert.equal(retryBudgetExhausted(standard), true);
+
+  const withinBudget = { ...(standard as object), lifetimeTokens: 120_000 } as never;
+  assert.equal(retryBudgetExhausted(withinBudget), false);
+
+  const patch = {
+    ...(standard as object),
+    effort: "simple",
+    patch: true,
+    lifetimeTokens: 250_000,
+  } as never;
+  assert.equal(hardTaskTokenCap(patch), 240_000);
+  assert.equal(retryBudgetExhausted(patch), true);
 });

@@ -4723,40 +4723,11 @@ export function CodeStudio({
                 <small title={taskQueue.goal}>{reason.slice(0, 260)}</small>
                 <small className="studio-continue-hint">
                   {t(
-                    "Resume keeps completed tasks and changed files; it does not restart the project.",
+                    "This task stopped on a verification or scope gate. Replaying the same goal is not offered; write a narrower task or open Reports instead.",
                   )}
                 </small>
               </div>
               <div className="studio-continue-actions">
-                <button
-                  className="ghost-button"
-                  disabled={!active}
-                  onClick={() => {
-                    void askProject(taskQueue.goal, false, {
-                      retryFailed: true,
-                      skipClarify: true,
-                      workspaceMode: "build",
-                    });
-                  }}
-                >
-                  <Play size={11} /> {t("Continue")}
-                  {active ? ` · ${active.model}` : ""}
-                </button>
-                <button
-                  className="primary-button"
-                  disabled={!active}
-                  onClick={() => {
-                    setPendingContinue({ goal: taskQueue.goal });
-                    setModelPickerOpen(true);
-                    setModelCatalog([]);
-                    if (active) {
-                      setModelCatalogProvider(active.provider);
-                      void loadModels(active.provider);
-                    }
-                  }}
-                >
-                  <RefreshCw size={11} /> {t("Choose model & continue")}
-                </button>
                 <button
                   className="ghost-button"
                   onClick={() => openSettings("reports")}

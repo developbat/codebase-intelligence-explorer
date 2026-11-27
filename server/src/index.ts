@@ -75,7 +75,7 @@ import { getPrompt, getPromptVersion, listPrompts, renderPrompt, resetPrompt, sa
 import { resolvePermission } from "./ai/permissions";
 import { analyzeIntent, shouldRequestIntentConfirmation } from "./ai/intent";
 import { decideTaskRelation } from "./ai/taskRelation";
-import { summarizeWorkState } from "./ai/workState";
+import { isPureRecentWorkQuestion, isRecentWorkQuestion, renderRecentWorkAnswer, summarizeWorkState } from "./ai/workState";
 import { listPlans, readPlan } from "./plans";
 import type { IntentAnalysis } from "../../shared/intent";
 import type { AiWorkspaceMode } from "../../shared/ai";
@@ -2405,6 +2405,50 @@ app.post("/api/projects/:id/ai/loop/stream", async (req, res) => {
         )
         .slice(-8)
     : undefined;
+  if (isPureRecentWorkQuestion(goal)) {
+    const queue = await getProjectTaskQueue(req.params.id).catch(() => null);
+    const analysis = await loadAnalysis(req.params.id).catch(() => null);
+    const taskHistory = analysis
+      ? await loadTaskHistory(analysis.rootPath).catch(() => [])
+      : [];
+    const answer = renderRecentWorkAnswer(
+      queue,
+      taskHistory,
+      typeof req.body?.language === "string" ? req.body.language : "en",
+    );
+    write({
+      type: "log",
+      entry: {
+        id: `log-${Date.now()}-work-state-fast`,
+        at: new Date().toISOString(),
+        level: "info",
+        label: "Work-state answer",
+        detail: "Answered from recent task records; no model, tools or task queue.",
+      },
+    });
+    write({ type: "start", provider: "work-state", model: "records" });
+    write({ type: "token", text: answer });
+    write({
+      type: "done",
+      result: {
+        instruction: goal,
+        summary: answer,
+        steps: [],
+        changedFiles: [],
+        ranCommands: [],
+        stoppedReason: "finished" as const,
+        provider: "work-state",
+        model: "records",
+        createdAt: new Date().toISOString(),
+        usage: { inputChars: 0, estimatedTokens: 0, contextFiles: [] },
+        tokenUsage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+        costUsd: 0,
+      },
+    });
+    unregisterAgentRun(req.params.id, controller);
+    res.end();
+    return;
+  }
   const existing = await getProjectTaskQueue(req.params.id).catch(() => null);
   const requestedGoal = goal;
   const relation = decideTaskRelation({ instruction: goal, history, queue: existing });
@@ -2545,26 +2589,70 @@ app.post("/api/projects/:id/ai/loop/stream", async (req, res) => {
     return;
   }
 
-  if (intent?.kind === "question" && intent.context === "none") {
+  if (
+    intent?.kind === "question" &&
+    (intent.context === "none" || isRecentWorkQuestion(goal, intent))
+  ) {
     try {
+      const recentWorkQuestion = isRecentWorkQuestion(goal, intent);
       write({
-        type: "start",
-        provider:
-          typeof req.body?.provider === "string" ? req.body.provider : intentProvider ?? "intent",
-        model:
-          typeof req.body?.model === "string" ? req.body.model : intentModel ?? "intent",
+        type: "log",
+        entry: {
+          id: `log-${Date.now()}-work-state`,
+          at: new Date().toISOString(),
+          level: "info",
+          label: recentWorkQuestion ? "Work-state answer" : "Direct chat",
+          detail: recentWorkQuestion
+            ? "Answered from recent task records; no tools or task queue."
+            : "Answered without the project task loop.",
+        },
       });
-      const result = await answerGeneralChat(req.params.id, goal, {
-        provider:
-          typeof req.body?.provider === "string" ? (req.body.provider as AiProviderId) : undefined,
-        model: typeof req.body?.model === "string" ? req.body.model : undefined,
-        language: typeof req.body?.language === "string" ? req.body.language : undefined,
-        intent,
-        workState: await projectWorkState(req.params.id),
-        history,
-        onToken: (chunk) => write({ type: "token", text: chunk }),
-      });
-      write({ type: "done", result });
+      const language = typeof req.body?.language === "string" ? req.body.language : "en";
+      if (recentWorkQuestion) {
+        const analysis = await loadAnalysis(req.params.id).catch(() => null);
+        const taskHistory = analysis
+          ? await loadTaskHistory(analysis.rootPath).catch(() => [])
+          : [];
+        const answer = renderRecentWorkAnswer(existing, taskHistory, language);
+        write({ type: "start", provider: "work-state", model: "records" });
+        write({ type: "token", text: answer });
+        write({
+          type: "done",
+          result: {
+            instruction: goal,
+            summary: answer,
+            steps: [],
+            changedFiles: [],
+            ranCommands: [],
+            stoppedReason: "finished" as const,
+            provider: "work-state",
+            model: "records",
+            createdAt: new Date().toISOString(),
+            usage: { inputChars: 0, estimatedTokens: 0, contextFiles: [] },
+            tokenUsage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+            costUsd: 0,
+          },
+        });
+      } else {
+        write({
+          type: "start",
+          provider:
+            typeof req.body?.provider === "string" ? req.body.provider : intentProvider ?? "intent",
+          model:
+            typeof req.body?.model === "string" ? req.body.model : intentModel ?? "intent",
+        });
+        const result = await answerGeneralChat(req.params.id, goal, {
+          provider:
+            typeof req.body?.provider === "string" ? (req.body.provider as AiProviderId) : undefined,
+          model: typeof req.body?.model === "string" ? req.body.model : undefined,
+          language: typeof req.body?.language === "string" ? req.body.language : undefined,
+          intent,
+          workState: await projectWorkState(req.params.id),
+          history,
+          onToken: (chunk) => write({ type: "token", text: chunk }),
+        });
+        write({ type: "done", result });
+      }
     } catch (error) {
       write({
         type: "error",

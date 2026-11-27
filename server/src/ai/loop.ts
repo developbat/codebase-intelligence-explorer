@@ -1665,6 +1665,15 @@ export function softTaskTokenBudget(effort: ProjectTaskEffort): number {
   return Math.round(taskBudgetForEffort(effort).tokens * 1.25);
 }
 
+/** Absolute safety cap across manual retries; Continue must not reset it. */
+export function hardTaskTokenCap(task: ProjectTask): number {
+  return Math.max(240_000, taskBudgetForEffort(taskBudgetEffort(task)).tokens * 2);
+}
+
+export function retryBudgetExhausted(task: ProjectTask): boolean {
+  return (task.lifetimeTokens ?? 0) >= hardTaskTokenCap(task);
+}
+
 /**
  * A "simple" edit can still require a real browser round-trip and several
  * reads. Give UI/verification tasks the standard safety budget so they do not
@@ -3346,9 +3355,68 @@ ${collapsed.tasks[0].checklist
         emit({ type: "task", queue });
       }
     }
+    const exhaustedRetries = queue.tasks.filter(
+      (task) =>
+        (task.status === "failed" || task.status === "blocked") &&
+        retryBudgetExhausted(task),
+    );
+    if (exhaustedRetries.length > 0) {
+      emit({
+        type: "log",
+        entry: {
+          id: `log-${Date.now()}-retry-budget`,
+          at: nowIso(),
+          level: "warn",
+          label: "Retry refused · lifetime budget exhausted",
+          detail: exhaustedRetries
+            .map(
+              (task) =>
+                `${task.id}: ${(task.lifetimeTokens ?? 0).toLocaleString()}/${hardTaskTokenCap(task).toLocaleString()} tokens`,
+            )
+            .join(" · "),
+        },
+      });
+      queue = {
+        ...queue,
+        status: "failed",
+        updatedAt: nowIso(),
+        tasks: queue.tasks.map((task) =>
+          exhaustedRetries.some((item) => item.id === task.id)
+            ? {
+                ...task,
+                status: "blocked",
+                notes: [
+                  task.notes,
+                  `Retry refused: this task already spent ${(task.lifetimeTokens ?? 0).toLocaleString()} of its ${hardTaskTokenCap(task).toLocaleString()} lifetime token cap. Start a narrower task instead of replaying the same goal.`,
+                ]
+                  .filter(Boolean)
+                  .join("\n"),
+                updatedAt: nowIso(),
+              }
+            : task,
+        ),
+      };
+      queue = await saveQueue(analysis.rootPath, queue);
+      emit({ type: "task", queue });
+      if (!queue.tasks.some((task) => task.status === "pending" || task.status === "in_progress")) {
+        const result = aggregateResult(goal.trim(), queue, [], main.id, main.model);
+        emit({ type: "done", result });
+        return {
+          queue,
+          summary: result.summary,
+          completed: queue.tasks.filter((task) => task.status === "done").length,
+          failed: queue.tasks.filter(
+            (task) => task.status === "failed" || task.status === "blocked",
+          ).length,
+          stopped: true,
+          stages: queue.stageUsage,
+        };
+      }
+    }
     const recoveries = new Map<string, RetryRecovery>();
     for (const task of queue.tasks) {
       if (task.status !== "failed" && task.status !== "blocked") continue;
+      if (retryBudgetExhausted(task)) continue;
       // eslint-disable-next-line no-await-in-loop
       const recovery = await prepareTaskRetry(analysis, task);
       recoveries.set(task.id, recovery);
@@ -3373,6 +3441,7 @@ ${collapsed.tasks[0].checklist
       ...queue,
       tasks: queue.tasks.map((task) => {
         if (task.status !== "failed" && task.status !== "blocked") return task;
+        if (retryBudgetExhausted(task)) return task;
         const recovery = recoveries.get(task.id);
         // A manual "Continue" must resume, not restart. Read-loop tasks are
         // narrowed again; completed tasks and changed files are preserved.
@@ -4499,10 +4568,7 @@ ${collapsed.tasks[0].checklist
       });
     }
     const noEditTokenBurn = changedBefore === 0 && taskSpentTokens >= 300_000;
-    const hardTaskTokens = Math.max(
-      240_000,
-      taskBudgetForEffort(taskBudgetEffort(task)).tokens * 2,
-    );
+    const hardTaskTokens = hardTaskTokenCap(task);
     const failureText = `${result.summary ?? ""}\n${result.steps
       .map((step) => step.observation ?? "")
       .join("\n")}`;
