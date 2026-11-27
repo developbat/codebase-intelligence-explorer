@@ -7,6 +7,7 @@ import type { BrowserCheckStep } from "../../../shared/browserCheck";
 import type { AiProviderId } from "../../../shared/ai";
 import { chatComplete } from "./complete";
 import { resolveAgentRole } from "./settings";
+import { loadProjectRules } from "../projectRules";
 import { recordUsage } from "./usage";
 import { estimateUsageCost } from "./pricing";
 import { compactProjectBrainBrief, ensureProjectBrain } from "../projectBrain";
@@ -473,11 +474,15 @@ export async function diagnoseProject(
     model: options.model,
   });
   const context = await buildDiagnosisContext(analysis, goal, constraints);
+  const projectRules = await loadProjectRules(analysis.rootPath).catch(() => null);
   let rawText = "";
   let tokenUsage: ProjectDiagnosis["tokenUsage"] | undefined;
   try {
     const messages = [
-      { role: "system" as const, content: DIAGNOSIS_SYSTEM },
+      {
+        role: "system" as const,
+        content: DIAGNOSIS_SYSTEM + (projectRules ? `\n\n${projectRules.block}` : ""),
+      },
       {
         role: "user" as const,
         content: `${context}\n\nReturn the diagnosis JSON now. Write all strings in ${options.language ?? "the user's language"}.`,

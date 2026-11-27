@@ -39,6 +39,7 @@ import type {
 import { aiLanguageInstruction } from "../../../shared/ai";
 import { getGitBlame, getGitStatus, getFileDiff } from "../git";
 import { getDataDir, loadAnalysis, saveAnalysis } from "../store";
+import { loadProjectRules } from "../projectRules";
 import { analyzeProject } from "../analyzer";
 import { isWithin } from "../scanner";
 import { formatProjectFile } from "../formatter";
@@ -1504,13 +1505,14 @@ export async function runCodingTask(
   }
 
   const taskPrompt = await getPrompt("task.multi_file", projectId);
+  const projectRules = await loadProjectRules(analysis.rootPath).catch(() => null);
   const taskPromptContent = renderPrompt(taskPrompt.system, {
     language: aiLanguageInstruction("en"),
   });
   const messages: ChatMessage[] = [
     {
       role: "system",
-      content: taskPromptContent,
+      content: taskPromptContent + (projectRules ? `\n\n${projectRules.block}` : ""),
     },
     {
       role: "user",
@@ -1608,13 +1610,14 @@ export async function editSourceFile(
   ].join("\n");
 
   const editPrompt = await getPrompt(patchMode ? "edit.file_patch" : "edit.file", projectId);
+  const projectRules = await loadProjectRules(analysis.rootPath).catch(() => null);
   const editPromptContent = renderPrompt(editPrompt.system, {
     language: aiLanguageInstruction(options.language ?? "en"),
   });
   const messages: ChatMessage[] = [
     {
       role: "system",
-      content: editPromptContent,
+      content: editPromptContent + (projectRules ? `\n\n${projectRules.block}` : ""),
     },
     {
       role: "user",
@@ -1829,13 +1832,21 @@ export async function askProject(
     index: "",
   }));
   const skillsPrompt = renderSkillsForPrompt(chatSkills.skills);
+  const projectRules = await loadProjectRules(analysis.rootPath).catch(() => null);
+  if (projectRules) {
+    for (const file of projectRules.files.slice(0, 3)) {
+      contextFiles.push({ path: file, label: "Project rules" });
+    }
+  }
   const messages: ChatMessage[] = [
     {
       role: "system",
       content:
         renderPrompt(chatPrompt.system, {
           language: aiLanguageInstruction(options.language ?? "en"),
-        }) + (skillsPrompt ? `\n\n${skillsPrompt}` : ""),
+        }) +
+        (projectRules ? `\n\n${projectRules.block}` : "") +
+        (skillsPrompt ? `\n\n${skillsPrompt}` : ""),
     },
     ...(options.history ?? []).slice(-6),
     {
@@ -4644,6 +4655,14 @@ export async function runAgentTask(
     options.microEdit !== true &&
     (fastTask || mentionedSkill || selectedSkill);
   const skillsPrompt = includeSkills ? renderSkillsForPrompt(enabledSkills) : "";
+  const projectRules = await loadProjectRules(analysis.rootPath).catch(() => null);
+  if (projectRules) {
+    log(
+      "info",
+      "Project rules loaded",
+      `${projectRules.files.join(", ")} · ${projectRules.content.length} chars${projectRules.truncated ? " · truncated" : ""}`,
+    );
+  }
   const capabilityIndex = options.microEdit === true ? "" : skillLoad.index || "";
   if (skillLoad.mentions.length > 0) {
     log("info", "Skill mention", `${skillLoad.mentions.join(", ")} · used for this run only`);
@@ -4675,6 +4694,7 @@ export async function runAgentTask(
       language: languageInstruction,
     }) +
     (skillsPrompt ? `\n\n${skillsPrompt}` : "") +
+    (projectRules ? `\n\n${projectRules.block}` : "") +
     (capabilityIndex ? `\n\n${capabilityIndex}` : "") +
     "\n\nOutput protocol: reply with one JSON object per turn using action and args. For independent read-only work (read_file, find_in_file, search_code, list_files, diagnostics) you may batch up to 4 calls in one reply as {\"actions\":[{...},{...}]}; this saves a full context round-trip. Keep mutating actions to one per reply. Never use <commentary>, <analysis>, <thinking> tags, markdown fences, or prose outside the JSON. The JSON must be complete." +
     "\n\nVerification protocol: when the user asks why something is missing or broken, trace the real wiring (HTML <script>/<link>, imports, event handlers, selectors) and use browser_check/run_test_scenario for runtime proof. State the root cause with file:line evidence; never guess from feature names. For UI or game behavior, save a reusable scenario in .cie/agent/scenarios/<name>.json and run it with run_test_scenario. Do not repeat failures recorded in .cie/agent/LESSONS.md. If a tool call fails, correct its arguments (the file path key is \"path\") and retry the same tool in this run; never finish with a blocker for an error you can fix yourself. If a needed tool does not exist, create a project tool or a small script and use it. Before retrying a failed task, read the newest file under .cie/agent/runs/ to see the exact failed action and error instead of guessing. For timers, counters, toasts or end-screen text, verify stability with a browser_check step {\"action\":\"expectStable\",\"selector\":\"...\",\"durationMs\":800}; text that changes every animation frame means it is being rewritten inside requestAnimationFrame, not that the timer is too fast. Verify the REAL project entry page: a synthetic harness under .cie/ is not proof, even when it passes. If the target state is hard to reach, use an eval step on the real page to put it in that state, wait for delayed elements with waitForSelector, then assert them. When the user asks to apply your previous answer, treat its findings as authoritative and start editing; do not rescan the project." +

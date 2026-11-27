@@ -1520,6 +1520,13 @@ export function CodeStudio({
     () => analysis.files.filter((file) => /\.html?$/i.test(file.path)).map((file) => file.path),
     [analysis.files],
   );
+  const projectRuleFiles = useMemo(
+    () =>
+      analysis.files
+        .map((file) => file.path)
+        .filter((filePath) => /(^|\/)AGENTS\.md$/i.test(filePath)),
+    [analysis.files],
+  );
   const inventory = useMemo(() => {
     const counts = { html: 0, js: 0, css: 0, php: 0, python: 0, other: 0 };
     for (const file of analysis.files) {
@@ -3872,6 +3879,19 @@ export function CodeStudio({
               <span>{t("Project root")}</span>
               <strong>{analysis.projectName}</strong>
               <small>{analysis.rootPath}</small>
+            </div>
+            <div className="studio-project-block">
+              <span>{t("Project rules")}</span>
+              <strong>
+                {projectRuleFiles.length > 0
+                  ? projectRuleFiles.join(", ")
+                  : t("No AGENTS.md")}
+              </strong>
+              <small>
+                {projectRuleFiles.length > 0
+                  ? t("Loaded into agent and chat prompts.")
+                  : t("Add AGENTS.md to the project root to give the agent rules.")}
+              </small>
             </div>
             <div className="studio-project-stats">
               <span><strong>{analysis.stats.files}</strong> {t("files")}</span>
