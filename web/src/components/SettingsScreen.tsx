@@ -135,7 +135,34 @@ export function SettingsScreen({
   const { t, locale, locales, setLocale } = useI18n();
   const [tab, setTab] = useState<SettingsTab>(initialTab);
   const [autoSwitchBusy, setAutoSwitchBusy] = useState(false);
+  const [appInfo, setAppInfo] = useState<Awaited<ReturnType<typeof api.appVersion>> | null>(null);
+  const [updateInfo, setUpdateInfo] = useState<Awaited<ReturnType<typeof api.checkUpdate>> | null>(null);
+  const [updateBusy, setUpdateBusy] = useState(false);
   const screenRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!open || tab !== "general") return;
+    void api.appVersion().then(setAppInfo).catch(() => undefined);
+  }, [open, tab]);
+
+  async function checkForUpdates() {
+    if (updateBusy) return;
+    setUpdateBusy(true);
+    try {
+      setUpdateInfo(await api.checkUpdate());
+    } catch {
+      setUpdateInfo({
+        current: appInfo?.version ?? "0.0.0",
+        latest: null,
+        updateAvailable: false,
+        source: "unavailable",
+        releaseUrl: appInfo?.releaseUrl ?? null,
+        note: t("Update check failed. Check your network or Git remote."),
+      });
+    } finally {
+      setUpdateBusy(false);
+    }
+  }
 
   async function saveAutoSwitch(value: boolean) {
     if (!aiSettings || autoSwitchBusy) return;
@@ -307,6 +334,34 @@ export function SettingsScreen({
                       )}
                     />
                   </div>
+                </section>
+
+                <section className="settings-section">
+                  <h3>{t("App & updates")}</h3>
+                  <div className="settings-project-card">
+                    <div>
+                      <strong>B.A.D IDE {appInfo?.version ?? "…"}</strong>
+                      <code>
+                        {appInfo?.commit?.slice(0, 7) ?? "—"} · {appInfo?.branch ?? "—"} ·{" "}
+                        {appInfo?.platform ?? "—"}/{appInfo?.arch ?? "—"}
+                      </code>
+                    </div>
+                    <button className="ghost-button" onClick={() => void checkForUpdates()} disabled={updateBusy}>
+                      <RefreshCw size={12} className={updateBusy ? "spin" : ""} /> {t("Check for updates")}
+                    </button>
+                  </div>
+                  <p>
+                    {updateInfo?.note ??
+                      t(
+                        "Source checkouts can check Git release tags. Packaged builds update from signed Electron releases, never by pulling arbitrary files.",
+                      )}
+                  </p>
+                  {updateInfo?.latest ? (
+                    <p>
+                      {t("Latest")}: <code>{updateInfo.latest}</code>
+                      {updateInfo.updateAvailable ? ` · ${t("Update available")}` : ""}
+                    </p>
+                  ) : null}
                 </section>
 
                 <section className="settings-section">

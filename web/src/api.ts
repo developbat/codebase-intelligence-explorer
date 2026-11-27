@@ -127,6 +127,30 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  appVersion: () =>
+    request<{
+      version: string;
+      commit: string | null;
+      branch: string | null;
+      dirty: boolean;
+      remote: string | null;
+      releaseUrl: string | null;
+      platform: string;
+      arch: string;
+      node: string;
+      electron: string | null;
+    }>("/api/app/version"),
+
+  checkUpdate: () =>
+    request<{
+      current: string;
+      latest: string | null;
+      updateAvailable: boolean;
+      source: "git-tags" | "unavailable";
+      releaseUrl: string | null;
+      note: string;
+    }>("/api/app/update-check"),
+
   analyze: (projectPath: string) =>
     request<AnalysisResult>("/api/analyze", {
       method: "POST",

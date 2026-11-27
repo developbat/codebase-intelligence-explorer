@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { analyzeProject } from "./analyzer";
+import { checkGitUpdate, getAppVersionInfo } from "./appVersion";
 import {
   askProject,
   analyzeSymbol,
@@ -236,6 +237,22 @@ app.get("/favicon.ico", (_req, res) => {
 
 app.get("/api/health", (_req, res) => {
   res.json({ ok: true, name: "codebase-intelligence-explorer", version: "0.2.0" });
+});
+
+app.get("/api/app/version", async (_req, res) => {
+  try {
+    res.json(await getAppVersionInfo());
+  } catch (error) {
+    handleError(res, error, 400);
+  }
+});
+
+app.get("/api/app/update-check", async (_req, res) => {
+  try {
+    res.json(await checkGitUpdate());
+  } catch (error) {
+    handleError(res, error, 400);
+  }
 });
 
 app.get("/api/fs/list", async (req, res) => {
