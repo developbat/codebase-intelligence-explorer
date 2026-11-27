@@ -823,7 +823,7 @@ export function CodeStudio({
   const [testResult, setTestResult] = useState<TestRunResult | null>(null);
   const [testOutput, setTestOutput] = useState("");
   const testAbortRef = useRef<AbortController | null>(null);
-  const prefs = useStudioPrefs();
+  const prefs = useStudioPrefs(analysis.id);
   const testTimeout = prefs.testTimeout;
   const setTestTimeout = (value: number) => updateStudioPrefs({ testTimeout: value });
   const [testGenInstruction, setTestGenInstruction] = useState("");
@@ -841,10 +841,11 @@ export function CodeStudio({
     localStorage.setItem("cie:live-browser", liveBrowser ? "1" : "0");
   }, [liveBrowser]);
   const agentAllowWrite = prefs.agentAllowWrite;
-  const setAgentAllowWrite = (value: boolean) => updateStudioPrefs({ agentAllowWrite: value });
+  const setAgentAllowWrite = (value: boolean) =>
+    updateStudioPrefs({ agentAllowWrite: value }, analysis.id);
   const agentAllowCommands = prefs.agentAllowCommands;
   const setAgentAllowCommands = (value: boolean) =>
-    updateStudioPrefs({ agentAllowCommands: value });
+    updateStudioPrefs({ agentAllowCommands: value }, analysis.id);
   const [permissionQueue, setPermissionQueue] = useState<AiAgentPermissionRequest[]>([]);
   const [permissionBusy, setPermissionBusy] = useState(false);
   const permissionRequest = permissionQueue[0] ?? null;
@@ -4777,7 +4778,7 @@ export function CodeStudio({
             {footerTab === "chat" ? (
               <div className={`studio-composer is-${studioMode}`}>
 
-          <div className="studio-composer-perms" title={t("Applies to every project")}>
+          <div className="studio-composer-perms" title={t("Applies to this project")}>
             <span className="studio-perms-label">
               <ShieldCheck size={11} /> {t("Pre-approve")}
             </span>

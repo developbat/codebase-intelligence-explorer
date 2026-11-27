@@ -459,7 +459,7 @@ export function SettingsScreen({
                   <h3>{t("General approvals")}</h3>
                   <p>
                     {t(
-                      "These are pre-approvals. When off, the agent pauses and asks Allow once / Always allow / Deny before the action.",
+                      "Defaults for projects without their own override. When off, the agent pauses and asks Allow once / Always allow / Deny before the action. Code Studio can override these per project.",
                     )}
                   </p>
                   <div className="settings-toggle-list">
