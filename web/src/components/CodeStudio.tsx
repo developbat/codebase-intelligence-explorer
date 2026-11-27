@@ -912,7 +912,7 @@ export function CodeStudio({
   const chatHydratedRef = useRef(false);
   const skipChatSaveRef = useRef(false);
   const [summaryBusy, setSummaryBusy] = useState(false);
-  const [sidebarTab, setSidebarTab] = useState<"files" | "chat" | "tools" | "project">("chat");
+  const [sidebarTab, setSidebarTab] = useState<"files" | "chat">("chat");
   const [leftWidth, setLeftWidth] = useState(() => {
     const stored = Number(localStorage.getItem("cie:studio-left-width"));
     const width = typeof window === "undefined" ? 1280 : window.innerWidth;
@@ -2801,6 +2801,39 @@ export function CodeStudio({
     }
   }
 
+  async function editProjectRules() {
+    const target = projectRuleFiles[0] ?? "AGENTS.md";
+    if (projectRuleFiles.length === 0) {
+      const stack = analysis.frameworks?.length
+        ? analysis.frameworks.join(", ")
+        : analysis.tooling?.ecosystems?.join(", ") || "Describe the stack";
+      const starter = [
+        "# AGENTS.md",
+        "",
+        "## Stack",
+        `- ${stack}`,
+        "",
+        "## Rules",
+        "- Prefer existing project patterns and keep changes scoped.",
+        "- Run the detected tests/build before finishing.",
+        "- Ask before adding a new dependency or changing public behavior.",
+        "",
+      ].join("\n");
+      try {
+        await api.writeFile(analysis.id, target, starter);
+      } catch (requestError) {
+        setError(
+          requestError instanceof Error
+            ? requestError.message
+            : t("Could not create AGENTS.md."),
+        );
+        return;
+      }
+    }
+    await openFile(target);
+    onRescan?.();
+  }
+
   async function summarizeFullProject() {
     if (!active || summaryBusy) return;
     setSummaryBusy(true);
@@ -3690,14 +3723,8 @@ export function CodeStudio({
           <button className={sidebarTab === "chat" ? "is-active" : ""} onClick={() => setSidebarTab("chat")}>
             <MessageSquare size={12} /> {t("Chats")}
           </button>
-          <button className={sidebarTab === "project" ? "is-active" : ""} onClick={() => setSidebarTab("project")}>
-            <Info size={12} /> {t("Details")}
-          </button>
           <button className={sidebarTab === "files" ? "is-active" : ""} onClick={() => setSidebarTab("files")}>
             <Folder size={12} /> {t("Files")}
-          </button>
-          <button className={sidebarTab === "tools" ? "is-active" : ""} onClick={() => setSidebarTab("tools")}>
-            <ListChecks size={12} /> {t("Tools")}
           </button>
         </div>
 
@@ -3767,7 +3794,7 @@ export function CodeStudio({
               <span>{analysis.git?.branch ?? t("no Git")}</span>
             </div>
           </>
-        ) : sidebarTab === "chat" ? (
+        ) : (
           <div className="studio-side-chat">
             <div className="studio-side-chat-head">
               <strong>{t("Conversations")}</strong>
@@ -3831,186 +3858,6 @@ export function CodeStudio({
             <button className="studio-side-chat-new" onClick={createChatTab} disabled={chatBusy}>
               <Plus size={11} /> {t("New chat")}
             </button>
-          </div>
-        ) : sidebarTab === "tools" ? (
-          <div className="studio-side-tools">
-            <div className="studio-side-chat-head">
-              <strong>{t("Project tools")}</strong>
-              <button
-                onClick={() => {
-                  setProjectToolsBusy(true);
-                  void api
-                    .projectTools(analysis.id)
-                    .then(setProjectTools)
-                    .catch(() => undefined)
-                    .finally(() => setProjectToolsBusy(false));
-                }}
-                disabled={projectToolsBusy}
-                title={t("Refresh")}
-              >
-                {projectToolsBusy ? <Loader2 size={10} className="spin" /> : <RefreshCw size={10} />}
-              </button>
-            </div>
-            {projectTools && projectTools.tools.length > 0 ? (
-              <div className="studio-side-tool-list">
-                {projectTools.tools.map((tool) => (
-                  <div key={tool.name} className="studio-side-tool">
-                    <strong>{tool.name}</strong>
-                    <p>{tool.description}</p>
-                    <code>{tool.command}</code>
-                    <small>
-                      {tool.tags.join(" · ")}
-                      {tool.lastRunAt ? ` · ${new Date(tool.lastRunAt).toLocaleString()}` : ""}
-                    </small>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <p className="studio-side-tool-empty">
-                {t(
-                  "No tools yet. Ask the agent to create one; it will be saved under .cie/agent/tools and can be run with run_project_tool.",
-                )}
-              </p>
-            )}
-          </div>
-        ) : (
-          <div className="studio-project-panel">
-            <div className="studio-project-block">
-              <span>{t("Project root")}</span>
-              <strong>{analysis.projectName}</strong>
-              <small>{analysis.rootPath}</small>
-            </div>
-            <div className="studio-project-block">
-              <span>{t("Project rules")}</span>
-              <strong>
-                {projectRuleFiles.length > 0
-                  ? projectRuleFiles.join(", ")
-                  : t("No AGENTS.md")}
-              </strong>
-              <small>
-                {projectRuleFiles.length > 0
-                  ? t("Loaded into agent and chat prompts.")
-                  : t("Add AGENTS.md to the project root to give the agent rules.")}
-              </small>
-            </div>
-            <div className="studio-project-stats">
-              <span><strong>{analysis.stats.files}</strong> {t("files")}</span>
-              <span><strong>{analysis.stats.symbols}</strong> {t("symbols")}</span>
-              <span><strong>{analysis.stats.functions}</strong> {t("functions")}</span>
-              <span><strong>{analysis.stats.routes}</strong> {t("routes")}</span>
-            </div>
-            <div className="studio-inventory-grid">
-              <span><strong>{inventory.html}</strong> HTML</span>
-              <span><strong>{inventory.js}</strong> JS/TS</span>
-              <span><strong>{inventory.css}</strong> CSS</span>
-              <span><strong>{inventory.php}</strong> PHP</span>
-              <span><strong>{inventory.python}</strong> Python</span>
-              <span><strong>{inventory.other}</strong> {t("other")}</span>
-            </div>
-            {analysis.frameworks && analysis.frameworks.length > 0 ? (
-              <div className="studio-project-block">
-                <span>{t("Frameworks")}</span>
-                <div className="ai-chips">
-                  {analysis.frameworks.map((framework) => (
-                    <code key={framework} className="framework-chip">{framework}</code>
-                  ))}
-                </div>
-              </div>
-            ) : null}
-            {analysis.tooling ? (
-              <>
-                <div className="studio-project-block">
-                  <span>{t("Ecosystems")}</span>
-                  <strong>{analysis.tooling.ecosystems.join(", ") || t("none detected")}</strong>
-                  <small>{analysis.tooling.packageManagers.join(", ") || "—"}</small>
-                </div>
-                <div className="studio-project-block">
-                  <span>{t("Tooling")}</span>
-                  <strong>{analysis.tooling.testFramework ?? t("No test framework detected")}</strong>
-                  <small>{analysis.tooling.testCommands.join(" · ") || t("No test command detected")}</small>
-                </div>
-                {(analysis.tooling.typecheckCommands ?? []).length > 0 ? (
-                  <div className="studio-project-block">
-                    <span>{t("Typecheck commands")}</span>
-                    <small>{(analysis.tooling.typecheckCommands ?? []).join(" · ")}</small>
-                  </div>
-                ) : null}
-                {analysis.tooling.buildCommands.length > 0 ? (
-                  <div className="studio-project-block">
-                    <span>{t("Build commands")}</span>
-                    <small>{analysis.tooling.buildCommands.join(" · ")}</small>
-                  </div>
-                ) : null}
-                {analysis.tooling.lintCommands.length + analysis.tooling.formatCommands.length > 0 ? (
-                  <div className="studio-project-block">
-                    <span>{t("Lint & format")}</span>
-                    <small>
-                      {[...analysis.tooling.lintCommands, ...analysis.tooling.formatCommands].join(" · ")}
-                    </small>
-                  </div>
-                ) : null}
-                {analysis.tooling.manifests.length > 0 ? (
-                  <div className="studio-project-block">
-                    <span>{t("Manifests")}</span>
-                    <small>{analysis.tooling.manifests.join(", ")}</small>
-                  </div>
-                ) : null}
-              </>
-            ) : null}
-            <div className="studio-project-block">
-              <span>{t("Search index")}</span>
-              <strong>
-                {indexStatus?.building
-                  ? t("Building…")
-                  : indexStatus?.ready
-                    ? t("{count} documents", { count: indexStatus.documents })
-                    : t("Not indexed")}
-              </strong>
-              <small>
-                {indexStatus?.updatedAt
-                  ? `${new Date(indexStatus.updatedAt).toLocaleString()}${
-                      indexStatus.stale ? ` · ${t("stale")}` : indexStatus.partial ? ` · ${t("partial")}` : ""
-                    }`
-                  : t("Build the index for faster local search.")}
-              </small>
-            </div>
-            <div className="studio-project-block">
-              <span>{t("Git")}</span>
-              <strong>{analysis.git?.branch ?? t("no Git")}</strong>
-              <small>{analysis.git?.headSubject ?? ""}</small>
-            </div>
-            <div className="studio-project-block">
-              <span>{t("Tests")}</span>
-              <strong>{testDiscovery?.framework ?? t("No test framework detected")}</strong>
-              <small>{t("{count} test files", { count: testDiscovery?.testFileCount ?? 0 })}</small>
-            </div>
-            <button
-              className="studio-rescan"
-              disabled={!active || summaryBusy}
-              onClick={() => void summarizeFullProject()}
-            >
-              <Sparkles size={12} /> {t("Full project summary")}
-            </button>
-            <button
-              className="studio-rescan"
-              disabled={!active}
-              onClick={() =>
-                void askProject(t("Explain this project using the analyzed graph and key files."))
-              }
-            >
-              <BrainCircuit size={12} /> {t("Explain this project")}
-            </button>
-            <button className="studio-rescan" onClick={onRescan}>
-              <RefreshCw size={12} /> {t("Rescan project analysis")}
-            </button>
-            <div className="studio-warning">
-              <AlertTriangle size={13} />
-              <span>
-                {t(
-                  "Code Studio writes to disk. Every save creates a local backup under ~/.codebase-intelligence-explorer/editor-backups.",
-                )}
-              </span>
-            </div>
           </div>
         )}
       </aside>
@@ -6007,6 +5854,18 @@ export function CodeStudio({
           >
             <Eye size={11} /> {t("Preview")}
           </button>
+          <button
+            className={rightTab === "details" ? "is-active" : ""}
+            onClick={() => setRightTab("details")}
+          >
+            <Info size={11} /> {t("Details")}
+          </button>
+          <button
+            className={rightTab === "tools" ? "is-active" : ""}
+            onClick={() => setRightTab("tools")}
+          >
+            <ListChecks size={11} /> {t("Tools")}
+          </button>
           {rightTab === "progress" ? (
             <button
               className="is-active"
@@ -6065,6 +5924,22 @@ export function CodeStudio({
                 <MoreHorizontal size={12} />
               </summary>
               <div className="studio-right-more-menu">
+                <button
+                  onClick={(event) => {
+                    setRightTab("details");
+                    event.currentTarget.closest("details")?.removeAttribute("open");
+                  }}
+                >
+                  <Info size={11} /> {t("Details")}
+                </button>
+                <button
+                  onClick={(event) => {
+                    setRightTab("tools");
+                    event.currentTarget.closest("details")?.removeAttribute("open");
+                  }}
+                >
+                  <ListChecks size={11} /> {t("Tools")}
+                </button>
                 {!showRunTab ? (
                   <button
                     onClick={(event) => {
@@ -6098,7 +5973,7 @@ export function CodeStudio({
               </div>
             </details>
           ) : null}
-          {rightTab !== "preview" && rightTab !== "live" && rightTab !== "run" && rightTab !== "changes" && rightTab !== "assets" && rightTab !== "progress" && activeFile ? (
+          {rightTab !== "preview" && rightTab !== "live" && rightTab !== "run" && rightTab !== "changes" && rightTab !== "assets" && rightTab !== "progress" && rightTab !== "details" && rightTab !== "tools" && activeFile ? (
             <>
               <button
                 className="studio-right-icon"
@@ -6124,7 +5999,7 @@ export function CodeStudio({
               </button>
             </>
           ) : null}
-          {rightTab !== "preview" && rightTab !== "live" && rightTab !== "run" && rightTab !== "changes" && rightTab !== "assets" && rightTab !== "progress" ? (
+          {rightTab !== "preview" && rightTab !== "live" && rightTab !== "run" && rightTab !== "changes" && rightTab !== "assets" && rightTab !== "progress" && rightTab !== "details" && rightTab !== "tools" ? (
             <button
               className="studio-right-save"
               onClick={() => void saveFile()}
@@ -6402,6 +6277,190 @@ export function CodeStudio({
                 ) : null}
               </div>
             </div>
+          ) : rightTab === "details" ? (
+          <div className="studio-project-panel">
+            <div className="studio-project-block">
+              <span>{t("Project root")}</span>
+              <strong>{analysis.projectName}</strong>
+              <small>{analysis.rootPath}</small>
+            </div>
+            <div className="studio-project-block">
+              <span>{t("Project rules")}</span>
+              <strong>
+                {projectRuleFiles.length > 0
+                  ? projectRuleFiles.join(", ")
+                  : t("No AGENTS.md")}
+              </strong>
+              <small>
+                {projectRuleFiles.length > 0
+                  ? t("Loaded into agent and chat prompts.")
+                  : t("Add AGENTS.md to the project root to give the agent rules.")}
+              </small>
+              <button className="studio-rescan" onClick={() => void editProjectRules()}>
+                <FileCode2 size={12} />{" "}
+                {projectRuleFiles.length > 0 ? t("Edit AGENTS.md") : t("Create AGENTS.md")}
+              </button>
+            </div>
+            <div className="studio-project-stats">
+              <span><strong>{analysis.stats.files}</strong> {t("files")}</span>
+              <span><strong>{analysis.stats.symbols}</strong> {t("symbols")}</span>
+              <span><strong>{analysis.stats.functions}</strong> {t("functions")}</span>
+              <span><strong>{analysis.stats.routes}</strong> {t("routes")}</span>
+            </div>
+            <div className="studio-inventory-grid">
+              <span><strong>{inventory.html}</strong> HTML</span>
+              <span><strong>{inventory.js}</strong> JS/TS</span>
+              <span><strong>{inventory.css}</strong> CSS</span>
+              <span><strong>{inventory.php}</strong> PHP</span>
+              <span><strong>{inventory.python}</strong> Python</span>
+              <span><strong>{inventory.other}</strong> {t("other")}</span>
+            </div>
+            {analysis.frameworks && analysis.frameworks.length > 0 ? (
+              <div className="studio-project-block">
+                <span>{t("Frameworks")}</span>
+                <div className="ai-chips">
+                  {analysis.frameworks.map((framework) => (
+                    <code key={framework} className="framework-chip">{framework}</code>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+            {analysis.tooling ? (
+              <>
+                <div className="studio-project-block">
+                  <span>{t("Ecosystems")}</span>
+                  <strong>{analysis.tooling.ecosystems.join(", ") || t("none detected")}</strong>
+                  <small>{analysis.tooling.packageManagers.join(", ") || "—"}</small>
+                </div>
+                <div className="studio-project-block">
+                  <span>{t("Tooling")}</span>
+                  <strong>{analysis.tooling.testFramework ?? t("No test framework detected")}</strong>
+                  <small>{analysis.tooling.testCommands.join(" · ") || t("No test command detected")}</small>
+                </div>
+                {(analysis.tooling.typecheckCommands ?? []).length > 0 ? (
+                  <div className="studio-project-block">
+                    <span>{t("Typecheck commands")}</span>
+                    <small>{(analysis.tooling.typecheckCommands ?? []).join(" · ")}</small>
+                  </div>
+                ) : null}
+                {analysis.tooling.buildCommands.length > 0 ? (
+                  <div className="studio-project-block">
+                    <span>{t("Build commands")}</span>
+                    <small>{analysis.tooling.buildCommands.join(" · ")}</small>
+                  </div>
+                ) : null}
+                {analysis.tooling.lintCommands.length + analysis.tooling.formatCommands.length > 0 ? (
+                  <div className="studio-project-block">
+                    <span>{t("Lint & format")}</span>
+                    <small>
+                      {[...analysis.tooling.lintCommands, ...analysis.tooling.formatCommands].join(" · ")}
+                    </small>
+                  </div>
+                ) : null}
+                {analysis.tooling.manifests.length > 0 ? (
+                  <div className="studio-project-block">
+                    <span>{t("Manifests")}</span>
+                    <small>{analysis.tooling.manifests.join(", ")}</small>
+                  </div>
+                ) : null}
+              </>
+            ) : null}
+            <div className="studio-project-block">
+              <span>{t("Search index")}</span>
+              <strong>
+                {indexStatus?.building
+                  ? t("Building…")
+                  : indexStatus?.ready
+                    ? t("{count} documents", { count: indexStatus.documents })
+                    : t("Not indexed")}
+              </strong>
+              <small>
+                {indexStatus?.updatedAt
+                  ? `${new Date(indexStatus.updatedAt).toLocaleString()}${
+                      indexStatus.stale ? ` · ${t("stale")}` : indexStatus.partial ? ` · ${t("partial")}` : ""
+                    }`
+                  : t("Build the index for faster local search.")}
+              </small>
+            </div>
+            <div className="studio-project-block">
+              <span>{t("Git")}</span>
+              <strong>{analysis.git?.branch ?? t("no Git")}</strong>
+              <small>{analysis.git?.headSubject ?? ""}</small>
+            </div>
+            <div className="studio-project-block">
+              <span>{t("Tests")}</span>
+              <strong>{testDiscovery?.framework ?? t("No test framework detected")}</strong>
+              <small>{t("{count} test files", { count: testDiscovery?.testFileCount ?? 0 })}</small>
+            </div>
+            <button
+              className="studio-rescan"
+              disabled={!active || summaryBusy}
+              onClick={() => void summarizeFullProject()}
+            >
+              <Sparkles size={12} /> {t("Full project summary")}
+            </button>
+            <button
+              className="studio-rescan"
+              disabled={!active}
+              onClick={() =>
+                void askProject(t("Explain this project using the analyzed graph and key files."))
+              }
+            >
+              <BrainCircuit size={12} /> {t("Explain this project")}
+            </button>
+            <button className="studio-rescan" onClick={onRescan}>
+              <RefreshCw size={12} /> {t("Rescan project analysis")}
+            </button>
+            <div className="studio-warning">
+              <AlertTriangle size={13} />
+              <span>
+                {t(
+                  "Code Studio writes to disk. Every save creates a local backup under ~/.codebase-intelligence-explorer/editor-backups.",
+                )}
+              </span>
+            </div>
+          </div>
+          ) : rightTab === "tools" ? (
+          <div className="studio-side-tools">
+            <div className="studio-side-chat-head">
+              <strong>{t("Project tools")}</strong>
+              <button
+                onClick={() => {
+                  setProjectToolsBusy(true);
+                  void api
+                    .projectTools(analysis.id)
+                    .then(setProjectTools)
+                    .catch(() => undefined)
+                    .finally(() => setProjectToolsBusy(false));
+                }}
+                disabled={projectToolsBusy}
+                title={t("Refresh")}
+              >
+                {projectToolsBusy ? <Loader2 size={10} className="spin" /> : <RefreshCw size={10} />}
+              </button>
+            </div>
+            {projectTools && projectTools.tools.length > 0 ? (
+              <div className="studio-side-tool-list">
+                {projectTools.tools.map((tool) => (
+                  <div key={tool.name} className="studio-side-tool">
+                    <strong>{tool.name}</strong>
+                    <p>{tool.description}</p>
+                    <code>{tool.command}</code>
+                    <small>
+                      {tool.tags.join(" · ")}
+                      {tool.lastRunAt ? ` · ${new Date(tool.lastRunAt).toLocaleString()}` : ""}
+                    </small>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="studio-side-tool-empty">
+                {t(
+                  "No tools yet. Ask the agent to create one; it will be saved under .cie/agent/tools and can be run with run_project_tool.",
+                )}
+              </p>
+            )}
+          </div>
           ) : rightTab === "preview" ? (
             <div className="studio-right-preview">
               <div className="studio-preview-head">

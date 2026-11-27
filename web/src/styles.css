@@ -26768,3 +26768,18 @@ button.canvas-stat {
 .studio-composer-perms small.studio-perms-hint {
   color: #7f9cbd;
 }
+
+/* Details/Tools panels live in the right preview area now */
+.studio-right-body > .studio-project-panel,
+.studio-right-body > .studio-side-tools {
+  height: 100%;
+  max-height: 100%;
+}
+
+.studio-right-body > .studio-project-panel {
+  padding: 12px 14px 20px;
+}
+
+.studio-right-body > .studio-side-tools {
+  padding: 10px 12px;
+}
