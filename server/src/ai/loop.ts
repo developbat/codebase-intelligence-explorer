@@ -73,6 +73,7 @@ import {
   type DiagnoseResult,
 } from "./diagnosis";
 import { auditProjectConstraints } from "./constraintRules";
+import { auditCompletedWork } from "./completionAudit";
 import {
   RECOVERY_POLICY,
   buildResumeContract,
@@ -998,7 +999,7 @@ export function summaryAllowsNoChanges(summary: string): boolean {
   if (/\b(not complete|incomplete|not done|failed|missing|tamamlanmadı|yapılmadı|eksik)\b/i.test(summary)) {
     return false;
   }
-  return /already (?:present|exists|implemented|applied|there|complete|complete and|satisf(?:y|ies|ied)|fits|matches|implemented and verified)|no (?:further )?(?:code )?changes? (?:are |was |were )?(?:needed|required)|nothing needed to change|none needed|task[\s-]*\d*\s*(?:is\s*)?complete|görev[\s-]*\d*\s*tamamlandı|created and verified|verified|confirmed|nothing (?:was|is) (?:changed|rewritten)|no (?:changes|modifications) (?:made|required)|zaten (?:var|mevcut|tamam|tam|işlevsel|karşılan|karşılıyor|uyumlu|uygulanmış|uyguluyor|uyguluyordur|uygundur|eklenmiş|yapılmış|mevcutmuş)|değişiklik (?:gerekmiyor|yapılmadı)|(?:hiçbir )?dosya değiştirilmedi|değişmedi|gerek yok/i.test(
+  return /already (?:present|exists|implemented|applied|there|complete|complete and|satisf(?:y|ies|ied)|fits|matches|implemented and verified)|no (?:further )?(?:code )?changes? (?:are |was |were )?(?:needed|required)|nothing needed to change|none needed|task[\s-]*\d*\s*(?:is\s*)?complete|görev[\s-]*\d*\s*tamamlandı|created and verified|verified|confirmed|nothing (?:was|is) (?:changed|rewritten)|no (?:changes|modifications) (?:made|required)|no files? (?:was|is|were|are) changed|already (?:meets|satisfies|matches)|zaten (?:var|mevcut|tamam|tam|işlevsel|karşılan|karşılıyor|uyumlu|uygulanmış|uyguluyor|uyguluyordur|uygundur|eklenmiş|yapılmış|mevcutmuş)|değişiklik (?:gerekmiyor|yapılmadı)|(?:hiçbir )?dosya değiştirilmedi|değişmedi|gerek yok/i.test(
     summary,
   );
 }
@@ -1009,7 +1010,7 @@ export function summaryAllowsNoChanges(summary: string): boolean {
  * task that changed another file, so it must be checked per request.
  */
 export function summaryClaimsAlreadyPresent(summary: string): boolean {
-  return /already (?:present|exists|implemented|applied|there|complete|satisf(?:y|ies|ied)|fits|matches|renders|sits|works|has)|no (?:further )?(?:code )?changes? (?:are |was |were )?(?:needed|required)|nothing needed to change|none needed|nothing (?:was|is) (?:changed|rewritten)|no (?:changes|modifications) (?:made|required)|zaten (?:var|mevcut|tamam|tam|işlevsel|karşılan|karşılıyor|uyumlu|uygulanmış|uyguluyor|uyguluyordur|uygundur|eklenmiş|yapılmış|mevcutmuş)|değişiklik (?:gerekmiyor|yapılmadı)|(?:hiçbir )?dosya değiştirilmedi|değişmedi|gerek yok/i.test(
+  return /already (?:present|exists|implemented|applied|there|complete|satisf(?:y|ies|ied)|fits|matches|renders|sits|works|has)|no (?:further )?(?:code )?changes? (?:are |was |were )?(?:needed|required)|nothing needed to change|none needed|nothing (?:was|is) (?:changed|rewritten)|no (?:changes|modifications) (?:made|required)|no files? (?:was|is|were|are) changed|already (?:meets|satisfies|matches)|zaten (?:var|mevcut|tamam|tam|işlevsel|karşılan|karşılıyor|uyumlu|uygulanmış|uyguluyor|uyguluyordur|uygundur|eklenmiş|yapılmış|mevcutmuş)|değişiklik (?:gerekmiyor|yapılmadı)|(?:hiçbir )?dosya değiştirilmedi|değişmedi|gerek yok/i.test(
     summary,
   );
 }
@@ -2837,6 +2838,34 @@ export async function runProjectLoop(
   const workspaceMode: AiWorkspaceMode = options.workspaceMode ?? "build";
   let queue = await loadQueue(analysis.rootPath, projectId);
   const sameGoal = queue?.goal.trim() === goal.trim();
+  if (queue && sameGoal && options.retryFailed === true) {
+    const audit = await auditCompletedWork(analysis, queue).catch(() => null);
+    if (audit?.completed) {
+      queue = audit.queue;
+      await saveQueue(analysis.rootPath, queue);
+      emit({
+        type: "log",
+        entry: {
+          id: `log-${Date.now()}-continuation-audit`,
+          at: nowIso(),
+          level: "success",
+          label: "Continuation audit passed",
+          detail: `${audit.task?.id ?? "task"} · ${audit.reason} No model replay was needed.`,
+        },
+      });
+      emit({ type: "task", queue });
+      const result = aggregateResult(goal.trim(), queue, [], main.id, main.model);
+      emit({ type: "done", result });
+      return {
+        queue,
+        summary: result.summary,
+        completed: queue.tasks.filter((task) => task.status === "done").length,
+        failed: queue.tasks.filter((task) => task.status === "failed" || task.status === "blocked").length,
+        stopped: false,
+        stages: queue.stageUsage,
+      };
+    }
+  }
   if (queue && sameGoal) {
     const stalled = queue.tasks.filter(
       (task) =>

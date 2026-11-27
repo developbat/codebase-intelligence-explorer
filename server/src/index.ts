@@ -2406,11 +2406,33 @@ app.post("/api/projects/:id/ai/loop/stream", async (req, res) => {
         .slice(-8)
     : undefined;
   const existing = await getProjectTaskQueue(req.params.id).catch(() => null);
+  const requestedGoal = goal;
   const relation = decideTaskRelation({ instruction: goal, history, queue: existing });
   goal = relation.goal;
   history = relation.history ?? history;
   if (relation.retryFailed) retryFailed = true;
   if (relation.clarified) clarified = true;
+  // A manual "Continue"/"Retry failed" is authoritative: it targets the
+  // existing queue even if the relation model sees no conversational history.
+  if (
+    retryFailed &&
+    req.body?.replan !== true &&
+    existing &&
+    existing.status !== "completed" &&
+    existing.goal.trim() === requestedGoal.trim()
+  ) {
+    goal = existing.goal;
+    write({
+      type: "log",
+      entry: {
+        id: `log-${Date.now()}-continue-resume`,
+        at: new Date().toISOString(),
+        level: "info",
+        label: "Continue resume",
+        detail: `Manual retry targets the existing queue: ${existing.tasks.length} task(s), status ${existing.status}.`,
+      },
+    });
+  }
   write({
     type: "log",
     entry: {
