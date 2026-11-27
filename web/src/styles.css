@@ -26855,3 +26855,132 @@ button.canvas-stat {
   color: #8ba8ce;
   font-size: 9px;
 }
+
+/* Agent run checkpoints */
+.studio-checkpoints-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  height: 100%;
+  min-height: 0;
+  padding: 12px;
+  overflow-y: auto;
+}
+
+.studio-checkpoints-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: #b9d4f3;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.studio-checkpoints-head > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.studio-checkpoints-head > button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 22px;
+  padding: 0 8px;
+  border: 1px solid rgba(139, 168, 206, 0.28);
+  border-radius: 5px;
+  background: transparent;
+  color: #9db9dc;
+  font-size: 9px;
+  cursor: pointer;
+}
+
+.studio-checkpoint-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.studio-checkpoint {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 6px 10px;
+  align-items: start;
+  padding: 9px 10px;
+  border: 1px solid rgba(139, 168, 206, 0.22);
+  border-radius: 8px;
+  background: rgba(11, 18, 28, 0.65);
+}
+
+.studio-checkpoint-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.studio-checkpoint-main strong {
+  color: #dcecff;
+  font-size: 10px;
+  font-weight: 550;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.studio-checkpoint-main small {
+  color: #6f8bab;
+  font-size: 8px;
+}
+
+.studio-checkpoint > button {
+  height: 24px;
+  padding: 0 9px;
+  font-size: 9px;
+  white-space: nowrap;
+}
+
+.studio-checkpoint-files {
+  grid-column: 1 / -1;
+  color: #8ba8ce;
+  font-size: 8px;
+}
+
+.studio-checkpoint-files summary {
+  cursor: pointer;
+}
+
+.studio-checkpoint-files code {
+  display: block;
+  padding: 1px 0;
+  color: #a9c7e8;
+  font-family: var(--mono);
+  font-size: 8px;
+  overflow-wrap: anywhere;
+}
+
+.studio-checkpoint-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 180px;
+  padding: 20px;
+  color: #7f9cbd;
+  text-align: center;
+  font-size: 10px;
+}
+
+.studio-checkpoint-empty strong {
+  color: #cfe2ff;
+  font-size: 11px;
+}
+
+.studio-checkpoint-empty span {
+  max-width: 320px;
+  font-size: 9px;
+  line-height: 1.5;
+}

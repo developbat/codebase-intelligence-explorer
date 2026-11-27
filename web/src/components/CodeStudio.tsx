@@ -167,6 +167,7 @@ import type {
   ProjectTaskQueue,
   ProjectTaskStageUsage,
 } from "../../../shared/tasks";
+import type { ProjectCheckpoint } from "../../../shared/checkpoints";
 import type { ClarificationRequest, IntentAnalysis } from "../../../shared/intent";
 import type { BrowserCheckResult } from "../../../shared/browserCheck";
 import type { ProjectToolList } from "../../../shared/projectTools";
@@ -893,6 +894,11 @@ export function CodeStudio({
   const [chatLiveAnswer, setChatLiveAnswer] = useState("");
   const [taskQueue, setTaskQueue] = useState<ProjectTaskQueue | null>(null);
   const [taskHistory, setTaskHistory] = useState<ProjectTaskHistoryEntry[]>([]);
+  const [checkpoints, setCheckpoints] = useState<ProjectCheckpoint[] | null>(null);
+  const [checkpointsBusy, setCheckpointsBusy] = useState(false);
+  const [checkpointError, setCheckpointError] = useState<string | null>(null);
+  const [checkpointRestoreBusy, setCheckpointRestoreBusy] = useState<string | null>(null);
+  const [checkpointMessage, setCheckpointMessage] = useState<string | null>(null);
   const [progressRefreshing, setProgressRefreshing] = useState(false);
   const rightMoreRef = useRef<HTMLDetailsElement | null>(null);
   const [dismissedQueueAt, setDismissedQueueAt] = useState<string | null>(null);
@@ -3043,6 +3049,63 @@ export function CodeStudio({
       setError(requestError instanceof Error ? requestError.message : t("Could not reorder the tasks."));
     }
   }
+
+  async function refreshCheckpoints(): Promise<void> {
+    setCheckpointsBusy(true);
+    setCheckpointError(null);
+    try {
+      const result = await api.checkpoints(analysis.id);
+      setCheckpoints(result.checkpoints);
+    } catch (requestError) {
+      setCheckpointError(
+        requestError instanceof Error ? requestError.message : t("Could not load checkpoints."),
+      );
+    } finally {
+      setCheckpointsBusy(false);
+    }
+  }
+
+  async function restoreAgentCheckpoint(checkpoint: ProjectCheckpoint): Promise<void> {
+    if (
+      !window.confirm(
+        t("Restore every file changed by this run to its pre-run state? New files will be removed."),
+      )
+    ) {
+      return;
+    }
+    setCheckpointRestoreBusy(checkpoint.id);
+    setCheckpointMessage(null);
+    try {
+      const result = await api.restoreCheckpoint(analysis.id, checkpoint.id);
+      const paths = checkpoint.files.map((file) => file.path);
+      setCheckpointMessage(
+        result.failed.length > 0
+          ? t("Restored {restored}, removed {deleted}; {failed} file(s) failed.", {
+              restored: result.restored,
+              deleted: result.deleted,
+              failed: result.failed.length,
+            })
+          : t("Restored {restored} and removed {deleted} file(s).", {
+              restored: result.restored,
+              deleted: result.deleted,
+            }),
+      );
+      await refreshCheckpoints();
+      await refreshAgentFiles(paths);
+      await refreshChangeReport(false);
+      onRescan?.();
+    } catch (requestError) {
+      setError(
+        requestError instanceof Error ? requestError.message : t("Could not restore the checkpoint."),
+      );
+    } finally {
+      setCheckpointRestoreBusy(null);
+    }
+  }
+
+  useEffect(() => {
+    if (rightTab === "checkpoints") void refreshCheckpoints();
+  }, [rightTab, analysis.id]);
 
   function updateMentionQuery(value: string, cursor: number): void {
     const before = value.slice(0, Math.max(0, cursor));
@@ -5956,6 +6019,12 @@ export function CodeStudio({
           >
             <ListChecks size={11} /> {t("Tools")}
           </button>
+          <button
+            className={rightTab === "checkpoints" ? "is-active" : ""}
+            onClick={() => setRightTab("checkpoints")}
+          >
+            <History size={11} /> {t("Checkpoints")}
+          </button>
           {rightTab === "progress" ? (
             <button
               className="is-active"
@@ -6030,6 +6099,14 @@ export function CodeStudio({
                 >
                   <ListChecks size={11} /> {t("Tools")}
                 </button>
+                <button
+                  onClick={(event) => {
+                    setRightTab("checkpoints");
+                    event.currentTarget.closest("details")?.removeAttribute("open");
+                  }}
+                >
+                  <History size={11} /> {t("Checkpoints")}
+                </button>
                 {!showRunTab ? (
                   <button
                     onClick={(event) => {
@@ -6063,7 +6140,7 @@ export function CodeStudio({
               </div>
             </details>
           ) : null}
-          {rightTab !== "preview" && rightTab !== "live" && rightTab !== "run" && rightTab !== "changes" && rightTab !== "assets" && rightTab !== "progress" && rightTab !== "details" && rightTab !== "tools" && activeFile ? (
+          {rightTab !== "preview" && rightTab !== "live" && rightTab !== "run" && rightTab !== "changes" && rightTab !== "assets" && rightTab !== "progress" && rightTab !== "details" && rightTab !== "tools" && rightTab !== "checkpoints" && activeFile ? (
             <>
               <button
                 className="studio-right-icon"
@@ -6089,7 +6166,7 @@ export function CodeStudio({
               </button>
             </>
           ) : null}
-          {rightTab !== "preview" && rightTab !== "live" && rightTab !== "run" && rightTab !== "changes" && rightTab !== "assets" && rightTab !== "progress" && rightTab !== "details" && rightTab !== "tools" ? (
+          {rightTab !== "preview" && rightTab !== "live" && rightTab !== "run" && rightTab !== "changes" && rightTab !== "assets" && rightTab !== "progress" && rightTab !== "details" && rightTab !== "tools" && rightTab !== "checkpoints" ? (
             <button
               className="studio-right-save"
               onClick={() => void saveFile()}
@@ -6366,6 +6443,79 @@ export function CodeStudio({
                   </div>
                 ) : null}
               </div>
+            </div>
+          ) : rightTab === "checkpoints" ? (
+            <div className="studio-checkpoints-panel">
+              <div className="studio-checkpoints-head">
+                <span>
+                  <History size={11} /> {t("Checkpoints")}
+                </span>
+                <button onClick={() => void refreshCheckpoints()} disabled={checkpointsBusy}>
+                  {checkpointsBusy ? <Loader2 size={11} className="spin" /> : <RefreshCw size={11} />}{" "}
+                  {t("Refresh")}
+                </button>
+              </div>
+              {checkpointMessage ? (
+                <div className="studio-banner success">
+                  <CheckCircle2 size={12} /> {checkpointMessage}
+                </div>
+              ) : null}
+              {checkpointError ? (
+                <div className="studio-banner error">
+                  <AlertTriangle size={12} /> {checkpointError}
+                </div>
+              ) : null}
+              {checkpointsBusy && !checkpoints ? (
+                <div className="studio-checkpoint-empty">
+                  <Loader2 size={16} className="spin" />
+                  <span>{t("Loading checkpoints…")}</span>
+                </div>
+              ) : checkpoints && checkpoints.length > 0 ? (
+                <div className="studio-checkpoint-list">
+                  {checkpoints.map((checkpoint) => (
+                    <div className="studio-checkpoint" key={checkpoint.id}>
+                      <div className="studio-checkpoint-main">
+                        <strong>{checkpoint.goal || t("Agent run")}</strong>
+                        <small>
+                          {new Date(checkpoint.updatedAt).toLocaleString()} ·{" "}
+                          {checkpoint.files.length} {t("files")} · {checkpoint.status}
+                        </small>
+                      </div>
+                      <button
+                        className="primary-button"
+                        onClick={() => void restoreAgentCheckpoint(checkpoint)}
+                        disabled={checkpointRestoreBusy !== null}
+                      >
+                        {checkpointRestoreBusy === checkpoint.id ? (
+                          <Loader2 size={11} className="spin" />
+                        ) : (
+                          <Undo2 size={11} />
+                        )}{" "}
+                        {t("Restore")}
+                      </button>
+                      <details className="studio-checkpoint-files">
+                        <summary>{t("Files")}</summary>
+                        {checkpoint.files.map((file) => (
+                          <code key={file.path}>
+                            {file.existed ? "" : "+ "}
+                            {file.path}
+                          </code>
+                        ))}
+                      </details>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="studio-checkpoint-empty">
+                  <History size={18} />
+                  <strong>{t("No checkpoints yet")}</strong>
+                  <span>
+                    {t(
+                      "Every agent run that changes files appears here. Restore it to return the project to its pre-run state.",
+                    )}
+                  </span>
+                </div>
+              )}
             </div>
           ) : rightTab === "details" ? (
           <div className="studio-project-panel">

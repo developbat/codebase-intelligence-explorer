@@ -138,6 +138,7 @@ import {
   writeTerminalInput,
 } from "./terminals";
 import { readPreviewFile } from "./preview";
+import { listCheckpoints, restoreCheckpoint } from "./checkpoints";
 import { getCommitDetail, getCommitFileDiff, getCommitLog, getFileDiff, getGitStatus } from "./git";
 import { findProjectIcon } from "./icons";
 import { discoverTests, runTests } from "./tests";
@@ -3692,6 +3693,25 @@ app.post("/api/projects/:id/python-env", async (req, res) => {
     }
     const job = await startPythonEnvironment(analysis.id, analysis.rootPath);
     res.status(202).json({ job, status });
+  } catch (error) {
+    handleError(res, error, 400);
+  }
+});
+
+app.get("/api/projects/:id/checkpoints", async (req, res) => {
+  try {
+    res.json({ checkpoints: await listCheckpoints(req.params.id) });
+  } catch (error) {
+    handleError(res, error, 400);
+  }
+});
+
+app.post("/api/projects/:id/checkpoints/:checkpointId/restore", async (req, res) => {
+  try {
+    const analysis = await loadAnalysis(req.params.id);
+    res.json(
+      await restoreCheckpoint(analysis.id, analysis.rootPath, req.params.checkpointId),
+    );
   } catch (error) {
     handleError(res, error, 400);
   }

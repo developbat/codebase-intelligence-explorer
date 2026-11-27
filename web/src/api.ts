@@ -74,6 +74,7 @@ import type {
   GraphicResult,
 } from "../../shared/graphics";
 import type { ModelHealthReport } from "../../shared/modelHealth";
+import type { ProjectCheckpoint, RestoreCheckpointResult } from "../../shared/checkpoints";
 import type {
   MobileBootResult,
   MobileCheckOptions,
@@ -150,6 +151,14 @@ export const api = {
       releaseUrl: string | null;
       note: string;
     }>("/api/app/update-check"),
+
+  checkpoints: (id: string) =>
+    request<{ checkpoints: ProjectCheckpoint[] }>(`/api/projects/${id}/checkpoints`),
+
+  restoreCheckpoint: (id: string, checkpointId: string) =>
+    request<RestoreCheckpointResult>(`/api/projects/${id}/checkpoints/${checkpointId}/restore`, {
+      method: "POST",
+    }),
 
   analyze: (projectPath: string) =>
     request<AnalysisResult>("/api/analyze", {

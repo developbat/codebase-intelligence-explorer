@@ -41,6 +41,7 @@ import { getGitBlame, getGitStatus, getFileDiff } from "../git";
 import { getDataDir, loadAnalysis, saveAnalysis } from "../store";
 import { loadProjectRules } from "../projectRules";
 import { formatFileMentions, readFileMentions } from "./fileMentions";
+import { beginCheckpoint } from "../checkpoints";
 import { analyzeProject } from "../analyzer";
 import { isWithin } from "../scanner";
 import { formatProjectFile } from "../formatter";
@@ -4641,6 +4642,9 @@ export async function runAgentTask(
       : "";
   const requestedSkills = [...(options.intent?.skills ?? [])];
   const goalText = (options.goalText || instruction).trim();
+  const checkpoint = readOnlyMode
+    ? null
+    : await beginCheckpoint(projectId, analysis.rootPath, runId, goalText).catch(() => null);
   const skillLoad = await loadSkillsForPrompt(analysis.rootPath, projectId, goalText, {
     requested: requestedSkills.slice(0, 3),
   }).catch(() => ({
@@ -7093,6 +7097,7 @@ export async function runAgentTask(
               { preview },
             );
             if (!allowed) throw new Error("The user denied permission to apply mapped changes.");
+            await checkpoint?.remember(filePath);
             // eslint-disable-next-line no-await-in-loop
             const written = await writeSourceFile(projectId, analysis.rootPath, filePath, mapped.content);
             if (!changedFiles.includes(written.filePath)) changedFiles.push(written.filePath);
@@ -7281,6 +7286,8 @@ export async function runAgentTask(
           { destructive: true },
         );
         if (!renameAllowed) throw new Error("The user denied permission to rename this path.");
+        await checkpoint?.remember(fromPath);
+        await checkpoint?.remember(toPath);
         const renamed = await renameProjectPath(analysis.rootPath, fromPath, toPath);
         await renameIndexedPath(projectId, analysis.rootPath, renamed.from, renamed.to).catch(() => {
           // index update is best-effort
@@ -7305,6 +7312,7 @@ export async function runAgentTask(
           { destructive: true },
         );
         if (!deleteAllowed) throw new Error("The user denied permission to delete this path.");
+        await checkpoint?.remember(targetPath);
         const deleted = await deleteProjectPath(analysis.rootPath, targetPath);
         await removeIndexedPath(projectId, deleted.path).catch(() => {
           // index update is best-effort
@@ -7630,6 +7638,7 @@ export async function runAgentTask(
           },
         );
         if (!writeAllowed) throw new Error("The user denied permission to write this file.");
+        await checkpoint?.remember(filePath);
         const written = await writeSourceFile(projectId, analysis.rootPath, filePath, content);
         const effectiveChange = !previous || previous.content !== content;
         if (effectiveChange) changedFiles.push(written.filePath);
@@ -7663,6 +7672,7 @@ export async function runAgentTask(
           },
         );
         if (!replaceAllowed) throw new Error("The user denied permission to edit this file.");
+        await checkpoint?.remember(filePath);
         const written = await writeSourceFile(projectId, analysis.rootPath, filePath, nextContent);
         const effectiveChange = nextContent !== file.content;
         if (effectiveChange && !changedFiles.includes(written.filePath)) changedFiles.push(written.filePath);
@@ -7702,6 +7712,7 @@ export async function runAgentTask(
             },
           );
           if (!allowed) throw new Error("The user denied permission to append to this file.");
+          await checkpoint?.remember(filePath);
           const written = await writeSourceFile(projectId, analysis.rootPath, filePath, nextContent);
           const effectiveChange = nextContent !== (existing?.content ?? "");
           if (effectiveChange && !changedFiles.includes(written.filePath)) changedFiles.push(written.filePath);
@@ -7750,6 +7761,7 @@ export async function runAgentTask(
           },
         );
         if (!manyAllowed) throw new Error("The user denied permission to edit this file.");
+        await checkpoint?.remember(filePath);
         const written = await writeSourceFile(projectId, analysis.rootPath, filePath, nextContent);
         const effectiveChange = nextContent !== file.content;
         if (effectiveChange && !changedFiles.includes(written.filePath)) changedFiles.push(written.filePath);
@@ -7814,6 +7826,7 @@ export async function runAgentTask(
           "Run the project formatter and write the formatted file.",
         );
         if (!formatAllowed) throw new Error("The user denied permission to format this file.");
+        await checkpoint?.remember(filePath);
         const formatted = await formatProjectFile(projectId, analysis, filePath);
         if (formatted.exitCode !== 0 || !formatted.command) {
           throw new Error(formatted.stderr || "No formatter was detected for this file type.");
@@ -8446,6 +8459,8 @@ export async function runAgentTask(
   }).catch(() => {
     // health tracking must never break an agent run
   });
+
+  await checkpoint?.finalize();
 
   let changeReport: ChangeReport | undefined;
   if (!readOnlyMode && changedFiles.length > 0) {
