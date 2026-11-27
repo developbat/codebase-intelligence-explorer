@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { classifyChatQuestion, isChatQuestion } from "./ai/chatIntent";
+import { classifyChatQuestion, isChatQuestion, planChat } from "./ai/chatIntent";
 
 function intent(overrides: Record<string, unknown> = {}) {
   return {
@@ -101,4 +101,41 @@ test("an explanatory edit-labeled request still stays in chat", () => {
     ),
     false,
   );
+});
+
+test("capability gate narrows model, context, tools and research", () => {
+  const meta = planChat("sen tam olarak nesin, hafızan var mı?");
+  assert.equal(meta.mode, "meta");
+  assert.equal(meta.needsProjectContext, false);
+  assert.equal(meta.needsTools, false);
+  assert.equal(meta.promptId, "chat.meta");
+
+  const recent = planChat("son ne yaptık?");
+  assert.equal(recent.mode, "recent-work");
+  assert.equal(recent.needsModel, false);
+  assert.equal(recent.needsTools, false);
+
+  const code = planChat("game.js içindeki move fonksiyonu nasıl çalışıyor?");
+  assert.equal(code.mode, "project");
+  assert.equal(code.needsProjectContext, true);
+  assert.equal(code.needsTools, false);
+  assert.equal(code.promptId, "chat.answer");
+
+  const debugging = planChat("bu hatanın kök nedenini açıkla");
+  assert.equal(debugging.mode, "project");
+  assert.ok(debugging.skillSlugs.includes("root-cause-debugging"));
+
+  const action = planChat("duvar patlatma özelliği ekle");
+  assert.equal(action.mode, "action");
+  assert.equal(action.needsTools, true);
+
+  const research = planChat("web'de güncel DeepSeek fiyatlarını araştır");
+  assert.equal(research.mode, "research");
+  assert.equal(research.needsResearch, true);
+  assert.equal(research.needsTools, true);
+  assert.equal(research.promptId, "chat.research");
+
+  const general = planChat("merhaba");
+  assert.equal(general.mode, "general");
+  assert.equal(general.needsTools, false);
 });

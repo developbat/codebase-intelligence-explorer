@@ -78,7 +78,7 @@ import { resolvePermission } from "./ai/permissions";
 import { analyzeIntent, shouldRequestIntentConfirmation } from "./ai/intent";
 import { decideTaskRelation } from "./ai/taskRelation";
 import { isPureRecentWorkQuestion, renderRecentWorkAnswer, summarizeWorkState } from "./ai/workState";
-import { classifyChatQuestion, isChatQuestion, type ChatQuestionKind } from "./ai/chatIntent";
+import { planChat, type ChatQuestionKind } from "./ai/chatIntent";
 import { listPlans, readPlan } from "./plans";
 import type { IntentAnalysis } from "../../shared/intent";
 import type { AiWorkspaceMode } from "../../shared/ai";
@@ -1862,22 +1862,80 @@ async function buildQuestionChatContext(
   if (kind === "recent-work") return workState;
   const analysis = await loadAnalysis(projectId).catch(() => null);
   if (!analysis) return workState;
-  const [brain, map, snippets] = await Promise.all([
+  const [brain, map, snippets, excerpts] = await Promise.all([
     ensureProjectBrain(analysis)
       .then((value) => compactProjectBrainBrief(value))
       .catch(() => ""),
     ensureProjectMap(analysis).catch(() => ""),
     agentSeedContext(analysis, question, undefined, null).catch(() => ""),
+    chatSourceExcerpts(analysis, question).catch(() => ""),
   ]);
   return [
     workState,
+    excerpts ? `Targeted source excerpts:\n${excerpts}` : "",
     brain ? `Project brain:\n${brain}` : "",
-    map ? `Project map:\n${map.slice(0, 4_000)}` : "",
-    snippets ? `Relevant project snippets:\n${snippets.slice(0, 4_000)}` : "",
+    map ? `Project map:\n${map.slice(0, 3_000)}` : "",
+    snippets ? `Relevant project snippets:\n${snippets.slice(0, 3_000)}` : "",
   ]
     .filter(Boolean)
     .join("\n\n")
-    .slice(0, 12_000);
+    .slice(0, 15_000);
+}
+
+async function chatSourceExcerpts(
+  analysis: Awaited<ReturnType<typeof loadAnalysis>>,
+  question: string,
+): Promise<string> {
+  const blocks: string[] = [];
+  const escape = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const relatedSymbols = [
+    { question: /(?:duvar|wall|patlat|blast|break|kır)/i, symbol: /(?:blast|wall|break|patlat)/i },
+    { question: /(?:hareket|move|yürü|walk|adım)/i, symbol: /(?:move|walk)/i },
+    { question: /(?:enerji|energy|maliyet|cost|şarj)/i, symbol: /(?:energy|cost|shot)/i },
+    { question: /(?:skor|score|puan)/i, symbol: /score/i },
+    { question: /(?:respawn|topla|pickup|reward|ödül)/i, symbol: /(?:respawn|reward|collect)/i },
+  ]
+    .filter((entry) => entry.question.test(question))
+    .map((entry) => entry.symbol);
+  const directSymbols = analysis.symbols.filter((symbol) => {
+    if (!symbol.name || symbol.name.length < 2) return false;
+    return new RegExp(`\\b${escape(symbol.name)}\\b`, "i").test(question);
+  });
+  const related = analysis.symbols.filter((symbol) =>
+    relatedSymbols.some((pattern) => pattern.test(symbol.name)),
+  );
+  const seenSymbols = new Set<string>();
+  const symbols = [...directSymbols, ...related]
+    .filter((symbol) => {
+      if (seenSymbols.has(symbol.id)) return false;
+      seenSymbols.add(symbol.id);
+      return true;
+    })
+    .slice(0, 4);
+  for (const symbol of symbols) {
+    const file = await readSourceFile(analysis.rootPath, symbol.filePath).catch(() => null);
+    if (!file) continue;
+    const lines = file.content.split("\n");
+    const start = Math.max(0, symbol.startLine - 6);
+    const end = Math.min(lines.length, symbol.endLine + 8);
+    blocks.push(
+      `${symbol.filePath}:${start + 1}-${end}\n${lines.slice(start, end).join("\n")}`,
+    );
+  }
+  const filePaths = [...new Set(
+    [...question.matchAll(/([\w./-]+\.(?:[cm]?[jt]sx?|vue|svelte|astro|html?|css|scss|php|py|go|rs|java|kt|cs|rb|swift|json|toml|ya?ml|md))/g)].map(
+      (match) => match[1],
+    ),
+  )]
+    .filter((filePath) => analysis.files.some((file) => file.path === filePath))
+    .slice(0, 2);
+  for (const filePath of filePaths) {
+    const file = await readSourceFile(analysis.rootPath, filePath).catch(() => null);
+    if (!file) continue;
+    const source = file.content.length <= 12_000 ? file.content : file.content.slice(0, 12_000);
+    blocks.push(`${filePath} (source excerpt)\n${source}`);
+  }
+  return blocks.join("\n\n").slice(0, 12_000);
 }
 
 app.post("/api/projects/:id/ai/chat", async (req, res) => {
@@ -2625,9 +2683,14 @@ app.post("/api/projects/:id/ai/loop/stream", async (req, res) => {
     return;
   }
 
-  if (intent && isChatQuestion(intent, goal)) {
+  const chatPlan = intent ? planChat(goal, intent) : null;
+  const chatMode =
+    chatPlan && chatPlan.mode !== "action" && chatPlan.mode !== "research"
+      ? (chatPlan.mode as ChatQuestionKind)
+      : null;
+  if (intent && chatPlan && chatMode) {
     try {
-      const chatKind = classifyChatQuestion(goal, intent);
+      const chatKind = chatMode;
       const recentWorkQuestion = chatKind === "recent-work";
       const chatDetail =
         chatKind === "recent-work"
@@ -2674,21 +2737,24 @@ app.post("/api/projects/:id/ai/loop/stream", async (req, res) => {
           },
         });
       } else {
+        const chatProvider =
+          typeof req.body?.provider === "string" ? req.body.provider : intentProvider ?? "intent";
+        const chatModel =
+          typeof req.body?.model === "string" ? req.body.model : intentModel ?? "intent";
         const chatContext = await buildQuestionChatContext(req.params.id, goal, chatKind);
         write({
           type: "start",
-          provider:
-            typeof req.body?.provider === "string" ? req.body.provider : intentProvider ?? "intent",
-          model:
-            typeof req.body?.model === "string" ? req.body.model : intentModel ?? "intent",
+          provider: chatProvider,
+          model: chatModel,
         });
         const result = await answerGeneralChat(req.params.id, goal, {
-          provider:
-            typeof req.body?.provider === "string" ? (req.body.provider as AiProviderId) : undefined,
-          model: typeof req.body?.model === "string" ? req.body.model : undefined,
+          provider: chatProvider as AiProviderId,
+          model: chatModel,
           language: typeof req.body?.language === "string" ? req.body.language : undefined,
           intent,
           workState: chatContext || undefined,
+          promptId: chatPlan.promptId,
+          skillSlugs: chatPlan.skillSlugs,
           history,
           onToken: (chunk) => write({ type: "token", text: chunk }),
         });
@@ -2704,6 +2770,19 @@ app.post("/api/projects/:id/ai/loop/stream", async (req, res) => {
       res.end();
     }
     return;
+  }
+
+  if (chatPlan?.mode === "research") {
+    write({
+      type: "log",
+      entry: {
+        id: `log-${Date.now()}-research-gate`,
+        at: new Date().toISOString(),
+        level: "info",
+        label: "Research gate",
+        detail: "Web/current-information request routed to research mode instead of chat.",
+      },
+    });
   }
 
   try {
@@ -2723,9 +2802,13 @@ app.post("/api/projects/:id/ai/loop/stream", async (req, res) => {
         replan: req.body?.replan === true,
         retryFailed,
         clarified,
-        workspaceMode: ["ask", "plan", "build", "research"].includes(req.body?.workspaceMode)
-          ? (req.body.workspaceMode as AiWorkspaceMode)
-          : undefined,
+        workspaceMode:
+          chatPlan?.mode === "research" &&
+          (!req.body?.workspaceMode || req.body.workspaceMode === "build")
+            ? "research"
+            : ["ask", "plan", "build", "research"].includes(req.body?.workspaceMode)
+              ? (req.body.workspaceMode as AiWorkspaceMode)
+              : undefined,
         tokenBudget: Number(req.body?.tokenBudget) || undefined,
         costBudgetUsd: Number(req.body?.costBudgetUsd) || undefined,
         intent,

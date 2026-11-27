@@ -1,0 +1,188 @@
+{
+  "version": 1,
+  "description": "Global chat capability/routing eval. Deterministic: no model calls, no project-specific data.",
+  "cases": [
+    {
+      "id": "meta-tr",
+      "instruction": "sen tam olarak nesin? hafızan var mı, ne yapabilirsin?",
+      "expect": {
+        "mode": "meta",
+        "needsModel": true,
+        "needsProjectContext": false,
+        "needsTools": false,
+        "needsResearch": false,
+        "promptId": "chat.meta"
+      }
+    },
+    {
+      "id": "meta-en",
+      "instruction": "what are you and what can you do? do you have memory?",
+      "expect": {
+        "mode": "meta",
+        "needsProjectContext": false,
+        "needsTools": false,
+        "promptId": "chat.meta"
+      }
+    },
+    {
+      "id": "recent-work-tr",
+      "instruction": "son ne yaptık?",
+      "expect": {
+        "mode": "recent-work",
+        "needsModel": false,
+        "needsProjectContext": false,
+        "needsTools": false,
+        "promptId": "chat.work"
+      }
+    },
+    {
+      "id": "recent-work-en",
+      "instruction": "what did we do last?",
+      "expect": {
+        "mode": "recent-work",
+        "needsModel": false,
+        "needsTools": false,
+        "promptId": "chat.work"
+      }
+    },
+    {
+      "id": "project-code-tr",
+      "instruction": "game.js içindeki move fonksiyonu nasıl çalışıyor?",
+      "expect": {
+        "mode": "project",
+        "needsProjectContext": true,
+        "needsTools": false,
+        "needsResearch": false,
+        "promptId": "chat.answer"
+      }
+    },
+    {
+      "id": "project-code-en",
+      "instruction": "explain how the move function works in game.js",
+      "expect": {
+        "mode": "project",
+        "needsProjectContext": true,
+        "needsTools": false,
+        "promptId": "chat.answer"
+      }
+    },
+    {
+      "id": "project-debug-skill",
+      "instruction": "bu hatanın kök nedenini açıkla",
+      "expect": {
+        "mode": "project",
+        "needsProjectContext": true,
+        "needsTools": false,
+        "promptId": "chat.answer",
+        "skillSlugsInclude": ["root-cause-debugging"]
+      }
+    },
+    {
+      "id": "project-security-skill",
+      "instruction": "bu API'de güvenlik sorunu var mı, açıkla",
+      "expect": {
+        "mode": "project",
+        "needsProjectContext": true,
+        "promptId": "chat.answer",
+        "skillSlugsInclude": ["security-audit"]
+      }
+    },
+    {
+      "id": "project-a11y-skill",
+      "instruction": "erişilebilirlik ve kontrast sorunlarını incele",
+      "expect": {
+        "mode": "project",
+        "needsProjectContext": true,
+        "promptId": "chat.answer",
+        "skillSlugsInclude": ["accessibility-audit"]
+      }
+    },
+    {
+      "id": "general-tr",
+      "instruction": "merhaba, nasılsın?",
+      "expect": {
+        "mode": "general",
+        "needsProjectContext": false,
+        "needsTools": false,
+        "promptId": "chat.general"
+      }
+    },
+    {
+      "id": "general-en",
+      "instruction": "thanks, that helps",
+      "expect": {
+        "mode": "general",
+        "needsProjectContext": false,
+        "needsTools": false,
+        "promptId": "chat.general"
+      }
+    },
+    {
+      "id": "action-add-tr",
+      "instruction": "duvar patlatma özelliği ekle",
+      "expect": {
+        "mode": "action",
+        "needsProjectContext": true,
+        "needsTools": true,
+        "promptId": "agent.auto"
+      }
+    },
+    {
+      "id": "action-add-en",
+      "instruction": "can you add a restart button to the HUD?",
+      "expect": {
+        "mode": "action",
+        "needsProjectContext": true,
+        "needsTools": true
+      }
+    },
+    {
+      "id": "action-run",
+      "instruction": "testleri çalıştır ve sonucu söyle",
+      "expect": {
+        "mode": "action",
+        "needsTools": true
+      }
+    },
+    {
+      "id": "action-edit-and-explain",
+      "instruction": "kodu düzelt ve neden bozuk olduğunu açıkla",
+      "expect": {
+        "mode": "action",
+        "needsTools": true
+      }
+    },
+    {
+      "id": "research-tr",
+      "instruction": "web'de güncel DeepSeek fiyatlarını araştır",
+      "expect": {
+        "mode": "research",
+        "needsModel": true,
+        "needsProjectContext": false,
+        "needsTools": true,
+        "needsResearch": true,
+        "promptId": "chat.research"
+      }
+    },
+    {
+      "id": "research-en",
+      "instruction": "search the web for the latest model pricing",
+      "expect": {
+        "mode": "research",
+        "needsTools": true,
+        "needsResearch": true,
+        "promptId": "chat.research"
+      }
+    },
+    {
+      "id": "how-to-not-action",
+      "instruction": "bu hatayı nasıl düzeltebilirim?",
+      "expect": {
+        "mode": "project",
+        "needsTools": false,
+        "needsProjectContext": true,
+        "promptId": "chat.answer"
+      }
+    }
+  ]
+}

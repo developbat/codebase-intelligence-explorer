@@ -1835,51 +1835,138 @@ export async function answerGeneralChat(
     history?: { role: "user" | "assistant"; content: string }[];
     intent?: IntentAnalysis;
     workState?: string;
+    promptId?: string;
+    skillSlugs?: string[];
     onToken?: (chunk: string) => void;
   } = {},
 ): Promise<AiAgentResult> {
   const config = await resolveProvider(options.provider, options.model);
+  const language = options.language ?? "en";
+  const inlineSystem = [
+    "You are B.A.D IDE's embedded assistant: a research and code-understanding assistant inside a local IDE.",
+    "You have project-scoped persistent memory in this workspace: project brain, task history and saved scenarios. You do not have global personal memory or memory across projects; say that precisely instead of claiming no memory at all.",
+    "Use the supplied project context when it is present. Do not claim you need to inspect the project if the context already answers the question; if it is insufficient, name the exact file, symbol or range that is missing.",
+    "Chat is read-only. Code Studio performs file edits and commands. If the user asks for a code change, say it belongs in Code Studio and offer a narrower task; do not claim the chat edited files.",
+    "Do not claim web browsing, tools or live data unless a tool actually ran in this request.",
+  ].join("\n");
+  const promptSystem = options.promptId
+    ? renderPrompt((await getPrompt(options.promptId, projectId)).system, {
+        language: aiLanguageInstruction(language),
+      })
+    : `${inlineSystem}\n${aiLanguageInstruction(language)}`;
+  let skillText = "";
+  if (options.skillSlugs && options.skillSlugs.length > 0) {
+    const analysis = await loadAnalysis(projectId).catch(() => null);
+    if (analysis) {
+      const skillLoad = await loadSkillsForPrompt(analysis.rootPath, projectId, instruction, {
+        requested: options.skillSlugs,
+      }).catch(() => null);
+      if (skillLoad) {
+        skillText = renderSkillsForPrompt(skillLoad.skills).slice(0, 5_000);
+      }
+    }
+  }
+  const systemContent = [
+    promptSystem,
+    "Chat mode: never output tool calls, JSON actions, XML, DSML or function calls. Answer in Markdown from the supplied context; if it is insufficient, say exactly which file, symbol or range is missing.",
+    "Return only the final user-facing answer. Do not include your chain of thought, planning notes, or phrases like 'The user asks', 'I have', 'I must' or 'Let me'. If you need to reason, do it silently.",
+    options.intent?.normalizedRequest
+      ? `Interpreted request (canonical): ${options.intent.normalizedRequest}`
+      : "",
+    options.intent?.behaviors?.length
+      ? `Requested behaviors: ${options.intent.behaviors
+          .map((behavior) => `${behavior.action} ${behavior.target}${behavior.details ? ` (${behavior.details})` : ""}`)
+          .join("; ")}`
+      : "",
+    options.intent?.constraints?.length
+      ? `Constraints: ${options.intent.constraints.join("; ")}`
+      : "",
+    skillText ? `Relevant skill guidance:\n${skillText}` : "",
+    options.workState ?? "",
+  ]
+    .filter(Boolean)
+    .join("\n\n");
   const messages: ChatMessage[] = [
-    {
-      role: "system",
-      content: [
-        "You are B.A.D IDE's embedded assistant: a research and code-understanding assistant inside a local IDE.",
-        "You have project-scoped persistent memory in this workspace: project brain, task history and saved scenarios. You do not have global personal memory or memory across projects; say that precisely instead of claiming no memory at all.",
-        "Use the supplied project context when it is present. Do not claim you need to inspect the project if the context already answers the question; if it is insufficient, name the exact file, symbol or range that is missing.",
-        "Chat is read-only. Code Studio performs file edits and commands. If the user asks for a code change, say it belongs in Code Studio and offer a narrower task; do not claim the chat edited files.",
-        "Do not claim web browsing, tools or live data unless a tool actually ran in this request.",
-        options.intent?.normalizedRequest
-          ? `Interpreted request (canonical): ${options.intent.normalizedRequest}`
-          : "",
-        options.intent?.behaviors?.length
-          ? `Requested behaviors: ${options.intent.behaviors
-              .map((behavior) => `${behavior.action} ${behavior.target}${behavior.details ? ` (${behavior.details})` : ""}`)
-              .join("; ")}`
-          : "",
-        options.intent?.constraints?.length
-          ? `Constraints: ${options.intent.constraints.join("; ")}`
-          : "",
-        options.workState ?? "",
-        aiLanguageInstruction(options.language ?? "en"),
-      ].join("\n"),
-    },
+    { role: "system", content: systemContent },
     ...selectHistory(options.history, "recent"),
     { role: "user", content: instruction.trim() },
   ];
-  const completion = await chatCompleteTracked(
+  const streamFirst = options.promptId === "chat.answer" ? undefined : options.onToken;
+  const stripReasoningTail = (value: string): string => {
+    const markers = [
+      /\n\s*(?:The user wants me|I need to continue|I'll continue|I should continue|Actually,? careful|I must say|Let me continue|We need to continue)\b/i,
+    ];
+    let cut = value.length;
+    for (const marker of markers) {
+      const index = value.search(marker);
+      if (index > 0) cut = Math.min(cut, index);
+    }
+    return value.slice(0, cut).trim();
+  };
+  const maxTokens = options.promptId === "chat.answer" ? 2_200 : 900;
+  let completion = await chatCompleteTracked(
     projectId,
     config,
     messages,
-    { maxTokens: 900, temperature: 0.4, onToken: options.onToken },
+    { maxTokens, temperature: 0.4, onToken: streamFirst },
     "chat",
   );
+  const looksLikeToolCall = (value: string): boolean => {
+    const text = value.trim();
+    if (!text) return false;
+    return (
+      /^\s*\{[\s\S]{0,400}"(?:action|tool|args|name)"\s*:/i.test(text) ||
+      /<tool_call>|<\/?function|DSML/i.test(text)
+    );
+  };
+  const looksLikeReasoning = (value: string): boolean => {
+    const head = value.trim().slice(0, 280);
+    return (
+      /^(?:the user|i (?:have|need|must|should|will|can't|cannot|am going)|let me|we (?:need|should)|first,? i|looking at|i'm going to)\b/i.test(
+        head,
+      ) ||
+      /^(?:kullanıcı|önce|şimdi|elimde|ben)\b/i.test(head) &&
+        /\b(?:yapmalıyım|söylemeliyim|bakmalıyım|i need|i must|i should)\b/i.test(head)
+    );
+  };
+  let answerText = stripReasoningTail(completion.text.trim());
+  if (looksLikeToolCall(answerText) || looksLikeReasoning(answerText)) {
+    const retry = await chatCompleteTracked(
+      projectId,
+      config,
+      [
+        {
+          role: "system",
+          content: `${systemContent}\n\nIMPORTANT: Your previous reply was internal reasoning or a tool call, not a user-facing answer. Chat cannot run tools. Return ONLY the final Markdown answer. Do not restate the request or say 'The user asks', 'I have', 'I must' or 'Let me'. If the supplied context is insufficient, name the missing file, symbol or range.`,
+        },
+        ...selectHistory(options.history, "recent"),
+        { role: "user", content: instruction.trim() },
+      ],
+      { maxTokens: 1_200, temperature: 0.2 },
+      "chat",
+    );
+    completion = {
+      ...retry,
+      tokenUsage: {
+        inputTokens: completion.tokenUsage.inputTokens + retry.tokenUsage.inputTokens,
+        outputTokens: completion.tokenUsage.outputTokens + retry.tokenUsage.outputTokens,
+        totalTokens: completion.tokenUsage.totalTokens + retry.tokenUsage.totalTokens,
+      },
+    };
+    answerText = stripReasoningTail(retry.text.trim());
+    if (looksLikeToolCall(answerText) || looksLikeReasoning(answerText)) {
+      answerText = /^tr/i.test(language)
+        ? "Bu soruyu yanıtlamak için sağlanan bağlam yetersiz. Lütfen dosya/sembol belirt; Code Studio ile inceleyebiliriz."
+        : "The supplied context is insufficient for this question. Name the file or symbol, or ask Code Studio to inspect it.";
+    }
+  }
   const costUsd = await estimateUsageCost(config.id, config.model, completion.tokenUsage).catch(
     () => undefined,
   );
   const inputChars = messages.reduce((total, message) => total + message.content.length, 0);
   return {
     instruction,
-    summary: completion.text.trim(),
+    summary: answerText,
     steps: [],
     changedFiles: [],
     ranCommands: [],
