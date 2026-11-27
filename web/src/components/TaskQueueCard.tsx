@@ -9,6 +9,7 @@ import {
   Loader2,
   MinusCircle,
   Pencil,
+  Play,
   Save,
   Trash2,
   X,
@@ -324,9 +325,16 @@ export function TaskQueueCard({
           {t("Context notes")}: <code>{queue.contextPath.split("/").pop()}</code>
         </button>
         {failed > 0 ? (
-          <span className="task-queue-retry-note">
-            {t("Replaying the same goal is disabled. Write a narrower task or open Reports.")}
-          </span>
+          <div className="task-queue-retry-actions">
+            {onRetryFailed ? (
+              <button className="ghost-button" onClick={onRetryFailed}>
+                <Play size={10} /> {t("Continue remaining work")}
+              </button>
+            ) : null}
+            <span className="task-queue-retry-note">
+              {t("Resumes incomplete work; completed files are preserved.")}
+            </span>
+          </div>
         ) : null}
 
       </div>

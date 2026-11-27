@@ -19,28 +19,50 @@ jobs:
         include:
           - os: macos-latest
             label: macOS (arm64)
-            command: npm run package:mac
+            builder: --mac dmg zip
           - os: windows-latest
             label: Windows (x64)
-            command: npm run package:win
+            builder: --win nsis --x64
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
-          node-version: 20
+          node-version: 24
           cache: npm
 
       - run: npm ci
 
-      # Unsigned builds. macOS auto-update requires a Developer ID signature
-      # and notarization; add signing secrets and remove this env to enable it.
-      - name: Build installers
-        run: ${{ matrix.command }}
+      # Unsigned builds. For a signed macOS release, add CSC_LINK/CSC_KEY_PASSWORD
+      # and APPLE_ID/APPLE_APP_SPECIFIC_PASSWORD/APPLE_TEAM_ID secrets, remove
+      # CSC_IDENTITY_AUTO_DISCOVERY, and use `npm run package:mac:signed`.
+      - name: Build web
+        run: npm run build
         env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Bundle server
+        run: npm run build:server
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Bundle Electron
+        run: npm run build:electron
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Package installers
+        run: npx electron-builder ${{ matrix.builder }} --publish never
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
 
-      - uses: actions/upload-artifact@v4
+      - name: Verify package contents
+        run: npm run verify:package
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/upload-artifact@v7
         with:
           name: bad-ide-${{ matrix.os }}
           if-no-files-found: error
@@ -57,12 +79,12 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: artifacts
           merge-multiple: true
 
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v3
         with:
           files: artifacts/*
           generate_release_notes: true

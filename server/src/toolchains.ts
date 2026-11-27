@@ -497,6 +497,41 @@ function commandCandidates(definition: Definition, projectRoot?: string): string
   return [...new Set(candidates)];
 }
 
+const WINGET_IDS: Record<string, string> = {
+  node: "OpenJS.NodeJS.LTS",
+  npm: "OpenJS.NodeJS.LTS",
+  git: "Git.Git",
+  python3: "Python.Python.3.13",
+  go: "GoLang.Go",
+  rustc: "Rustlang.Rustup",
+  cargo: "Rustlang.Rustup",
+  ffmpeg: "Gyan.FFmpeg",
+};
+
+const commandAvailability = new Map<string, boolean>();
+
+async function hasCommand(command: string): Promise<boolean> {
+  const cached = commandAvailability.get(command);
+  if (cached !== undefined) return cached;
+  try {
+    await execFileAsync(process.platform === "win32" ? "where" : "which", [command], {
+      timeout: 3_000,
+      maxBuffer: 256 * 1024,
+    });
+    commandAvailability.set(command, true);
+    return true;
+  } catch {
+    commandAvailability.set(command, false);
+    return false;
+  }
+}
+
+function windowsInstallHint(): string {
+  return process.platform === "win32"
+    ? "Windows: install with winget or Chocolatey, or run the command in an elevated terminal."
+    : "";
+}
+
 async function checkDefinition(
   definition: Definition,
   projectRoot?: string,
@@ -676,15 +711,31 @@ export async function installToolchain(
         : "";
     return { id, command: "", ok: true, output: `${tool.name} is already installed.${note}` };
   }
-  const command = tool.installCommands.find((item) => item.platform === report.platform)?.command;
+  let command = tool.installCommands.find((item) => item.platform === report.platform)?.command;
   if (!command) throw new Error(`No automatic install command is available for ${tool.name} on ${report.platform}.`);
+  if (report.platform === "win32") {
+    if ((await hasCommand("choco")) === false && command.startsWith("choco ")) {
+      const wingetId = WINGET_IDS[id];
+      if (wingetId && (await hasCommand("winget"))) {
+        command = `winget install --id ${wingetId} -e --silent --accept-package-agreements --accept-source-agreements`;
+      } else {
+        return {
+          id,
+          command,
+          ok: false,
+          output: `${tool.name} needs Chocolatey, but choco was not found.${windowsInstallHint()}`,
+        };
+      }
+    }
+  }
   let output = "";
   try {
     const result = await execAsync(command, {
       timeout: 15 * 60_000,
       maxBuffer: 8 * 1024 * 1024,
-      shell: "/bin/bash",
+      shell: process.platform === "win32" ? process.env.COMSPEC || "cmd.exe" : "/bin/bash",
       cwd: projectRoot,
+      windowsHide: true,
     });
     output = `${result.stdout ?? ""}${result.stderr ?? ""}`.trim().slice(-8_000);
   } catch (error) {
@@ -692,7 +743,7 @@ export async function installToolchain(
       id,
       command,
       ok: false,
-      output: (error instanceof Error ? error.message : "Toolchain install failed.").slice(-8_000),
+      output: `${error instanceof Error ? error.message : "Toolchain install failed."}${windowsInstallHint()}`.slice(-8_000),
     };
   }
   const after = await checkToolchains(true, { rootPath: projectRoot });

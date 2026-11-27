@@ -49,9 +49,11 @@ mac:
   target:
     - dmg
     - zip
-  identity: null
-  hardenedRuntime: false
+  hardenedRuntime: true
   gatekeeperAssess: false
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+  notarize: false
   artifactName: bad-ide-${version}-${arch}.${ext}
 
 win:

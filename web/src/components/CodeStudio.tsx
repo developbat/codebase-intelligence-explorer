@@ -3133,6 +3133,36 @@ export function CodeStudio({
     });
   }
 
+  function continueRemainingWork(): void {
+    if (!taskQueue || chatBusy) return;
+    if (taskQueue.status === "running") return;
+    const exhausted = taskQueue.tasks.some((task) =>
+      /hard cost cap|not enough lifetime budget|retry refused/i.test(task.notes ?? ""),
+    );
+    if (exhausted) {
+      setError(
+        t(
+          "This task reached its lifetime budget. Start a narrower task instead of replaying the same goal.",
+        ),
+      );
+      return;
+    }
+    if (
+      !window.confirm(
+        t(
+          "Resume the remaining work? Completed files are preserved, but this will spend more tokens.",
+        ),
+      )
+    ) {
+      return;
+    }
+    void askProject(taskQueue.goal, false, {
+      retryFailed: true,
+      skipClarify: true,
+      workspaceMode: "build",
+    });
+  }
+
   async function askProject(
     question = chatInput,
     appendUser = true,
@@ -4433,10 +4463,7 @@ export function CodeStudio({
                   defaultOpen
                   liveStepCount={chatLiveSteps.length}
                   onOpenFile={(path) => void openFile(path)}
-                  onRetryFailed={() => {
-                    if (chatBusy || !taskQueue) return;
-                    void askProject(taskQueue.goal, false, { retryFailed: true, skipClarify: true });
-                  }}
+                  onRetryFailed={continueRemainingWork}
                   onUpdateTask={updateQueueTask}
                   onDeleteTask={deleteQueueTask}
                   onMoveTask={moveQueueTask}
@@ -4682,6 +4709,9 @@ export function CodeStudio({
             firstFailure?.resultSummary ||
             firstFailure?.verification?.output ||
             t("Stopped without a detailed error. Check the task trace below.");
+          const exhausted = failed.some((task) =>
+            /hard cost cap|not enough lifetime budget|retry refused/i.test(task.notes ?? ""),
+          );
           return (
             <div className="studio-continue is-global">
               <div className="studio-continue-info">
@@ -4699,6 +4729,15 @@ export function CodeStudio({
                 </small>
               </div>
               <div className="studio-continue-actions">
+                {exhausted ? null : (
+                  <button
+                    className="primary-button"
+                    onClick={continueRemainingWork}
+                    title={t("Resume incomplete work")}
+                  >
+                    <Play size={11} /> {t("Continue remaining work")}
+                  </button>
+                )}
                 <button
                   className="ghost-button"
                   onClick={() => openSettings("reports")}
@@ -6199,14 +6238,7 @@ export function CodeStudio({
               onClose={() => setRightTab("preview")}
               liveStepCount={chatLiveSteps.length}
               onOpenFile={(path) => void openFile(path)}
-              onRetryFailed={() => {
-                if (!taskQueue) return;
-                void askProject(taskQueue.goal, false, {
-                  retryFailed: true,
-                  skipClarify: true,
-                  workspaceMode: "build",
-                });
-              }}
+              onRetryFailed={continueRemainingWork}
               onUpdateTask={updateQueueTask}
               onDeleteTask={deleteQueueTask}
               onMoveTask={moveQueueTask}

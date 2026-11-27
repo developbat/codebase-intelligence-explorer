@@ -1,7 +1,7 @@
 {
   "name": "codebase-intelligence-explorer",
   "private": true,
-  "version": "0.2.5",
+  "version": "0.2.6",
   "type": "module",
   "description": "Read-only code intelligence explorer: static analysis, knowledge graph, Git change impact, and optional multi-provider AI analysis.",
   "scripts": {
@@ -33,7 +33,8 @@
     "publish:mac": "npm run build && npm run build:server && npm run build:electron && electron-builder --mac dmg zip --publish always",
     "publish:win": "npm run build && npm run build:server && npm run build:electron && electron-builder --win nsis --x64 --publish always",
     "package:win:arm64": "npm run build && npm run build:server && npm run build:electron && electron-builder --win nsis --arm64",
-    "verify:package": "node scripts/verify-package.mjs"
+    "verify:package": "node scripts/verify-package.mjs",
+    "package:mac:signed": "npm run build && npm run build:server && npm run build:electron && electron-builder --mac dmg zip -c.mac.notarize=true"
   },
   "dependencies": {
     "@codemirror/autocomplete": "^6.20.4",
