@@ -3,7 +3,9 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
+const ROOT = process.env.CIE_APP_ROOT
+  ? path.resolve(process.env.CIE_APP_ROOT)
+  : path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 
 function git(args: string[], timeout = 8_000): string | null {
   try {

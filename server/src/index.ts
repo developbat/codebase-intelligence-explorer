@@ -180,7 +180,9 @@ import {
 import type { ProjectTemplateId, SourceResponse } from "../../shared/types";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const REPO_ROOT = path.resolve(HERE, "../..");
+const REPO_ROOT = process.env.CIE_APP_ROOT
+  ? path.resolve(process.env.CIE_APP_ROOT)
+  : path.resolve(HERE, "../..");
 const PORT = Number(process.env.PORT || 4317);
 const TRANSPARENT_PNG = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",

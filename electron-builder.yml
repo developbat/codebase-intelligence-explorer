@@ -1,0 +1,61 @@
+appId: com.bad.ide
+productName: B.A.D IDE
+copyright: Copyright © 2026 B.A.D IDE
+
+directories:
+  output: release
+  buildResources: build
+
+files:
+  - dist-electron/**/*
+  - package.json
+  - "!node_modules/**"
+
+extraResources:
+  - from: dist
+    to: app/dist
+    filter: ["**/*", "!**/._*"]
+  - from: dist-server
+    to: app/server
+    filter: ["**/*", "!**/._*"]
+  - from: node_modules/playwright-core
+    to: app/node_modules/playwright-core
+    filter: ["**/*", "!**/._*"]
+  - from: node_modules/fsevents
+    to: app/node_modules/fsevents
+    filter: ["**/*", "!**/._*"]
+  - from: node_modules/typescript
+    to: app/node_modules/typescript
+    filter: ["**/*", "!**/._*"]
+
+asar: false
+
+mac:
+  icon: build/icon.png
+  category: public.app-category.developer-tools
+  target:
+    - dmg
+    - zip
+  identity: null
+  hardenedRuntime: false
+  gatekeeperAssess: false
+  artifactName: bad-ide-${version}-${arch}.${ext}
+
+win:
+  icon: build/icon.png
+  target:
+    - nsis
+  artifactName: bad-ide-${version}-${arch}.${ext}
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: B.A.D IDE
+
+publish:
+  provider: github
+  owner: developbat
+  repo: codebase-intelligence-explorer

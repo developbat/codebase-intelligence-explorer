@@ -19,6 +19,7 @@ import {
 import type { AiSettingsPublic } from "../../../shared/ai";
 import { useI18n } from "../i18n";
 import { api } from "../api";
+import { desktopUpdates, type DesktopUpdateState } from "../desktopUpdates";
 import { AiSettingsDialog } from "./AiSettingsDialog";
 import { UsageDialog } from "./UsageDialog";
 import { ReportsPanel } from "./ReportsPanel";
@@ -137,16 +138,49 @@ export function SettingsScreen({
   const [autoSwitchBusy, setAutoSwitchBusy] = useState(false);
   const [appInfo, setAppInfo] = useState<Awaited<ReturnType<typeof api.appVersion>> | null>(null);
   const [updateInfo, setUpdateInfo] = useState<Awaited<ReturnType<typeof api.checkUpdate>> | null>(null);
+  const [desktopUpdate, setDesktopUpdate] = useState<DesktopUpdateState | null>(null);
   const [updateBusy, setUpdateBusy] = useState(false);
+  const [updateActionBusy, setUpdateActionBusy] = useState(false);
   const screenRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     if (!open || tab !== "general") return;
-    void api.appVersion().then(setAppInfo).catch(() => undefined);
+    let active = true;
+    void api.appVersion()
+      .then((info) => {
+        if (active) setAppInfo(info);
+      })
+      .catch(() => undefined);
+    const bridge = desktopUpdates();
+    if (!bridge) {
+      return () => {
+        active = false;
+      };
+    }
+    void bridge.getState()
+      .then((state) => {
+        if (active) setDesktopUpdate(state);
+      })
+      .catch(() => undefined);
+    const off = bridge.onState((state) => setDesktopUpdate(state));
+    return () => {
+      active = false;
+      off();
+    };
   }, [open, tab]);
 
   async function checkForUpdates() {
     if (updateBusy) return;
+    const bridge = desktopUpdates();
+    if (bridge) {
+      setUpdateBusy(true);
+      try {
+        setDesktopUpdate(await bridge.check());
+      } finally {
+        setUpdateBusy(false);
+      }
+      return;
+    }
     setUpdateBusy(true);
     try {
       setUpdateInfo(await api.checkUpdate());
@@ -161,6 +195,47 @@ export function SettingsScreen({
       });
     } finally {
       setUpdateBusy(false);
+    }
+  }
+
+  async function downloadUpdate() {
+    const bridge = desktopUpdates();
+    if (!bridge || updateActionBusy) return;
+    setUpdateActionBusy(true);
+    try {
+      setDesktopUpdate(await bridge.download());
+    } finally {
+      setUpdateActionBusy(false);
+    }
+  }
+
+  async function installUpdate() {
+    const bridge = desktopUpdates();
+    if (!bridge || updateActionBusy) return;
+    setUpdateActionBusy(true);
+    try {
+      await bridge.install();
+    } catch {
+      setUpdateActionBusy(false);
+    }
+  }
+
+  function updateStatusText(state: DesktopUpdateState): string {
+    switch (state.status) {
+      case "checking":
+        return t("Checking for updates…");
+      case "available":
+        return `${t("Update available")}: ${state.latestVersion ?? "—"}`;
+      case "not-available":
+        return t("You are on the latest version.");
+      case "downloading":
+        return `${t("Downloading update…")} ${state.progress ?? 0}%`;
+      case "downloaded":
+        return t("Update downloaded. Restart to finish installing.");
+      case "error":
+        return `${t("Update failed")}: ${state.message}`;
+      default:
+        return state.message || t("Check for updates to see if a new version is available.");
     }
   }
 
@@ -340,28 +415,86 @@ export function SettingsScreen({
                   <h3>{t("App & updates")}</h3>
                   <div className="settings-project-card">
                     <div>
-                      <strong>B.A.D IDE {appInfo?.version ?? "…"}</strong>
+                      <strong>
+                        B.A.D IDE {desktopUpdate?.currentVersion ?? appInfo?.version ?? "…"}
+                      </strong>
                       <code>
                         {appInfo?.commit?.slice(0, 7) ?? "—"} · {appInfo?.branch ?? "—"} ·{" "}
                         {appInfo?.platform ?? "—"}/{appInfo?.arch ?? "—"}
                       </code>
                     </div>
-                    <button className="ghost-button" onClick={() => void checkForUpdates()} disabled={updateBusy}>
-                      <RefreshCw size={12} className={updateBusy ? "spin" : ""} /> {t("Check for updates")}
+                    <button
+                      className="ghost-button"
+                      onClick={() => void checkForUpdates()}
+                      disabled={updateBusy || updateActionBusy}
+                    >
+                      <RefreshCw size={12} className={updateBusy ? "spin" : ""} />{" "}
+                      {t("Check for updates")}
                     </button>
                   </div>
-                  <p>
-                    {updateInfo?.note ??
-                      t(
-                        "Source checkouts can check Git release tags. Packaged builds update from signed Electron releases, never by pulling arbitrary files.",
-                      )}
-                  </p>
-                  {updateInfo?.latest ? (
-                    <p>
-                      {t("Latest")}: <code>{updateInfo.latest}</code>
-                      {updateInfo.updateAvailable ? ` · ${t("Update available")}` : ""}
-                    </p>
-                  ) : null}
+
+                  {desktopUpdate ? (
+                    <div className="update-panel">
+                      <p>{updateStatusText(desktopUpdate)}</p>
+                      {desktopUpdate.status === "downloading" ? (
+                        <div className="update-progress" aria-hidden="true">
+                          <span style={{ width: `${desktopUpdate.progress ?? 0}%` }} />
+                        </div>
+                      ) : null}
+                      <div className="update-actions">
+                        {desktopUpdate.status === "available" ? (
+                          <button
+                            className="primary-button"
+                            onClick={() => void downloadUpdate()}
+                            disabled={updateActionBusy}
+                          >
+                            {t("Download update")} {desktopUpdate.latestVersion ?? ""}
+                          </button>
+                        ) : null}
+                        {desktopUpdate.status === "downloaded" ? (
+                          <button
+                            className="primary-button"
+                            onClick={() => void installUpdate()}
+                            disabled={updateActionBusy}
+                          >
+                            {t("Restart to update")}
+                          </button>
+                        ) : null}
+                        {desktopUpdate.releaseUrl ? (
+                          <a
+                            className="update-link"
+                            href={desktopUpdate.releaseUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                          >
+                            {t("Release notes")}
+                          </a>
+                        ) : null}
+                      </div>
+                      {!desktopUpdate.supported ? (
+                        <p>
+                          {t(
+                            "Update checks run in the packaged desktop app. This window is a development build.",
+                          )}
+                        </p>
+                      ) : null}
+                    </div>
+                  ) : (
+                    <>
+                      <p>
+                        {updateInfo?.note ??
+                          t(
+                            "Source checkouts can check Git release tags. Packaged builds update from signed Electron releases, never by pulling arbitrary files.",
+                          )}
+                      </p>
+                      {updateInfo?.latest ? (
+                        <p>
+                          {t("Latest")}: <code>{updateInfo.latest}</code>
+                          {updateInfo.updateAvailable ? ` · ${t("Update available")}` : ""}
+                        </p>
+                      ) : null}
+                    </>
+                  )}
                 </section>
 
                 <section className="settings-section">

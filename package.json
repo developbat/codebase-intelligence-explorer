@@ -23,7 +23,16 @@
     "eval:chat": "tsx server/src/evalChat.ts",
     "eval:chat:live": "tsx server/src/evalChatLive.ts",
     "eval:patch": "tsx server/src/evalPatch.ts",
-    "reset:agent": "tsx server/src/resetAgentMemory.ts"
+    "reset:agent": "tsx server/src/resetAgentMemory.ts",
+    "build:server": "node scripts/build-server.mjs",
+    "start:electron": "npm run build:server && npm run build:electron && electron .",
+    "package:dir": "npm run build && npm run build:server && npm run build:electron && electron-builder --dir",
+    "package:mac": "npm run build && npm run build:server && npm run build:electron && electron-builder --mac dmg zip",
+    "package:win": "npm run build && npm run build:server && npm run build:electron && electron-builder --win nsis --x64",
+    "build:electron": "node scripts/build-electron.mjs",
+    "publish:mac": "npm run build && npm run build:server && npm run build:electron && electron-builder --mac dmg zip --publish always",
+    "publish:win": "npm run build && npm run build:server && npm run build:electron && electron-builder --win nsis --x64 --publish always",
+    "package:win:arm64": "npm run build && npm run build:server && npm run build:electron && electron-builder --win nsis --arm64"
   },
   "dependencies": {
     "@codemirror/autocomplete": "^6.20.4",
@@ -57,6 +66,7 @@
     "chokidar": "^3.6.0",
     "diff": "^5.2.2",
     "driver.js": "^1.10.2",
+    "electron-updater": "^6.6.2",
     "elkjs": "^0.9.3",
     "express": "^4.21.2",
     "fast-glob": "^3.3.3",
@@ -83,6 +93,8 @@
     "@types/three": "^0.170.0",
     "@vitejs/plugin-react": "^4.3.4",
     "concurrently": "^9.1.2",
+    "electron": "^33.4.11",
+    "electron-builder": "^25.1.8",
     "tsx": "^4.19.2",
     "vite": "^5.4.11"
   },
@@ -103,5 +115,7 @@
     "ai",
     "react",
     "threejs"
-  ]
+  ],
+  "main": "dist-electron/main.cjs",
+  "author": "B.A.D IDE"
 }
