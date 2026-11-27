@@ -26525,3 +26525,41 @@ button.canvas-stat {
 .studio-bottom-controls > textarea {
   padding-bottom: 96px;
 }
+
+/* Keep Image/Video prompt pinned to the bottom while the media area scrolls */
+.image-studio-main {
+  overflow: hidden;
+  padding: 0;
+}
+
+.image-studio-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 12px 14px 18px;
+}
+
+.video-studio-main .studio-bottom-controls > textarea {
+  width: 92%;
+  max-width: 92%;
+  margin: 0 auto;
+  display: block;
+}
+
+/* Chat send is intentionally larger and flush to the right edge */
+.chat-studio-composer > .chat-studio-send {
+  right: 12px;
+  bottom: 12px;
+  height: 38px;
+  min-width: 88px;
+  padding: 0 14px;
+  border-radius: 10px;
+  font-size: 10.5px;
+}
+
+.chat-studio-composer .studio-composer-bottom {
+  left: 16px;
+  right: 16px;
+  bottom: 14px;
+  padding-right: 104px;
+}

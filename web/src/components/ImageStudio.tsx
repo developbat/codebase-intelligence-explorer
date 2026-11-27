@@ -272,6 +272,7 @@ export function ImageStudio({
       />
 
       <main className="image-studio-main">
+        <div className="image-studio-scroll">
         <div className="chat-studio-head">
           <div>
             <h2>{t("Image")}</h2>
@@ -350,6 +351,8 @@ export function ImageStudio({
             ))}
           </div>
         ) : null}
+
+        </div>
 
         <div className="studio-bottom-controls">
           <textarea

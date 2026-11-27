@@ -278,7 +278,8 @@ export function VideoStudio({
         onDelete={(id) => remove(id)}
       />
 
-      <main className="image-studio-main">
+      <main className="image-studio-main video-studio-main">
+        <div className="image-studio-scroll">
         <div className="chat-studio-head">
           <div>
             <h2>{t("Video")}</h2>
@@ -476,6 +477,8 @@ export function VideoStudio({
             <p className="video-studio-note">{t("Open a project to trim, convert or resize local videos.")}</p>
           )}
         </details>
+
+        </div>
 
         <div className="studio-bottom-controls">
           <textarea
