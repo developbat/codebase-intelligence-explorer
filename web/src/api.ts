@@ -141,6 +141,11 @@ export const api = {
       body: JSON.stringify(input),
     }),
 
+  quickProject: () =>
+    request<ScaffoldProjectResult>("/api/projects/quick", {
+      method: "POST",
+    }),
+
   recent: () => request<{ projects: RecentProject[] }>("/api/recent"),
 
   project: (id: string) => request<AnalysisResult>(`/api/projects/${id}`),
@@ -319,6 +324,20 @@ export const api = {
   },
 
   tests: (id: string) => request<TestDiscovery>(`/api/projects/${id}/tests`),
+
+  downloadReport: async (projectId: string): Promise<void> => {
+    const response = await fetch(`/api/projects/${projectId}/report`);
+    if (!response.ok) {
+      throw new Error("Could not download the report.");
+    }
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `bad-report-${projectId}-${new Date().toISOString().slice(0, 10)}.json`;
+    link.click();
+    URL.revokeObjectURL(url);
+  },
 
   usage: (id: string) => request<AiUsageReport>(`/api/projects/${id}/usage`),
 

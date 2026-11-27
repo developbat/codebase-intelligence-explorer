@@ -1,6 +1,7 @@
 import express from "express";
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { analyzeProject } from "./analyzer";
@@ -65,7 +66,7 @@ import {
   updateTask,
 } from "./tasks";
 import type { ProjectTask } from "../../shared/tasks";
-import { ensureProjectBrain, getProjectBrainView, refreshProjectBrain, compactProjectBrainBrief } from "./projectBrain";
+import { ensureProjectBrain, getProjectBrainView, refreshProjectBrain, compactProjectBrainBrief, redactSecrets } from "./projectBrain";
 import { ensureProjectMap } from "./projectMap";
 import { compactDiagnosisBrief, diagnoseProject, diagnosisPaths, loadDiagnosis } from "./ai/diagnosis";
 import { getPublicSettings, resolveAgentRole, resolveProvider, updateAiSettings } from "./ai/settings";
@@ -2319,6 +2320,111 @@ app.get("/api/projects/:id/tasks", async (req, res) => {
   }
 });
 
+app.get("/api/projects/:id/report", async (req, res) => {
+  try {
+    const analysis = await loadAnalysis(req.params.id);
+    const [queue, history, diagnosis, brain, settings] = await Promise.all([
+      getProjectTaskQueue(req.params.id).catch(() => null),
+      loadTaskHistory(analysis.rootPath).catch(() => []),
+      loadDiagnosis(analysis.rootPath).catch(() => null),
+      ensureProjectBrain(analysis).catch(() => null),
+      getPublicSettings().catch(() => null),
+    ]);
+    const clip = (value: unknown, max: number): string => {
+      const text = String(value ?? "").replace(/\s+/g, " ").trim();
+      return text.length > max ? `${text.slice(0, max - 1)}…` : text;
+    };
+    const runsDir = path.join(analysis.rootPath, ".cie", "agent", "runs");
+    const runFiles = await fs.readdir(runsDir).catch(() => [] as string[]);
+    const runs = [];
+    for (const file of runFiles.filter((name) => name.endsWith(".json")).slice(-40)) {
+      const stat = await fs.stat(path.join(runsDir, file)).catch(() => null);
+      if (stat) runs.push({ file, time: stat.mtimeMs });
+    }
+    runs.sort((a, b) => b.time - a.time);
+    const recentRuns = [];
+    for (const entry of runs.slice(0, 5)) {
+      const parsed = JSON.parse(
+        await fs.readFile(path.join(runsDir, entry.file), "utf8").catch(() => "{}"),
+      ) as {
+        taskId?: string;
+        runKey?: string;
+        summary?: string;
+        changedFiles?: string[];
+        steps?: { index?: number; action?: string; ok?: boolean; observation?: string }[];
+      };
+      recentRuns.push({
+        taskId: parsed.taskId,
+        runKey: parsed.runKey,
+        summary: clip(parsed.summary, 1_500),
+        changedFiles: parsed.changedFiles ?? [],
+        steps: (parsed.steps ?? []).map((step) => ({
+          index: step.index,
+          action: step.action,
+          ok: step.ok,
+          observation: clip(step.observation, 1_200),
+        })),
+      });
+    }
+    const contextPath = path.join(analysis.rootPath, ".cie", "agent", "context.md");
+    const contextTail = await fs.readFile(contextPath, "utf8").catch(() => "");
+    const version = JSON.parse(
+      await fs.readFile(path.join(REPO_ROOT, "package.json"), "utf8").catch(() => "{}"),
+    ).version;
+    const bundle = {
+      schemaVersion: 1,
+      generatedAt: new Date().toISOString(),
+      app: {
+        version: version ?? "unknown",
+        platform: process.platform,
+        arch: process.arch,
+        node: process.version,
+        electron: process.versions.electron ?? null,
+      },
+      project: {
+        id: analysis.id,
+        name: analysis.projectName,
+        rootPath: analysis.rootPath,
+        git: analysis.git ?? null,
+      },
+      analysis: {
+        createdAt: analysis.createdAt,
+        stats: analysis.stats,
+        languages: analysis.languages,
+        frameworks: analysis.frameworks,
+        warnings: analysis.warnings,
+      },
+      settings,
+      queue,
+      history: history.slice(0, 10),
+      diagnosis,
+      brain: brain
+        ? {
+            brief: compactProjectBrainBrief(brain),
+            constraints: brain.constraints,
+            features: brain.features.slice(0, 20),
+            knownIssues: brain.knownIssues.slice(0, 20),
+            recentChanges: brain.recentChanges.slice(0, 10),
+          }
+        : null,
+      runs: recentRuns,
+      contextTail: contextTail.slice(-4_000),
+    };
+    const body = redactSecrets(
+      JSON.stringify(bundle, null, 2).replaceAll(os.homedir(), "~"),
+    );
+    const stamp = new Date().toISOString().slice(0, 10);
+    res.setHeader("Content-Type", "application/json; charset=utf-8");
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="bad-report-${analysis.id}-${stamp}.json"`,
+    );
+    res.send(body);
+  } catch (error) {
+    handleError(res, error, 400);
+  }
+});
+
 app.patch("/api/projects/:id/tasks/:taskId", async (req, res) => {
   try {
     const analysis = await loadAnalysis(req.params.id);
@@ -2873,6 +2979,28 @@ app.post("/api/projects/scaffold", async (req, res) => {
       template: template as ProjectTemplateId,
     });
     res.status(201).json(result);
+  } catch (error) {
+    handleError(res, error, 400);
+  }
+});
+
+app.post("/api/projects/quick", async (_req, res) => {
+  try {
+    const parentPath = path.join(os.homedir(), "B.A.D IDE");
+    await fs.mkdir(parentPath, { recursive: true });
+    const date = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+    let lastError: unknown = null;
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const name = `bad-${date}-${Math.random().toString(36).slice(2, 7)}`;
+      try {
+        const result = await scaffoldProject({ parentPath, name, template: "blank" });
+        res.status(201).json(result);
+        return;
+      } catch (error) {
+        lastError = error;
+      }
+    }
+    throw lastError instanceof Error ? lastError : new Error("Quick project could not be created.");
   } catch (error) {
     handleError(res, error, 400);
   }

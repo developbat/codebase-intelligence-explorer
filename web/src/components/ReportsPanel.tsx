@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, ClipboardList, Loader2, RefreshCw } from "lucide-react";
+import { AlertTriangle, ClipboardList, Download, Loader2, RefreshCw } from "lucide-react";
 import type { AiUsageReport } from "../../../shared/ai";
 import type { ModelHealthReport } from "../../../shared/modelHealth";
 import type { ProjectTaskQueue } from "../../../shared/tasks";
@@ -94,10 +94,19 @@ export function ReportsPanel({ projectId }: { projectId: string }) {
             )}
           </p>
         </div>
-        <button className="ghost-button" onClick={() => void load()} disabled={busy}>
-          {busy ? <Loader2 size={12} className="spin" /> : <RefreshCw size={12} />}
-          {t("Refresh")}
-        </button>
+        <div className="reports-head-actions">
+          <button
+            className="ghost-button"
+            onClick={() => void api.downloadReport(projectId)}
+            title={t("Download a sanitized report for sharing")}
+          >
+            <Download size={12} /> {t("Share report")}
+          </button>
+          <button className="ghost-button" onClick={() => void load()} disabled={busy}>
+            {busy ? <Loader2 size={12} className="spin" /> : <RefreshCw size={12} />}
+            {t("Refresh")}
+          </button>
+        </div>
       </div>
 
       {error ? (

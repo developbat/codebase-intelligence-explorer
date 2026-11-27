@@ -134,6 +134,7 @@ export default function App() {
   const [depth, setDepth] = useState(1);
   const [inspectorOpen, setInspectorOpen] = useState(() => window.innerWidth > 1120);
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [dialogMode, setDialogMode] = useState<"open" | "create">("open");
   const [studioInitialPrompt, setStudioInitialPrompt] = useState("");
   const [studioAutoRunPrompt, setStudioAutoRunPrompt] = useState(false);
   const [chatInitialPrompt, setChatInitialPrompt] = useState("");
@@ -393,6 +394,39 @@ export default function App() {
     } finally {
       setBusy(null);
     }
+  }
+
+  async function createQuickChat() {
+    if (!activeProvider(aiSettings)) {
+      setAiSettingsAdd(false);
+      setAiSettingsOpen(true);
+      return;
+    }
+    if (busy) return;
+    setBusy("analyze");
+    setError(null);
+    try {
+      const created = await api.quickProject();
+      const result = await api.analyze(created.rootPath);
+      applyAnalysis(result);
+      localStorage.setItem(LAST_PATH_KEY, created.rootPath);
+      setLastPath(created.rootPath);
+      setDialogOpen(false);
+      setProduct("chat");
+      setChatInitialPrompt("");
+      setChatAutoRunPrompt(false);
+    } catch (requestError) {
+      setError(
+        requestError instanceof Error ? requestError.message : t("Quick chat project could not be created"),
+      );
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  function openProjectDialog(mode: "open" | "create") {
+    setDialogMode(mode);
+    setDialogOpen(true);
   }
 
   async function loadRecent(project: RecentProject): Promise<boolean> {
@@ -860,6 +894,7 @@ export default function App() {
           </div>
         </div>
 
+        {analysis ? (
         <div className="product-switcher" role="tablist" aria-label={t("Product")}>
           <button
             className={product === "intelligence" ? "is-active" : ""}
@@ -902,21 +937,22 @@ export default function App() {
             <span>{t("Video")}</span>
           </button>
         </div>
+        ) : null}
 
-        <div className="breadcrumbs">
+        <div className="breadcrumbs" style={{ display: analysis ? undefined : "none" }}>
           {product === "studio" ? null : product === "chat" ? (
             <span className="breadcrumb-item">
               <MessageSquare size={12} className="breadcrumb-sep" />
               <span className="is-current">{t("Chat Studio")}</span>
               <span className="studio-top-pill">{t("No code edits")}</span>
             </span>
-          ) : product === "image" ? (
+          ) : product === "image" && analysis ? (
             <span className="breadcrumb-item">
               <ImageIcon size={12} className="breadcrumb-sep" />
               <span className="is-current">{t("Image Studio")}</span>
               <span className="studio-top-pill">{t("Free generator")}</span>
             </span>
-          ) : product === "video" ? (
+          ) : product === "video" && analysis ? (
             <span className="breadcrumb-item">
               <Clapperboard size={12} className="breadcrumb-sep" />
               <span className="is-current">{t("Video Studio")}</span>
@@ -954,8 +990,8 @@ export default function App() {
         </div>
 
         <div className="topbar-actions">
-          {product === "intelligence" ? <TourButton /> : null}
-          {product === "intelligence" ? (
+          {!analysis || product === "intelligence" ? <TourButton /> : null}
+          {!analysis || product === "intelligence" ? (
             <button
               className={`icon-button topbar-icon ${aiConfigured ? "is-active" : ""}`}
               onClick={() => {
@@ -968,7 +1004,7 @@ export default function App() {
               <Sparkles size={15} />
             </button>
           ) : null}
-          {product === "intelligence" ? (
+          {!analysis || product === "intelligence" ? (
             <select
               className="lang-select"
               value={locale}
@@ -1053,7 +1089,7 @@ export default function App() {
             }}
           />
         </Suspense>
-      ) : product === "chat" ? (
+      ) : product === "chat" && analysis ? (
         <Suspense
           fallback={
             <div className="app-loading">
@@ -1442,7 +1478,13 @@ export default function App() {
               onAnalyze={analyze}
               busy={busy !== null}
               error={error}
-              lastPath={lastPath}
+              onStartChat={() => void createQuickChat()}
+              onOpenDialog={openProjectDialog}
+              aiConfigured={aiConfigured}
+              onOpenAiSettings={() => {
+                setAiSettingsAdd(false);
+                setAiSettingsOpen(true);
+              }}
             />
           )}
         </main>
@@ -1605,6 +1647,7 @@ export default function App() {
 
       <OpenProjectDialog
         open={dialogOpen}
+        initialMode={dialogMode}
         busy={busy === "analyze"}
         error={error}
         lastPath={lastPath}

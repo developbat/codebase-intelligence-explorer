@@ -28,156 +28,131 @@ interface EmptyStateProps {
   onAnalyze: (path: string) => void;
   busy: boolean;
   error: string | null;
-  lastPath: string;
+  onStartChat: () => void;
+  onOpenDialog: (mode: "open" | "create") => void;
+  aiConfigured: boolean;
+  onOpenAiSettings: () => void;
 }
 
-const FEATURES = [
-  {
-    icon: FolderOpen,
-    title: "Project intelligence",
-    text: "Folder trees, manifests, symbols and source files become a navigable knowledge graph.",
-  },
-  {
-    icon: Code2,
-    title: "Code Studio editor",
-    text: "A write-enabled editor with file tabs, diffs, preview and a real terminal for the same project.",
-  },
-  {
-    icon: Sparkles,
-    title: "Agent task loop",
-    text: "Plan, queue and execute coding tasks with model roles, permissions, retries and automatic verification.",
-  },
-  {
-    icon: Play,
-    title: "Run, test and preview",
-    text: "Run checks, tests, builds and dev servers, then inspect pages, mobile apps and game canvases.",
-  },
-  {
-    icon: Network,
-    title: "Knowledge graph + 3D",
-    text: "Files, symbols, routes, database objects and relationships as 2D maps and a 3D explorer.",
-  },
-  {
-    icon: Boxes,
-    title: "Game and mobile scaffolds",
-    text: "Canvas, Phaser, Three.js, Godot, Flutter, Expo and PWA templates with assets, audio and device tools.",
-  },
-];
-
-export function EmptyState({ onAnalyze, busy, error, lastPath }: EmptyStateProps) {
+export function EmptyState({
+  onAnalyze,
+  busy,
+  error,
+  onStartChat,
+  onOpenDialog,
+  aiConfigured,
+  onOpenAiSettings,
+}: EmptyStateProps) {
   const { t } = useI18n();
-  const [path, setPath] = useState(lastPath);
-  const [browserOpen, setBrowserOpen] = useState(false);
-
-  useEffect(() => {
-    setPath(lastPath);
-  }, [lastPath]);
+  const [startOpen, setStartOpen] = useState(false);
 
   return (
-    <div className="empty-state">
+    <div className="empty-state home-state">
       <div className="empty-glow" />
-      <div className="empty-content">
-        <div className="empty-badge">
-          <Sparkles size={13} /> {t("Code intelligence + agentic Code Studio")}
-        </div>
+      <div className="home-hero">
+        <img className="home-hero-logo" src="/cbe.png" alt="" />
+        <div className="home-hero-brand">B.A.D IDE</div>
         <h1>
           {t("Understand your code.")}
           <br />
           <span>{t("Build it in Code Studio.")}</span>
         </h1>
-        <p className="empty-lede">
+        <p className="home-hero-lede">
           {t(
-            "Analyze a TypeScript/JavaScript, PHP or Python project and explore its files, symbols, routes and dependencies as a knowledge graph. Edit the same project in Code Studio, run commands, test, preview, and let the agent plan, build and verify the work.",
+            "Start with chat, create a project, or open a folder. Your saved projects stay on the left.",
           )}
         </p>
 
-        <form
-          className="path-form"
-          onSubmit={(event) => {
-            event.preventDefault();
-            if (path.trim() && !busy) onAnalyze(path.trim());
-          }}
-        >
-          <FolderOpen size={16} className="path-icon" />
-          <input
-            value={path}
-            onChange={(event) => setPath(event.target.value)}
-            placeholder="/Users/you/projects/app"
-            spellCheck={false}
-            aria-label={t("Project folder path")}
-            autoFocus
-          />
-          <button type="button" className="ghost-button browse-button" onClick={() => setBrowserOpen(true)}>
-            <FolderSearch size={14} /> {t("Browse…")}
+        {!aiConfigured ? (
+          <button className="home-provider-cta" onClick={onOpenAiSettings}>
+            <Sparkles size={14} />
+            {t("Add an AI provider token to start")}
           </button>
-          <button type="submit" className="primary-button" disabled={busy || !path.trim()}>
-            {busy ? <Loader2 size={15} className="spin" /> : <Play size={14} />}
-            {t("Analyze")}
-          </button>
-        </form>
+        ) : null}
 
-        <button className="sample-button" onClick={() => onAnalyze("fixtures/sample-app")} disabled={busy}>
-          <Network size={14} /> {t("Open sample project")}
-          <span className="sample-tag">acme-orders</span>
-          <ArrowRight size={13} />
+        <button
+          className="home-start-button"
+          onClick={() => setStartOpen((value) => !value)}
+          disabled={busy}
+        >
+          <Play size={17} /> {t("Start")}
+          <ArrowRight size={16} />
         </button>
 
-        <div className="empty-product-note">
-          <span>
-            <Network size={12} /> {t("Explore the project graph")}
-          </span>
-          <span className="empty-product-sep" aria-hidden="true">→</span>
-          <span>
-            <Code2 size={12} /> {t("Build, run and verify in Code Studio")}
-          </span>
-        </div>
+        {startOpen ? (
+          <div className="home-start-menu">
+            <button onClick={onStartChat}>
+              <MessageSquare size={18} />
+              <span>
+                <strong>{t("Start chatting")}</strong>
+                <small>
+                  {aiConfigured
+                    ? t("A quick project is created automatically.")
+                    : t("Add a provider token first.")}
+                </small>
+              </span>
+            </button>
+            <button
+              onClick={() => {
+                setStartOpen(false);
+                onOpenDialog("create");
+              }}
+            >
+              <FolderPlus size={18} />
+              <span>
+                <strong>{t("Create a project")}</strong>
+                <small>{t("Choose a location and template.")}</small>
+              </span>
+            </button>
+            <button
+              onClick={() => {
+                setStartOpen(false);
+                onOpenDialog("open");
+              }}
+            >
+              <FolderOpen size={18} />
+              <span>
+                <strong>{t("Open existing")}</strong>
+                <small>{t("Import a folder and analyze it.")}</small>
+              </span>
+            </button>
+            <button
+              onClick={() => {
+                setStartOpen(false);
+                onAnalyze("fixtures/sample-app");
+              }}
+            >
+              <Network size={18} />
+              <span>
+                <strong>{t("Open sample project")}</strong>
+                <small>acme-orders</small>
+              </span>
+            </button>
+          </div>
+        ) : null}
 
         {error ? (
-          <div className="form-error">
+          <div className="form-error home-error">
             <Lock size={13} /> {error}
           </div>
         ) : null}
 
-        <div className="feature-grid">
-          {FEATURES.map((feature) => (
-            <div key={feature.title} className="feature-card">
-              <feature.icon size={17} />
-              <div>
-                <h3>{t(feature.title)}</h3>
-                <p>{t(feature.text)}</p>
-              </div>
-            </div>
-          ))}
-        </div>
-
-        <div className="empty-footer">
+        <div className="home-trust">
           <span>
-            <ShieldCheck size={13} /> {t("Local analysis · code never leaves your machine")}
+            <ShieldCheck size={12} /> {t("Local analysis · code never leaves your machine")}
           </span>
           <span>
-            <CheckCircle2 size={13} /> {t("TS/JS · PHP · Python · file-level multi-language")}
-          </span>
-          <span>
-            <Code2 size={13} /> {t("Graph, editor, terminal, tests and preview in one workspace")}
+            <CheckCircle2 size={12} /> {t("Chat · Code Studio · tools · verification")}
           </span>
         </div>
       </div>
-
-      <FolderBrowserDialog
-        open={browserOpen}
-        initialPath={path || lastPath}
-        onClose={() => setBrowserOpen(false)}
-        onSelect={(selected) => {
-          setPath(selected);
-          setBrowserOpen(false);
-        }}
-      />
     </div>
   );
 }
 
 interface OpenProjectDialogProps {
   open: boolean;
+  initialMode?: "open" | "create";
   busy: boolean;
   error: string | null;
   lastPath: string;
@@ -211,6 +186,7 @@ function parentOf(folderPath: string): string {
 
 export function OpenProjectDialog({
   open,
+  initialMode = "open",
   busy,
   error,
   lastPath,
@@ -219,7 +195,7 @@ export function OpenProjectDialog({
   onCreate,
 }: OpenProjectDialogProps) {
   const { t } = useI18n();
-  const [mode, setMode] = useState<"open" | "create">("open");
+  const [mode, setMode] = useState<"open" | "create">(initialMode);
   const [path, setPath] = useState(lastPath);
   const [browserOpen, setBrowserOpen] = useState(false);
   const [browserTarget, setBrowserTarget] = useState<"path" | "parent">("path");
@@ -234,10 +210,11 @@ export function OpenProjectDialog({
 
   useEffect(() => {
     if (open) {
+      setMode(initialMode);
       setPath(lastPath);
       setParentPath((current) => current || parentOf(lastPath) || "~");
     }
-  }, [open, lastPath]);
+  }, [open, initialMode, lastPath]);
 
   useEffect(() => {
     if (!open || mode !== "create" || templates.length > 0) return;
