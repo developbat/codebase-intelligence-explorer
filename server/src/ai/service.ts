@@ -4603,7 +4603,13 @@ export async function runAgentTask(
   log(
     "info",
     "Context plan",
-    `prompt=${prompt.id} · system=${systemContent.length}c · task=${context.length}c · history=${conversation.length} · brain=${projectBrainBrief.length}c · skills=${includeSkills ? "full" : "index"}`,
+    `prompt=${prompt.id} · system=${systemContent.length}c · task=${context.length}c · history=${conversation.length} · brain=${
+      projectBrainBrief.length > 0
+        ? `${projectBrainBrief.length}c`
+        : instructionHasProjectBrain
+          ? "in-task"
+          : "0c"
+    } · skills=${includeSkills ? "full" : "index"}`,
   );
   if (contextChars > 30_000) {
     log(
