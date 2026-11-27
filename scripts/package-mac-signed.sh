@@ -22,6 +22,20 @@ elif [ -n "$APPLE_KEYCHAIN_PROFILE" ]; then
   NOTARIZE=true
 fi
 
+# electron-builder 26 passes the certificate common name to codesign. When the
+# login keychain holds two Developer ID certificates with the same name, that is
+# ambiguous, so pin the SHA-1 of a valid identity. CI imports a fresh keychain
+# from CSC_LINK and does not need this.
+IDENTITY_ARGS=""
+if [ -z "$CSC_LINK" ]; then
+  IDENTITY_HASH=$(security find-identity -v -p codesigning 2>/dev/null \
+    | sed -n 's/^ *[0-9]*) \([0-9A-F]\{40\}\) "Developer ID Application:.*(C928N2FQ94)"$/\1/p' \
+    | head -n 1)
+  if [ -n "$IDENTITY_HASH" ]; then
+    IDENTITY_ARGS="-c.mac.identity=$IDENTITY_HASH"
+  fi
+fi
+
 rm -rf "$OUT"
 npm run build
 npm run build:server
@@ -31,6 +45,7 @@ npm run clean:appledouble
 npx electron-builder --mac dmg zip \
   -c.directories.output="$OUT" \
   -c.mac.notarize="$NOTARIZE" \
+  $IDENTITY_ARGS \
   --publish never
 
 APP=$(find "$OUT" -maxdepth 2 -name "*.app" -type d | head -n 1)
