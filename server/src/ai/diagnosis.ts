@@ -1,7 +1,9 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import crypto from "node:crypto";
 import type { AnalysisResult, SymbolRecord } from "../../../shared/types";
 import type { ProjectDiagnosis, DiagnosisDesign, DiagnosisFact, DiagnosisFailureMode, DiagnosisVerification } from "../../../shared/diagnosis";
+import type { BrowserCheckStep } from "../../../shared/browserCheck";
 import type { AiProviderId } from "../../../shared/ai";
 import { chatComplete } from "./complete";
 import { resolveAgentRole } from "./settings";
@@ -10,6 +12,7 @@ import { estimateUsageCost } from "./pricing";
 import { compactProjectBrainBrief, ensureProjectBrain } from "../projectBrain";
 import { ensureProjectMap } from "../projectMap";
 import { readSourceFile } from "../editor";
+import { runBrowserCheck } from "../browserCheck";
 
 const DIAGNOSIS_FILE = "diagnosis.json";
 const DIAGNOSIS_MARKDOWN_FILE = "diagnosis.md";
@@ -112,13 +115,63 @@ function normalizeFailureModes(value: unknown): DiagnosisFailureMode[] {
     .slice(0, 10);
 }
 
-function normalizeVerification(value: unknown, fallbackCommands: string[]): DiagnosisVerification {
+const BROWSER_ACTIONS = new Set([
+  "click",
+  "fill",
+  "press",
+  "pressKeys",
+  "eval",
+  "expectText",
+  "expectValue",
+  "expectVisible",
+  "expectCount",
+  "expectStable",
+  "waitForText",
+  "waitForSelector",
+]);
+
+function normalizeSteps(value: unknown): BrowserCheckStep[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object")
+    .map((item) => {
+      const action = String(item.action ?? "").trim();
+      if (!BROWSER_ACTIONS.has(action)) return null;
+      const step: BrowserCheckStep = { action: action as BrowserCheckStep["action"] };
+      if (typeof item.selector === "string" && item.selector.trim()) step.selector = item.selector.trim();
+      if (typeof item.value === "string") step.value = item.value;
+      if (typeof item.text === "string") step.text = item.text;
+      if (typeof item.expectText === "string") step.expectText = item.expectText;
+      if (typeof item.script === "string") step.script = item.script;
+      if (typeof item.expression === "string") step.expression = item.expression;
+      if (typeof item.code === "string") step.code = item.code;
+      if (typeof item.contains === "string") step.contains = item.contains;
+      if (typeof item.expected === "string") step.expected = item.expected;
+      if (Array.isArray(item.keys)) step.keys = item.keys.filter((key): key is string => typeof key === "string");
+      if (typeof item.count === "number") step.count = item.count;
+      return step;
+    })
+    .filter((step): step is BrowserCheckStep => Boolean(step))
+    .slice(0, 8);
+}
+
+function normalizeVerification(
+  value: unknown,
+  fallbackCommands: string[],
+  entryPath?: string,
+): DiagnosisVerification {
   const record = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
+  const steps = normalizeSteps(record.steps);
   return {
     command:
       typeof record.command === "string" && record.command.trim()
         ? clip(record.command, 400)
         : fallbackCommands[0],
+    path:
+      typeof record.path === "string" && record.path.trim()
+        ? clip(record.path, 240)
+        : entryPath,
+    steps,
     checks: stringList(record.checks, 8),
     expected: stringList(record.expected, 8),
   };
@@ -284,9 +337,10 @@ async function buildDiagnosisContext(
 
 const DIAGNOSIS_SYSTEM = `You are a senior software diagnostician for a coding agent. You do not write code. Return JSON only, no markdown fences.
 Schema:
-{"problem":"one sentence","rootCause":"one or two sentences","confidence":0.0,"facts":[{"claim":"verified fact","file":"path","line":1,"evidence":"short quote or observation"}],"constraints":["user/project constraint"],"unknowns":["unresolved question"],"callSites":["file:line — symbol/behavior"],"includes":["import/include chain"],"impact":["affected module/route/data"],"designs":[{"name":"short","summary":"what to change","pros":["..."],"cons":["..."],"files":["path"],"risk":"low|medium|high"}],"chosenDesign":"design name","rationale":"why chosen","failureModes":[{"scenario":"what can fail","impact":"user/system impact","mitigation":"guard/rollback"}],"rollback":"how to undo safely","verification":{"command":"command or empty","checks":["runtime/DOM/DB check"],"expected":["observable result"]},"todos":["small ordered step"]}
+{"problem":"one sentence","rootCause":"one or two sentences","confidence":0.0,"facts":[{"claim":"verified fact","file":"path","line":1,"evidence":"short quote or observation"}],"constraints":["user/project constraint"],"unknowns":["unresolved question"],"callSites":["file:line — symbol/behavior"],"includes":["import/include chain"],"impact":["affected module/route/data"],"designs":[{"name":"short","summary":"what to change","pros":["..."],"cons":["..."],"files":["path"],"risk":"low|medium|high"}],"chosenDesign":"design name","rationale":"why chosen","failureModes":[{"scenario":"what can fail","impact":"user/system impact","mitigation":"guard/rollback"}],"rollback":"how to undo safely","verification":{"command":"command or empty","path":"index.html","steps":[{"action":"click","selector":"#start-btn"},{"action":"eval","script":"...","expectText":"..."}],"checks":["runtime/DOM/DB check"],"expected":["observable result"]},"todos":["small ordered step"]}
 Rules:
 - Ground every fact in the provided project brain, graph edges, excerpts or explicit user constraints. Cite file:line. Do not invent files, APIs or behavior.
+- If the project has a real HTML/UI entry, 'verification.steps' is REQUIRED: include 2-6 concrete steps with at least one interaction (click/fill/press/pressKeys/eval) and one assertion (expectText/expectValue/expectCount/expectStable or an eval with expectText). Use only selectors/text you saw in the evidence. For canvas/global behavior, a single eval step with expectText is valid. Example: [{"action":"click","selector":"#start-btn"},{"action":"eval","script":"...","expectText":"true"}]. If the project has no HTML/UI entry, leave steps empty and describe prose checks instead.
 - Read the Project brain first; reuse it instead of rediscovering.
 - If evidence is insufficient, list it under unknowns; do not guess.
 - Produce exactly two designs (or one when only one is genuinely viable) and choose one. Include concrete tradeoffs, failure modes and a rollback.
@@ -367,6 +421,9 @@ function normalizeDiagnosis(
       ? clip(raw.chosenDesign, 160)
       : designs[0]?.name ?? "Smallest safe change";
   const facts = normalizeFacts(raw.facts);
+  const entryPath =
+    analysis.files.find((file) => /(^|\/)index\.html?$/i.test(file.path))?.path ??
+    analysis.files.find((file) => /\.html?$/i.test(file.path))?.path;
   const verification = normalizeVerification(
     raw.verification,
     [
@@ -374,6 +431,7 @@ function normalizeDiagnosis(
       ...(analysis.tooling?.typecheckCommands ?? []),
       ...(analysis.tooling?.buildCommands ?? []),
     ],
+    entryPath,
   );
   return {
     version: 1,
@@ -410,7 +468,7 @@ export async function diagnoseProject(
   } = {},
 ): Promise<DiagnoseResult> {
   const constraints = [...new Set((options.constraints ?? []).map((item) => clip(item, 300)).filter(Boolean))];
-  const config = await resolveAgentRole("planner", {
+  const config = await resolveAgentRole("diagnosis", {
     provider: options.provider,
     model: options.model,
   });
@@ -463,7 +521,17 @@ export async function diagnoseProject(
     diagnosis.tokenUsage = tokenUsage;
     const costUsd = await estimateUsageCost(config.id, config.model, tokenUsage).catch(() => undefined);
     diagnosis.costUsd = costUsd;
+    if (diagnosis.verification.steps?.length) {
+      const valid = await validateDiagnosisScenario(analysis, diagnosis);
+      if (!valid) {
+        diagnosis.verification.steps = [];
+        diagnosis.unknowns.push(
+          "The generated browser verification steps failed on the real page, so they were dropped; use the prose checks.",
+        );
+      }
+    }
     await saveDiagnosis(analysis.rootPath, diagnosis).catch(() => undefined);
+    await saveDiagnosisScenario(analysis.rootPath, diagnosis).catch(() => undefined);
     await recordUsage({
       projectId: analysis.id,
       provider: config.id,
@@ -493,6 +561,7 @@ export async function diagnoseProject(
     diagnosis.model = config.model;
     diagnosis.tokenUsage = tokenUsage;
     await saveDiagnosis(analysis.rootPath, diagnosis).catch(() => undefined);
+    await saveDiagnosisScenario(analysis.rootPath, diagnosis).catch(() => undefined);
     return {
       diagnosis,
       provider: config.id,
@@ -501,6 +570,72 @@ export async function diagnoseProject(
       usedFallback: true,
     };
   }
+}
+
+export function diagnosisScenarioName(goal: string): string {
+  return `diagnosis-${crypto.createHash("sha1").update(goal.trim()).digest("hex").slice(0, 10)}`;
+}
+
+export function isUsableDiagnosisScenario(diagnosis: ProjectDiagnosis | null): boolean {
+  if (!diagnosis?.verification.path) return false;
+  const steps = diagnosis.verification.steps ?? [];
+  if (steps.length < 2) return false;
+  const interaction = steps.some((step) =>
+    ["click", "fill", "press", "pressKeys", "eval"].includes(step.action),
+  );
+  const assertion = steps.some(
+    (step) =>
+      ["expectText", "expectValue", "expectCount", "expectStable", "waitForText"].includes(step.action) ||
+      (step.action === "eval" && Boolean(step.expectText ?? step.contains ?? step.expected)),
+  );
+  return interaction && assertion;
+}
+
+/** Persist the diagnosis verification as a reusable browser scenario. */
+export async function saveDiagnosisScenario(
+  rootPath: string,
+  diagnosis: ProjectDiagnosis,
+): Promise<{ name: string; path: string; steps: BrowserCheckStep[] } | null> {
+  if (!isUsableDiagnosisScenario(diagnosis)) return null;
+  const name = diagnosisScenarioName(diagnosis.goal);
+  const directory = path.join(rootPath, ".cie", "agent", "scenarios");
+  await fs.mkdir(directory, { recursive: true, mode: 0o700 });
+  const file = path.join(directory, `${name}.json`);
+  const payload = {
+    name,
+    path: diagnosis.verification.path,
+    steps: diagnosis.verification.steps,
+    timeoutMs: 30_000,
+    createdAt: diagnosis.createdAt,
+    source: "diagnosis",
+  };
+  await fs.writeFile(file, `${JSON.stringify(payload, null, 2)}\n`, {
+    encoding: "utf8",
+    mode: 0o600,
+  });
+  return {
+    name,
+    path: diagnosis.verification.path!,
+    steps: diagnosis.verification.steps!,
+  };
+}
+
+/**
+ * A model-written scenario is only useful if it actually passes on the real
+ * page. Validate once before binding it as a required finish check; a broken
+ * scenario would reject every task even when the code is correct.
+ */
+export async function validateDiagnosisScenario(
+  analysis: AnalysisResult,
+  diagnosis: ProjectDiagnosis,
+): Promise<boolean> {
+  if (!isUsableDiagnosisScenario(diagnosis)) return false;
+  const result = await runBrowserCheck(analysis.id, analysis.rootPath, {
+    path: diagnosis.verification.path,
+    steps: diagnosis.verification.steps,
+    timeoutMs: 30_000,
+  }).catch(() => null);
+  return result?.ok === true;
 }
 
 export async function saveDiagnosis(rootPath: string, diagnosis: ProjectDiagnosis): Promise<void> {
@@ -550,6 +685,11 @@ export function compactDiagnosisBrief(diagnosis: ProjectDiagnosis | null, maxCha
     `Rollback: ${diagnosis.rollback}`,
     diagnosis.verification.command || diagnosis.verification.checks.length
       ? `Verification: ${[diagnosis.verification.command, ...diagnosis.verification.checks].filter(Boolean).join(" · ")}`
+      : "",
+    diagnosis.verification.steps?.length
+      ? `Browser steps (${diagnosis.verification.path ?? "entry"}): ${diagnosis.verification.steps
+          .map((step) => `${step.action}${step.selector ? ` ${step.selector}` : ""}`)
+          .join(" → ")}`
       : "",
     diagnosis.unknowns.length ? `Unknowns:\n${diagnosis.unknowns.slice(0, 6).map((item) => `- ${item}`).join("\n")}` : "",
     diagnosis.todos.length ? `Todos:\n${diagnosis.todos.slice(0, 8).map((item) => `- ${item}`).join("\n")}` : "",
@@ -601,6 +741,13 @@ export function renderDiagnosisMarkdown(diagnosis: ProjectDiagnosis): string {
   if (diagnosis.verification.command) lines.push(`- Command: \`${diagnosis.verification.command}\``);
   for (const check of diagnosis.verification.checks) lines.push(`- Check: ${check}`);
   for (const expected of diagnosis.verification.expected) lines.push(`- Expected: ${expected}`);
+  if (diagnosis.verification.steps?.length) {
+    lines.push(
+      `- Browser steps (${diagnosis.verification.path ?? "entry"}): ${diagnosis.verification.steps
+        .map((step) => `${step.action}${step.selector ? ` ${step.selector}` : ""}`)
+        .join(" → ")}`,
+    );
+  }
   lines.push("", "## Unknowns");
   if (diagnosis.unknowns.length === 0) lines.push("- None.");
   for (const unknown of diagnosis.unknowns) lines.push(`- ${unknown}`);

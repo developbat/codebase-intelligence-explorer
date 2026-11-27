@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
   Bot,
+  Brain,
   CheckCircle2,
   Loader2,
   RefreshCw,
@@ -31,7 +32,7 @@ interface AgentSettingsPanelProps {
   onSaved: (settings: AiSettingsPublic) => void;
 }
 
-const ROLE_ORDER: AiAgentRole[] = ["main", "planner", "fast", "reviewer"];
+const ROLE_ORDER: AiAgentRole[] = ["main", "planner", "diagnosis", "fast", "reviewer"];
 
 const ROLE_META: Record<AiAgentRole, { title: string; description: string; icon: typeof Bot }> = {
   main: {
@@ -43,6 +44,11 @@ const ROLE_META: Record<AiAgentRole, { title: string; description: string; icon:
     title: "Task planner",
     description: "Breaks a goal into an ordered task queue and keeps task context.",
     icon: Sparkles,
+  },
+  diagnosis: {
+    title: "Diagnosis / reasoning model",
+    description: "Read-only root-cause analysis before planning: facts, designs, risks and verification. A reasoning model is recommended.",
+    icon: Brain,
   },
   fast: {
     title: "Fast / economy model",

@@ -1607,6 +1607,9 @@ export const tr: Dictionary = {
   "Fast / economy model": "Hızlı / ekonomik model",
   "Breaks a goal into an ordered task queue and keeps task context.": "Hedefi sıralı görev kuyruğuna böler ve görev bağlamını korur.",
   "Task planner": "Görev planlayıcı",
+  "Diagnosis / reasoning model": "Teşhis / akıl yürütme modeli",
+  "Read-only root-cause analysis before planning: facts, designs, risks and verification. A reasoning model is recommended.":
+    "Planlamadan önce salt-okunur kök neden analizi: kanıtlar, tasarımlar, riskler ve doğrulama. Akıl yürütme modeli önerilir.",
   "Implements normal and hard tasks, edits files, and runs verification.": "Normal ve zor görevleri uygular, dosyaları düzenler ve doğrulama çalıştırır.",
   "Main coding model": "Ana kodlama modeli",
   "Auto-pick uses the model lists already cached in Models, not a fresh network call. Use Update model list in Models when you want fresh catalogs.": "Otomatik seçim, Modeller'de önbelleğe alınmış listeleri kullanır; yeni ağ çağrısı yapmaz. Güncel listeler için Modeller'de Model listesini güncelle'yi kullanın.",

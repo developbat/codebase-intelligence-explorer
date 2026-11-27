@@ -432,7 +432,10 @@ function mergeConstraints(
 ): ProjectBrainConstraint[] {
   const byText = new Map<string, ProjectBrainConstraint>();
   for (const constraint of [...previous, ...incoming]) {
-    const key = constraint.text.toLowerCase().replace(/\s+/g, " ").trim();
+    const key = `${constraint.scope ?? ""}|${constraint.goal ?? ""}|${constraint.text}`
+      .toLowerCase()
+      .replace(/\s+/g, " ")
+      .trim();
     if (!byText.has(key)) byText.set(key, constraint);
   }
   return [...byText.values()].slice(0, MAX_CONSTRAINTS);
@@ -908,20 +911,40 @@ function constraintKind(text: string): ProjectBrainConstraint["kind"] {
   return "other";
 }
 
+function constraintScope(text: string): "project" | "task" {
+  if (
+    /\bserver[- ]side only\b|\bsadece sunucu/i.test(text) ||
+    /uygulama(?:ya| koduna)? dokunma|do not touch (?:the )?(?:application|app|client)/i.test(text) ||
+    /(?:password|parola|secret|token|credential)/i.test(text)
+  ) {
+    return "project";
+  }
+  if (/\b(?:only|sadece)\b/i.test(text) || /[\w./-]+\.(?:php|js|ts|tsx|jsx|css|html|py|go|rs|java|kt|swift|dart)\b/i.test(text)) {
+    return "task";
+  }
+  return "project";
+}
+
 export async function addProjectConstraints(
   analysis: AnalysisResult,
   texts: string[],
   source = "request",
+  goal?: string,
 ): Promise<ProjectBrain> {
   const clean = unique(texts.map((text) => clip(redactSecrets(text), 300)));
   if (clean.length === 0) return ensureProjectBrain(analysis);
   const brain = await ensureProjectBrain(analysis);
-  const incoming: ProjectBrainConstraint[] = clean.map((text) => ({
-    id: `constraint-${text.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 48)}`,
-    text,
-    kind: constraintKind(text),
-    source,
-  }));
+  const incoming: ProjectBrainConstraint[] = clean.map((text) => {
+    const scope = constraintScope(text);
+    return {
+      id: `constraint-${text.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 48)}`,
+      text,
+      kind: constraintKind(text),
+      source,
+      scope,
+      goal: scope === "task" ? goal : undefined,
+    };
+  });
   const next: ProjectBrain = {
     ...brain,
     updatedAt: nowIso(),

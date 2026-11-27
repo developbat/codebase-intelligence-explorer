@@ -7,9 +7,12 @@ import type { ProjectDiagnosis } from "../../shared/diagnosis";
 import {
   compactDiagnosisBrief,
   diagnosisPaths,
+  diagnosisScenarioName,
+  isUsableDiagnosisScenario,
   loadDiagnosis,
   renderDiagnosisMarkdown,
   saveDiagnosis,
+  saveDiagnosisScenario,
 } from "./ai/diagnosis";
 
 function sample(): ProjectDiagnosis {
@@ -65,6 +68,11 @@ function sample(): ProjectDiagnosis {
     rollback: "Revert game.js to the previous reward mapping.",
     verification: {
       command: "node --check game.js",
+      path: "index.html",
+      steps: [
+        { action: "click", selector: "#start-btn" },
+        { action: "eval", script: "state.score", expectText: "0" },
+      ],
       checks: ["Collect the gem 3 times and assert isWall=false each time."],
       expected: ["Score/inventory increase each time; no console errors."],
     },
@@ -100,6 +108,35 @@ test("diagnosis markdown and persistence round-trip", async () => {
     assert.match(markdown, /## Designs/);
     assert.match(markdown, /## Verification/);
     assert.match(markdown, /## Todos/);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("diagnosis browser steps become a reusable scenario", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "cie-diagnosis-scenario-"));
+  try {
+    const diagnosis = sample();
+    assert.equal(isUsableDiagnosisScenario(diagnosis), true);
+    const saved = await saveDiagnosisScenario(root, diagnosis);
+    assert.ok(saved);
+    assert.equal(saved?.name, diagnosisScenarioName(diagnosis.goal));
+    const file = path.join(root, ".cie", "agent", "scenarios", `${saved?.name}.json`);
+    const parsed = JSON.parse(await fs.readFile(file, "utf8")) as {
+      path?: string;
+      steps?: { action?: string }[];
+    };
+    assert.equal(parsed.path, "index.html");
+    assert.equal(parsed.steps?.length, 2);
+    const invalid = {
+      ...diagnosis,
+      verification: {
+        ...diagnosis.verification,
+        steps: [{ action: "expectVisible" as const, selector: "#game" }],
+      },
+    };
+    assert.equal(isUsableDiagnosisScenario(invalid), false);
+    assert.equal(await saveDiagnosisScenario(root, invalid), null);
   } finally {
     await fs.rm(root, { recursive: true, force: true });
   }

@@ -1,4 +1,5 @@
 import type { AiTokenUsage } from "./ai";
+import type { BrowserCheckStep } from "./browserCheck";
 
 export interface DiagnosisFact {
   claim: string;
@@ -24,6 +25,10 @@ export interface DiagnosisFailureMode {
 
 export interface DiagnosisVerification {
   command?: string;
+  /** Real entry page for browser steps. */
+  path?: string;
+  /** Concrete browser_check steps; run automatically as the required scenario. */
+  steps?: BrowserCheckStep[];
   checks: string[];
   expected: string[];
 }

@@ -1695,6 +1695,11 @@ export async function askProject(
   const analysis = await loadAnalysis(projectId);
   const config = await resolveProvider(options.provider, options.model);
   const tokens = keywords(`${options.intent?.normalizedRequest ?? ""} ${question}`);
+  if (options.intent?.constraints?.length) {
+    await addProjectConstraints(analysis, options.intent.constraints, "chat", question).catch(() => null);
+  }
+  const brain = await ensureProjectBrain(analysis).catch(() => null);
+  const nodeLimit = brain ? 8 : 14;
 
   let scored = analysis.nodes
     .filter((node) => !["project", "folder", "module"].includes(node.kind))
@@ -1708,7 +1713,7 @@ export async function askProject(
     })
     .filter((entry) => entry.score > 0)
     .sort((a, b) => b.score - a.score)
-    .slice(0, 14);
+    .slice(0, nodeLimit);
 
   if (scored.length === 0) {
     scored = analysis.nodes
@@ -1719,14 +1724,10 @@ export async function askProject(
           (b.metadata?.callCount ?? 0) -
           ((a.metadata?.callerCount ?? 0) + (a.metadata?.callCount ?? 0)),
       )
-      .slice(0, 10)
+      .slice(0, brain ? 8 : 10)
       .map((node) => ({ node, score: 0 }));
   }
 
-  if (options.intent?.constraints?.length) {
-    await addProjectConstraints(analysis, options.intent.constraints, "chat").catch(() => null);
-  }
-  const brain = await ensureProjectBrain(analysis).catch(() => null);
   const brainBrief = brain ? compactProjectBrainBrief(brain) : "";
   const contextParts: string[] = [
     brainBrief || projectBrief(analysis),
@@ -1758,7 +1759,7 @@ export async function askProject(
         .join("\n")}`,
     );
   }
-  let budget = MAX_CONTEXT_CHARS;
+  let budget = brain ? 10_000 : MAX_CONTEXT_CHARS;
 
   for (const { node } of scored) {
     if (budget <= 0) break;
@@ -1771,7 +1772,7 @@ export async function askProject(
       : undefined;
     if (symbol) {
       contextParts.push(`Signature: ${symbol.signature}`);
-      const source = await readLines(analysis, symbol.filePath, symbol.startLine, symbol.endLine, Math.min(4500, budget));
+      const source = await readLines(analysis, symbol.filePath, symbol.startLine, symbol.endLine, Math.min(brain ? 3_000 : 4_500, budget));
       contextParts.push("```", source, "```");
       budget -= source.length;
       contextFiles.push({ path: symbol.filePath, startLine: symbol.startLine, endLine: symbol.endLine, label: symbol.qualifiedName });

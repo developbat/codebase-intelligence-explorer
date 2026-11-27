@@ -57,7 +57,7 @@ interface StoredSettings {
   agentMaxOutputTokens: number;
 }
 
-export const AI_AGENT_ROLES: AiAgentRole[] = ["main", "planner", "fast", "reviewer"];
+export const AI_AGENT_ROLES: AiAgentRole[] = ["main", "planner", "fast", "reviewer", "diagnosis"];
 const DEFAULT_MODEL_HEALTH: AiModelHealthSettings = {
   protocolFailureLimit: 2,
   emptyFailureLimit: 2,
@@ -143,7 +143,7 @@ function defaults(): StoredSettings {
     defaultModel: main.model,
     providers,
     customProviders: [],
-    agentRoles: { main, planner: main, fast: main, reviewer: main },
+    agentRoles: { main, planner: main, fast: main, reviewer: main, diagnosis: main },
     modelHealth: DEFAULT_MODEL_HEALTH,
     autoSwitchModels: true,
     fallback: { chain: [] },
@@ -228,6 +228,12 @@ async function loadStored(): Promise<StoredSettings> {
         parsedRoles.reviewer && typeof parsedRoles.reviewer.provider === "string"
           ? parsedRoles.reviewer
           : fallbackRole,
+      diagnosis:
+        parsedRoles.diagnosis && typeof parsedRoles.diagnosis.provider === "string"
+          ? parsedRoles.diagnosis
+          : parsedRoles.planner && typeof parsedRoles.planner.provider === "string"
+            ? parsedRoles.planner
+            : fallbackRole,
     };
     const providers: Partial<Record<AiProviderId, StoredProvider>> = {
       ...base.providers,
@@ -550,6 +556,11 @@ export async function updateAiSettings(input: AiSettingsInput): Promise<AiSettin
       stored.agentRoles[role] = { provider: configured.provider, model };
     }
     const main = stored.agentRoles.main;
+    // Diagnosis follows the planner unless the user explicitly chooses a
+    // separate reasoning model for it.
+    if (!input.agentRoles.diagnosis && input.agentRoles.planner) {
+      stored.agentRoles.diagnosis = stored.agentRoles.planner;
+    }
     stored.defaultProvider = main.provider;
     stored.defaultModel = main.model;
   }

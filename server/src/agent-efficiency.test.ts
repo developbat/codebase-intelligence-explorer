@@ -123,6 +123,18 @@ test("verified no-change summaries are accepted as completion", () => {
     true,
   );
   assert.equal(summaryAllowsNoChanges("The task is incomplete; route wiring is missing."), false);
+  assert.equal(
+    summaryAllowsNoChanges(
+      "respawnReward yedek dalı istenen davranışı zaten uyguluyor; hiçbir dosya değiştirilmedi.",
+    ),
+    true,
+  );
+  assert.equal(
+    summaryClaimsAlreadyPresent(
+      "respawnReward yedek dalı istenen davranışı zaten uyguluyor; hiçbir dosya değiştirilmedi.",
+    ),
+    true,
+  );
 });
 
 test("visual shape/placement requests classify and require rendered geometry evidence", () => {
@@ -401,6 +413,19 @@ test("no-change completion requires file:line evidence and a real check", () => 
         changedFiles: [],
       },
       false,
+    ).ok,
+    true,
+  );
+  assert.equal(
+    noChangeCompletionEvidence(
+      plain,
+      {
+        summary: "Already present at parser.ts:42; verified by the required scenario.",
+        steps: [],
+        changedFiles: [],
+      },
+      true,
+      true,
     ).ok,
     true,
   );

@@ -95,6 +95,7 @@ test("provider model lists are cached and agent roles can be configured", async 
         ["planner", "gpt-test-large"],
         ["fast", "gpt-test-small"],
         ["reviewer", "gpt-test-large"],
+        ["diagnosis", "gpt-test-large"],
       ],
     );
 

@@ -216,7 +216,7 @@ export interface AiProviderState {
   keyHint?: string;
 }
 
-export type AiAgentRole = "main" | "planner" | "fast" | "reviewer";
+export type AiAgentRole = "main" | "planner" | "fast" | "reviewer" | "diagnosis";
 
 export interface AiAgentRoleConfig {
   provider: AiProviderId;

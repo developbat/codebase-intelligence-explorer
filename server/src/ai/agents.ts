@@ -221,6 +221,12 @@ export async function autoConfigureAgents(): Promise<AiAgentAutoResult> {
       ...plannerPick,
     },
     {
+      role: "diagnosis",
+      provider: plannerPick.provider,
+      model: plannerPick.model,
+      reason: "Diagnosis uses the planner/reasoning model",
+    },
+    {
       role: "fast",
       provider: fastProvider.id,
       model: fastModel,
@@ -313,7 +319,7 @@ export async function pickAlternateAgentModel(exclude?: {
   );
   // Coding fallbacks should stay cheap and fast first. Reviewer/planner models
   // are often the most expensive ones and should be a last resort.
-  const roleOrder: AiAgentRole[] = ["fast", "main", "planner", "reviewer"];
+  const roleOrder: AiAgentRole[] = ["fast", "main", "planner", "diagnosis", "reviewer"];
   const candidates: { provider: string; model: string; reason: string }[] = [];
   for (const role of roleOrder) {
     const configuredRole = settings.agentRoles.find((item) => item.role === role);

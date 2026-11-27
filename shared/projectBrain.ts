@@ -110,6 +110,9 @@ export interface ProjectBrainConstraint {
   kind: "path" | "behavior" | "security" | "style" | "other";
   value?: string;
   source?: string;
+  /** Project-wide rules persist; task-scoped rules apply only to the same goal. */
+  scope?: "project" | "task";
+  goal?: string;
 }
 
 export interface ProjectBrainDecision {

@@ -68,8 +68,11 @@ import {
   compactDiagnosisBrief,
   diagnoseProject,
   diagnosisPaths,
+  diagnosisScenarioName,
+  isUsableDiagnosisScenario,
   type DiagnoseResult,
 } from "./diagnosis";
+import { auditProjectConstraints } from "./constraintRules";
 import {
   RECOVERY_POLICY,
   buildResumeContract,
@@ -995,7 +998,7 @@ export function summaryAllowsNoChanges(summary: string): boolean {
   if (/\b(not complete|incomplete|not done|failed|missing|tamamlanmadı|yapılmadı|eksik)\b/i.test(summary)) {
     return false;
   }
-  return /already (?:present|exists|implemented|applied|there|complete|complete and|satisf(?:y|ies|ied)|fits|matches|implemented and verified)|no (?:further )?(?:code )?changes? (?:are |was |were )?(?:needed|required)|nothing needed to change|none needed|task[\s-]*\d*\s*(?:is\s*)?complete|görev[\s-]*\d*\s*tamamlandı|created and verified|verified|confirmed|nothing (?:was|is) (?:changed|rewritten)|no (?:changes|modifications) (?:made|required)|zaten (?:var|mevcut|tamam|tam|işlevsel|karşılan|uyumlu|uygulanmış|eklenmiş|yapılmış|mevcutmuş)|değişiklik gerekmiyor|gerek yok/i.test(
+  return /already (?:present|exists|implemented|applied|there|complete|complete and|satisf(?:y|ies|ied)|fits|matches|implemented and verified)|no (?:further )?(?:code )?changes? (?:are |was |were )?(?:needed|required)|nothing needed to change|none needed|task[\s-]*\d*\s*(?:is\s*)?complete|görev[\s-]*\d*\s*tamamlandı|created and verified|verified|confirmed|nothing (?:was|is) (?:changed|rewritten)|no (?:changes|modifications) (?:made|required)|zaten (?:var|mevcut|tamam|tam|işlevsel|karşılan|karşılıyor|uyumlu|uygulanmış|uyguluyor|uyguluyordur|uygundur|eklenmiş|yapılmış|mevcutmuş)|değişiklik (?:gerekmiyor|yapılmadı)|(?:hiçbir )?dosya değiştirilmedi|değişmedi|gerek yok/i.test(
     summary,
   );
 }
@@ -1006,7 +1009,7 @@ export function summaryAllowsNoChanges(summary: string): boolean {
  * task that changed another file, so it must be checked per request.
  */
 export function summaryClaimsAlreadyPresent(summary: string): boolean {
-  return /already (?:present|exists|implemented|applied|there|complete|satisf(?:y|ies|ied)|fits|matches|renders|sits|works|has)|no (?:further )?(?:code )?changes? (?:are |was |were )?(?:needed|required)|nothing needed to change|none needed|nothing (?:was|is) (?:changed|rewritten)|no (?:changes|modifications) (?:made|required)|zaten (?:var|mevcut|tamam|tam|işlevsel|karşılan|uyumlu|uygulanmış|eklenmiş|yapılmış|mevcutmuş)|değişiklik gerekmiyor|gerek yok/i.test(
+  return /already (?:present|exists|implemented|applied|there|complete|satisf(?:y|ies|ied)|fits|matches|renders|sits|works|has)|no (?:further )?(?:code )?changes? (?:are |was |were )?(?:needed|required)|nothing needed to change|none needed|nothing (?:was|is) (?:changed|rewritten)|no (?:changes|modifications) (?:made|required)|zaten (?:var|mevcut|tamam|tam|işlevsel|karşılan|karşılıyor|uyumlu|uygulanmış|uyguluyor|uyguluyordur|uygundur|eklenmiş|yapılmış|mevcutmuş)|değişiklik (?:gerekmiyor|yapılmadı)|(?:hiçbir )?dosya değiştirilmedi|değişmedi|gerek yok/i.test(
     summary,
   );
 }
@@ -1884,7 +1887,7 @@ export function isInteractiveUiCheck(step: AiAgentStep): boolean {
 }
 
 const VISUAL_SHAPE_PLACEMENT =
-  /\b(?:shape|shaped|icon|glyph|sprite|drawn|draw|render(?:ed|ing)?|top[-\s]?left|left[-\s]?top|top[-\s]?right|right[-\s]?top|bottom[-\s]?left|bottom[-\s]?right|corner|position(?:ed)?|placement|placed|layout|align(?:ed|ment)?)\b|şekil(?:inde|li)?|ikon|simge|sol[-\s]?üst|üst[-\s]?sol|sağ[-\s]?üst|üst[-\s]?sağ|sol[-\s]?alt|sağ[-\s]?alt|köşe|konum|hizala|çiz|görünüm/i;
+  /\b(?:shape|shaped|icon|glyph|sprite|drawn|draw|render(?:ed|ing)?|top[-\s]?left|left[-\s]?top|top[-\s]?right|right[-\s]?top|bottom[-\s]?left|bottom[-\s]?right|corner)\b|şekil(?:inde|li)?|ikon|simge|sol[-\s]?üst|üst[-\s]?sol|sağ[-\s]?üst|üst[-\s]?sağ|sol[-\s]?alt|sağ[-\s]?alt|köşe|hizala|çiz|görünüm/i;
 
 /** True when the request is about how something looks or where it sits. */
 export function taskRequestsVisualShapeOrPlacement(task: ProjectTask): boolean {
@@ -2096,6 +2099,7 @@ export function noChangeCompletionEvidence(
   task: ProjectTask,
   result: Pick<AiAgentResult, "summary" | "steps" | "changedFiles">,
   projectHasUi: boolean,
+  scenarioPassed = false,
 ): { ok: boolean; reason: string } {
   if (!summaryCitesFileLines(result.summary ?? "")) {
     return {
@@ -2113,7 +2117,13 @@ export function noChangeCompletionEvidence(
         "No-change completion rejected: the request asks for a visual shape or placement. A constant, icon name, element id or plain 'visible' check only proves presence. Verify the rendered result with browser_check eval (getBoundingClientRect or getImageData) plus an assertion, or edit the code to match the requested shape/placement.",
     };
   }
-  if (!visual && projectHasUi && !hasGeometry && !result.steps.some(isInteractiveUiCheck)) {
+  if (
+    !visual &&
+    projectHasUi &&
+    !hasGeometry &&
+    !scenarioPassed &&
+    !result.steps.some(isInteractiveUiCheck)
+  ) {
     return {
       ok: false,
       reason:
@@ -2774,7 +2784,7 @@ export async function runProjectLoop(
     ]),
   ];
   if (requestConstraints.length > 0) {
-    await addProjectConstraints(analysis, requestConstraints, "request").catch(() => undefined);
+    await addProjectConstraints(analysis, requestConstraints, "request", goal).catch(() => undefined);
   }
   const projectBrain = await ensureProjectBrain(analysis).catch(() => null);
   const projectBriefText = projectBrain ? compactProjectBrainBrief(projectBrain) : "";
@@ -2947,6 +2957,16 @@ export async function runProjectLoop(
     });
   }
   const diagnosisBrief = diagnosis ? compactDiagnosisBrief(diagnosis) : "";
+  const diagnosisScenario: TaskScenarioMatch | null =
+    diagnosis && isUsableDiagnosisScenario(diagnosis)
+      ? {
+          name: diagnosisScenarioName(diagnosis.goal),
+          path: diagnosis.verification.path!,
+          steps: diagnosis.verification.steps!,
+          timeoutMs: 30_000,
+          score: 0,
+        }
+      : null;
   let plannedNow = false;
   if (
     !queue ||
@@ -3307,10 +3327,15 @@ ${collapsed.tasks[0].checklist
     // name without being responsible for the whole scenario. Require it only
     // when the task detail or acceptance explicitly asks for it.
     const scenarioText = `${task.detail}\n${task.acceptance ?? ""}`.toLowerCase();
+    const isFinalTask =
+      task.buildSession === true ||
+      queue.tasks.length === 1 ||
+      queue.tasks[queue.tasks.length - 1]?.id === task.id;
     const requiredScenario =
-      scenarioMatch && scenarioText.includes(scenarioMatch.name.toLowerCase())
+      (isFinalTask ? diagnosisScenario : null) ??
+      (scenarioMatch && scenarioText.includes(scenarioMatch.name.toLowerCase())
         ? scenarioMatch
-        : null;
+        : null);
     const microEdit = isMicroEditTask(task);
     const tightReads =
       !microEdit &&
@@ -3870,8 +3895,9 @@ ${collapsed.tasks[0].checklist
     const noChangeClaim =
       summaryClaimsAlreadyPresent(result.summary) ||
       (task.buildSession === true && result.changedFiles.length === 0);
+    const scenarioPassed = result.logs?.some((entry) => entry.label === "Required scenario passed") === true;
     const noChangeEvidence = noChangeClaim
-      ? noChangeCompletionEvidence(task, result, projectHasUi)
+      ? noChangeCompletionEvidence(task, result, projectHasUi, scenarioPassed)
       : { ok: true, reason: "" };
     const summaryAllowsCompletion =
       summaryAllowsNoChanges(result.summary) &&
@@ -3961,6 +3987,26 @@ ${collapsed.tasks[0].checklist
       taskLooksLikeRandomStart(task) &&
       projectHasUi &&
       !result.steps.some(isRandomStartEvidenceCheck);
+    const brainForConstraints = await ensureProjectBrain(analysis).catch(() => null);
+    const constraintAudit = auditProjectConstraints({
+      constraints: brainForConstraints?.constraints ?? [],
+      changedFiles: [...(current.changedFiles ?? []), ...result.changedFiles],
+      summary: result.summary ?? "",
+      goal: queue.goal,
+      files: analysis.files.map((file) => file.path),
+    });
+    if (constraintAudit.warnings.length > 0) {
+      emit({
+        type: "log",
+        entry: {
+          id: `log-${Date.now()}-constraint-warning`,
+          at: nowIso(),
+          level: "info",
+          label: "Constraint warning",
+          detail: constraintAudit.warnings.join(" ").slice(0, 400),
+        },
+      });
+    }
     let status: ProjectTask["status"] =
       result.stoppedReason === "aborted" || result.stoppedReason === "budget"
         ? "blocked"
@@ -3968,6 +4014,7 @@ ${collapsed.tasks[0].checklist
           ? "done"
           : result.stoppedReason !== "finished" ||
             !noChangeEvidence.ok ||
+            !constraintAudit.ok ||
             malformedToolReply ||
             writeWithoutChange ||
             verificationBlocker ||
@@ -3979,18 +4026,20 @@ ${collapsed.tasks[0].checklist
             missingRandomVerification
           ? "failed"
           : "done";
+    if (!constraintAudit.ok) status = "failed";
     const requiredScenarioSatisfied =
       !requiredScenario ||
       Boolean(scenarioRescue?.ok) ||
       result.logs?.some((entry) => entry.label === "Required scenario passed");
     if (
-      scenarioRescue?.ok ||
-      (microCompleted &&
-        requiredScenarioSatisfied &&
-        !missingVisualVerification &&
-        !missingSpawnVerification &&
-        !missingRemovalVerification &&
-        !missingRandomVerification)
+      (scenarioRescue?.ok ||
+        (microCompleted &&
+          requiredScenarioSatisfied &&
+          !missingVisualVerification &&
+          !missingSpawnVerification &&
+          !missingRemovalVerification &&
+          !missingRandomVerification)) &&
+      constraintAudit.ok
     ) {
       status = "done";
     }
@@ -4288,6 +4337,26 @@ ${collapsed.tasks[0].checklist
     if (
       status !== "done" &&
       result.stoppedReason !== "aborted" &&
+      lifetimeTokens >= hardTaskTokens
+    ) {
+      queue = markTask(queue, task.id, {
+        status: "blocked",
+        completedAt: nowIso(),
+        lifetimeTokens,
+        notes: `Blocked to control cost: ${lifetimeTokens.toLocaleString()} tokens spent across attempts (limit ${hardTaskTokens.toLocaleString()}). The last failure was a verification/incomplete-work gate, not a budget error. Split the goal into smaller behaviors or retry with a narrower scope and an exact verification recipe.`,
+      });
+      await appendTaskContext(
+        analysis.rootPath,
+        `Blocked · ${task.id}`,
+        `Hard cost cap reached: ${lifetimeTokens.toLocaleString()} of ${hardTaskTokens.toLocaleString()} tokens. No further retries.`,
+      ).catch(() => undefined);
+      queue = await saveQueue(analysis.rootPath, queue);
+      emit({ type: "task", queue, task: queue.tasks.find((item) => item.id === task.id) });
+      continue;
+    }
+    if (
+      status !== "done" &&
+      result.stoppedReason !== "aborted" &&
       (readBudgetStalled || noEditTokenBurn || envFailure || softBudgetHit)
     ) {
       const reason =
@@ -4521,7 +4590,7 @@ ${collapsed.tasks[0].checklist
           status: "failed",
           notes: `Automatic model switching is disabled. Choose another model or enable it in Settings → General.${
             noChangeEvidence.ok ? "" : ` ${noChangeEvidence.reason}`
-          }`,
+          }${constraintAudit.ok ? "" : ` Constraint violation: ${constraintAudit.violations.join(" ")}`}`,
         });
       } else if (!modelFailure) {
         // The provider answered normally; the task itself was incomplete.
@@ -4540,6 +4609,10 @@ ${collapsed.tasks[0].checklist
           retryContext: compactRetryContext(result),
           notes: `Retry the same model: the provider worked, but the task was incomplete. Continue from the current files, complete the missing work and verify it. Do not restart from scratch.${
             noChangeEvidence.ok ? "" : ` ${noChangeEvidence.reason}`
+          }${
+            constraintAudit.ok
+              ? ""
+              : ` Constraint violation: ${constraintAudit.violations.join(" ")}`
           }${
             missingVisualVerification
               ? " No rendered-geometry check ran for the requested shape/placement. Add one browser_check step that reads getBoundingClientRect (DOM position) or canvas getImageData (drawn shape) and assert it with expectText/expectValue; a symbol, icon constant, element id or expectVisible is not proof."
