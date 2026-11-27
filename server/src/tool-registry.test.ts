@@ -42,6 +42,7 @@ test("approval and destructive metadata are rendered", () => {
   const needsApproval = renderAgentToolCatalog(false, false, false);
   assert.match(needsApproval, /write_file[\s\S]*requires user approval/);
   assert.match(needsApproval, /run_command[\s\S]*requires user approval/);
+  assert.match(needsApproval, /run_background[\s\S]*requires user approval/);
   assert.match(needsApproval, /delete_file[\s\S]*always requires confirmation/);
   assert.match(needsApproval, /rename_path[\s\S]*always requires confirmation/);
 
@@ -56,6 +57,9 @@ test("argument schemas accept path aliases and reject missing/typed values", () 
   assert.match(validateToolArgs("read_file", { path: 3 }) ?? "", /path must be string/);
   assert.equal(validateToolArgs("write_file", { path: "a.ts", content: "x" }), null);
   assert.match(validateToolArgs("run_command", {}) ?? "", /requires one of: command/);
+  assert.equal(validateToolArgs("run_background", { command: "node server.js" }), null);
+  assert.match(validateToolArgs("run_background", {}) ?? "", /requires one of: command/);
+  assert.match(validateToolArgs("stop_background", {}) ?? "", /requires one of: jobId/);
 });
 
 test("capability suggestions follow the request and selected groups", () => {

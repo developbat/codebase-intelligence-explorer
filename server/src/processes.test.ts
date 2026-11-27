@@ -28,6 +28,22 @@ test("extractLocalUrls finds and normalizes dev server addresses", () => {
   );
 });
 
+test("detectDevCommands prefers a plain Node server over the static fallback", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "cie-dev-"));
+  try {
+    await fs.writeFile(path.join(root, "index.html"), "<!doctype html><html></html>\n");
+    await fs.writeFile(
+      path.join(root, "server.js"),
+      "require('http').createServer((req, res) => res.end('ok')).listen(3000);\n",
+    );
+    const commands = await detectDevCommands(root);
+    assert.equal(commands[0]?.command, "node server.js");
+    assert.ok(!commands.some((item) => item.command.includes("http.server")));
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
 test("detectDevCommands reads package scripts and lockfile manager", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "cie-dev-"));
   try {
@@ -134,6 +150,9 @@ test("isDevServerCommand distinguishes servers from one-off commands", async () 
   assert.equal(isDevServerCommand("./.venv/bin/python -m uvicorn app.main:app --reload"), true);
   assert.equal(isDevServerCommand("npm run dev"), true);
   assert.equal(isDevServerCommand("npm run build"), false);
+  assert.equal(isDevServerCommand("node server.js"), true);
+  assert.equal(isDevServerCommand("node index.mjs"), true);
+  assert.equal(isDevServerCommand("node -e \"console.log(1)\""), false);
   assert.equal(isDevServerCommand("./.venv/bin/python -m pip install -r requirements.txt"), false);
   assert.equal(isDevServerCommand("./.venv/bin/python -m pytest -q"), false);
 });

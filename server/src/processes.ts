@@ -12,6 +12,7 @@ import {
   writePythonEnvironmentMarker,
 } from "./pythonRuntime";
 import { isWithin } from "./scanner";
+import { projectProcessEnv } from "./projectEnv";
 import type { BackgroundJob, DevCommandSuggestion } from "../../shared/types";
 
 const MAX_OUTPUT = 240_000;
@@ -181,6 +182,18 @@ export async function detectDevCommands(rootPath: string): Promise<DevCommandSug
     // no package.json
   }
 
+  // A plain Node server (no package.json script) is a real backend: prefer it
+  // over the static `python3 -m http.server` fallback, which cannot serve the
+  // project's own /api routes.
+  if (!suggestions.some((item) => item.purpose !== "install")) {
+    for (const candidate of ["server.js", "app.js", "index.js", "main.js"]) {
+      if (await exists(candidate)) {
+        suggestions.push({ label: "Node server", command: `node ${candidate}`, kind: "node" });
+        break;
+      }
+    }
+  }
+
   if ((await exists("composer.json")) && !(await exists("vendor"))) {
     suggestions.push({ label: "Install dependencies", command: "composer install", kind: "php", purpose: "install" });
   }
@@ -307,7 +320,7 @@ export interface BackgroundProcessOptions {
 }
 
 const DEV_SERVER_PATTERN =
-  /\b(streamlit|uvicorn|gunicorn|flask\s+--app|manage\.py\s+runserver|npm\s+(run\s+)?(dev|start|serve)|pnpm\s+(dev|start)|yarn\s+(dev|start)|bun\s+(dev|start)|vite|next\s+dev|php\s+-S|http\.server|expo\s+start|react-native\s+start|flutter\s+run|go\s+run|cargo\s+run|dotnet\s+run|rails\s+server|mix\s+phx\.server)\b/i;
+  /\b(streamlit|uvicorn|gunicorn|flask\s+--app|manage\.py\s+runserver|npm\s+(run\s+)?(dev|start|serve)|pnpm\s+(dev|start)|yarn\s+(dev|start)|bun\s+(dev|start)|vite|next\s+dev|php\s+-S|http\.server|expo\s+start|react-native\s+start|flutter\s+run|go\s+run|cargo\s+run|dotnet\s+run|rails\s+server|mix\s+phx\.server|node\s+(?:\.\/)?(?:server|app|index|main)\.(?:js|cjs|mjs|ts)|python3?\s+(?:app|main|server)\.py|deno\s+run)\b/i;
 
 export function isDevServerCommand(command: string): boolean {
   return DEV_SERVER_PATTERN.test(command);
@@ -345,14 +358,13 @@ export async function startBackgroundProcess(
     shell: true,
     windowsHide: true,
     detached: process.platform !== "win32",
-    env: {
-      ...process.env,
+    env: projectProcessEnv({
       CI: process.env.CI ?? "1",
       PYTHONUNBUFFERED: "1",
       GIT_PAGER: "cat",
       PAGER: "cat",
       ...pythonEnv,
-    },
+    }),
   });
 
   const job: JobInternal = {
@@ -438,7 +450,7 @@ export async function autoStartDevServer(
   });
 }
 
-async function waitForJobUrl(
+export async function waitForBackgroundUrl(
   projectId: string,
   jobId: string,
   timeoutMs: number,
@@ -467,7 +479,7 @@ export async function ensureDevServerForRequest(
     (job) => job.status === "running" && isDevServerCommand(job.command),
   );
   if (running) {
-    const url = await waitForJobUrl(projectId, running.id, 6_000);
+    const url = await waitForBackgroundUrl(projectId, running.id, 6_000);
     const current = listBackgroundProcesses(projectId).find((item) => item.id === running.id) ?? running;
     return { job: current, url };
   }
@@ -477,7 +489,7 @@ export async function ensureDevServerForRequest(
   const started = await startBackgroundProcess(rootPath, projectId, server.command, undefined, {
     autoRestart: true,
   });
-  const url = await waitForJobUrl(projectId, started.id, 12_000);
+  const url = await waitForBackgroundUrl(projectId, started.id, 12_000);
   const current = listBackgroundProcesses(projectId).find((item) => item.id === started.id) ?? started;
   return { job: current, url };
 }

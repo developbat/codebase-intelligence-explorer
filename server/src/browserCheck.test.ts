@@ -24,6 +24,24 @@ test("browser check treats a dev-server URL as url even when passed in path", ()
   assert.throws(() => browserCheckTarget("demo", "https://example.com"), /localhost/);
 });
 
+test("browser check rejects the B.A.D IDE server as a project target", () => {
+  const previous = process.env.CIE_BROWSER_BASE;
+  process.env.CIE_BROWSER_BASE = "http://127.0.0.1:50442";
+  try {
+    assert.throws(
+      () => browserCheckTarget("demo", "http://localhost:50442/"),
+      /B\.A\.D IDE app server/,
+    );
+    assert.equal(
+      browserCheckTarget("demo", "http://127.0.0.1:50442/api/projects/demo/preview/index.html"),
+      "http://127.0.0.1:50442/api/projects/demo/preview/index.html",
+    );
+  } finally {
+    if (previous === undefined) delete process.env.CIE_BROWSER_BASE;
+    else process.env.CIE_BROWSER_BASE = previous;
+  }
+});
+
 
 test("browser steps accept model aliases before launch", () => {
   const steps = normalizeBrowserSteps([

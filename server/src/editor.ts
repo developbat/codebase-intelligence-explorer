@@ -6,6 +6,7 @@ import { getDataDir } from "./store";
 import { updateIndexedFile } from "./indexer";
 import { waitForPythonSetup, projectPythonEnv } from "./pythonRuntime";
 import { isWithin } from "./scanner";
+import { projectProcessEnv } from "./projectEnv";
 
 const MAX_WRITE_BYTES = 900_000;
 const MAX_ASSET_BYTES = 15_000_000;
@@ -348,7 +349,11 @@ export async function runProjectCommand(
       env:
         options.envMode === "safe"
           ? safeProcessEnv({ CI: process.env.CI ?? "1", ...pythonEnv, ...(options.env ?? {}) })
-          : { ...process.env, CI: process.env.CI ?? "1", ...pythonEnv, ...(options.env ?? {}) },
+          : projectProcessEnv({
+              CI: process.env.CI ?? "1",
+              ...pythonEnv,
+              ...(options.env ?? {}),
+            }),
     });
 
     const append = (

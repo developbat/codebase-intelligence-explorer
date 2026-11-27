@@ -50,6 +50,13 @@ import { lspCompletion, lspDiagnostics, lspHover } from "../lsp";
 import { queryCsvFile, querySqliteFile } from "../dataQuery";
 import { runBrowserCheck } from "../browserCheck";
 import {
+  isDevServerCommand,
+  listBackgroundProcesses,
+  startBackgroundProcess,
+  stopBackgroundProcess,
+  waitForBackgroundUrl,
+} from "../processes";
+import {
   normalizeBrowserSteps,
   type BrowserCheckStep,
 } from "../../../shared/browserCheck";
@@ -5403,6 +5410,8 @@ export async function runAgentTask(
       "format_file",
       "run_skill_script",
       "run_command",
+      "run_background",
+      "stop_background",
       "finish",
     ];
     const action = validActions.includes(rawAction as AiAgentAction)
@@ -5495,6 +5504,8 @@ export async function runAgentTask(
         delete_file: "Deleting file…",
         format_file: "Formatting file…",
         run_command: "Running command…",
+        run_background: "Starting background server…",
+        stop_background: "Stopping background server…",
       };
       log("tool", toolLabel[action] ?? `Running ${action}…`, agentActionTarget(args));
     }
@@ -7739,6 +7750,14 @@ export async function runAgentTask(
               : "That command is blocked by the agent safety policy.",
           );
         }
+        if (
+          isDevServerCommand(command) &&
+          !/\b(?:build|test|lint|typecheck|tsc|compile|check)\b/i.test(command)
+        ) {
+          throw new Error(
+            `"${command}" looks like a long-running server. Use run_background instead, then browser_check the URL it returns.`,
+          );
+        }
         const cwdInput = normalizeAgentPath(analysis.rootPath, args.cwd);
         const cwd = cwdInput || undefined;
         const commandAllowed = await requirePermission(
@@ -7785,6 +7804,74 @@ export async function runAgentTask(
         ) {
           verificationPassed = true;
         }
+      } else if (action === "run_background") {
+        if (ranCommands.length >= AGENT_MAX_COMMANDS) {
+          throw new Error(
+            `Command limit reached (${AGENT_MAX_COMMANDS}). Stop a background job or finish with the evidence you already have.`,
+          );
+        }
+        const command = String(args.command ?? "").trim();
+        if (!command) throw new Error("A command is required.");
+        if (isBlockedAgentCommand(command)) {
+          throw new Error(
+            /\b(?:p?kill|killall|nohup)\b/i.test(command)
+              ? "Do not kill or restart the dev server. Use stop_background with the job id returned by run_background."
+              : "That command is blocked by the agent safety policy.",
+          );
+        }
+        const bgCwdInput = normalizeAgentPath(analysis.rootPath, args.cwd);
+        const bgCwd = bgCwdInput || undefined;
+        const bgAllowed = await requirePermission(
+          "command",
+          "run_background",
+          command,
+          `Background process. Working directory: ${bgCwd ?? "."}`,
+          { preview: command },
+        );
+        if (!bgAllowed) throw new Error("The user denied permission to start the background process.");
+        const job = await startBackgroundProcess(analysis.rootPath, projectId, command, bgCwd);
+        ranCommands.push(command);
+        const url = await waitForBackgroundUrl(projectId, job.id, 15_000);
+        const current =
+          listBackgroundProcesses(projectId).find((item) => item.id === job.id) ?? job;
+        const bgOutput = current.output?.slice(-2_000) ?? "";
+        const running = current.status === "running";
+        const portHint = /EADDRINUSE|address already in use/i.test(bgOutput)
+          ? "Port is already in use. Retry with an explicit free port, for example PORT=3100 node server.js."
+          : "";
+        ok = running;
+        observation = clampObservation(
+          [
+            `Background job ${job.id} started.`,
+            `Command: ${job.command}`,
+            `Status: ${current.status}`,
+            url
+              ? `URL: ${url}`
+              : "URL: not detected yet (the process may still be starting; inspect the output below).",
+            running
+              ? `Next: call browser_check with url="${url ?? "http://127.0.0.1:<port>"}" and assert the real behavior. Stop it with stop_background jobId="${job.id}" when done.`
+              : "The process exited before a URL was detected. Fix the command or the project server and try again.",
+            portHint,
+            bgOutput ? `Output:\n${bgOutput}` : "",
+          ]
+            .filter(Boolean)
+            .join("\n"),
+          4_000,
+        );
+        log(
+          running ? "success" : "error",
+          running ? "Background server started" : "Background server failed",
+          url ?? job.command,
+        );
+      } else if (action === "stop_background") {
+        const jobId = String(args.jobId ?? args.id ?? "").trim();
+        if (!jobId) {
+          throw new Error("A jobId is required. Use the id returned by run_background.");
+        }
+        const job = stopBackgroundProcess(projectId, jobId);
+        observation = `Stopped background job ${jobId} (${job.command}). Status: ${job.status}.`;
+        ok = true;
+        log("info", "Background server stopped", job.command);
       }
       }
       if (actionCacheKeyValue && !cachedAction && ok) {

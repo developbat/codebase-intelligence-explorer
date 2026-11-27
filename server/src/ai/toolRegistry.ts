@@ -573,9 +573,28 @@ const TOOL_SPECS: AgentToolSpec[] = [
     groups: ["command"],
     example: '{"action":"run_command","args":{"command":"npm test","cwd":"."}}',
     description: "Run a project command with a permission handshake.",
-    whenToUse: "Use for tests, build, typecheck, lint or an explicit user command.",
+    whenToUse:
+      "Use for tests, build, typecheck, lint or an explicit user command. Never use it for a long-running dev server.",
     permission: "command",
     args: { required: [["command"]], types: { command: "string" } },
+  },
+  {
+    action: "run_background",
+    groups: ["command"],
+    example: '{"action":"run_background","args":{"command":"node server.js","cwd":"."}}',
+    description: "Start a long-running project process in the background and return its local URL.",
+    whenToUse:
+      "Use for a dev/preview server or any page that needs its own API. Start it, then browser_check the returned URL; use stop_background when done.",
+    permission: "command",
+    args: { required: [["command"]], types: { command: "string", cwd: "string" } },
+  },
+  {
+    action: "stop_background",
+    groups: ["command"],
+    example: '{"action":"stop_background","args":{"jobId":"<job id from run_background>"}}',
+    description: "Stop a background process started by run_background.",
+    whenToUse: "Use when the verification finished and the server is no longer needed.",
+    args: { required: [["jobId", "id"]], types: { jobId: "string" } },
   },
   {
     action: "run_project_tool",

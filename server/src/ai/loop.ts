@@ -4580,11 +4580,15 @@ ${collapsed.tasks[0].checklist
       result.stoppedReason !== "aborted" &&
       lifetimeTokens >= hardTaskTokens
     ) {
+      const preserved = [
+        ...new Set([...(task.changedFiles ?? []), ...result.changedFiles]),
+      ];
       queue = markTask(queue, task.id, {
         status: "blocked",
         completedAt: nowIso(),
         lifetimeTokens,
-        notes: `Blocked to control cost: ${lifetimeTokens.toLocaleString()} tokens spent across attempts (limit ${hardTaskTokens.toLocaleString()}). The last failure was a verification/incomplete-work gate, not a budget error. Split the goal into smaller behaviors or retry with a narrower scope and an exact verification recipe.`,
+        changedFiles: preserved,
+        notes: `Blocked to control cost: ${lifetimeTokens.toLocaleString()} tokens spent across attempts (limit ${hardTaskTokens.toLocaleString()}). Preserved files from earlier attempts: ${preserved.join(", ") || "none"}. The last failure was a verification/incomplete-work gate, not a budget error. Split the goal into smaller behaviors or start a narrow verification task.`,
       });
       await appendTaskContext(
         analysis.rootPath,
@@ -4762,6 +4766,33 @@ ${collapsed.tasks[0].checklist
       break;
     }
 
+    // Do not start a retry that cannot fit under the lifetime cap. A replay
+    // that overshoots the cap wastes a full attempt and then blocks anyway.
+    if (
+      status !== "done" &&
+      result.stoppedReason !== "aborted" &&
+      task.attempts === 0 &&
+      hardTaskTokens - lifetimeTokens < 40_000
+    ) {
+      const preserved = [
+        ...new Set([...(task.changedFiles ?? []), ...result.changedFiles]),
+      ];
+      queue = markTask(queue, task.id, {
+        status: "blocked",
+        completedAt: nowIso(),
+        changedFiles: preserved,
+        notes: `Stopped before a retry: only ${Math.max(0, hardTaskTokens - lifetimeTokens).toLocaleString()} of the ${hardTaskTokens.toLocaleString()}-token lifetime cap remains. Preserved files from earlier attempts: ${preserved.join(", ") || "none"}. Start a narrow verification task instead of replaying this goal.`,
+      });
+      await appendTaskContext(
+        analysis.rootPath,
+        `Blocked before retry · ${task.id}`,
+        `Preserved work: ${preserved.join(", ") || "none"}. Not enough lifetime budget remained for another full attempt.`,
+      ).catch(() => undefined);
+      queue = await saveQueue(analysis.rootPath, queue);
+      emit({ type: "task", queue, task: queue.tasks.find((item) => item.id === task.id) });
+      continue;
+    }
+
     if (status !== "done" && result.stoppedReason !== "aborted" && task.attempts === 0) {
       const burnedStepsWithoutEdit =
         !inspectionTask &&
@@ -4836,6 +4867,14 @@ ${collapsed.tasks[0].checklist
       } else if (!modelFailure) {
         // The provider answered normally; the task itself was incomplete.
         // Do not switch models for task-quality failures.
+        const preservedRetryFiles = [
+          ...new Set([...(task.changedFiles ?? []), ...result.changedFiles]),
+        ];
+        const projectNeedsServer =
+          preservedRetryFiles.some((file) =>
+            /(^|\/)(?:server|app|index|main)\.(?:js|cjs|mjs|ts|py)$/i.test(file),
+          ) ||
+          preservedRetryFiles.some((file) => /(^|\/)package\.json$/i.test(file));
         queue = markTask(queue, task.id, {
           status: "pending",
           effort: task.effort,
@@ -4877,6 +4916,12 @@ ${collapsed.tasks[0].checklist
           }${
             missingUiVerification
               ? ` No interactive real-page check ran after the UI change. Run browser_check or game_check on the actual entry page with a click/fill/press/eval and an assertion; for a canvas game, click a key and check the HUD/status.${uiSmokeSummary ? ` ${uiSmokeSummary}` : ""}`
+              : ""
+          }${
+            preservedRetryFiles.length > 0 &&
+            projectNeedsServer &&
+            (missingUiVerification || missingBehaviorVerification)
+              ? ` The files (${preservedRetryFiles.join(", ")}) are already written; do NOT re-read them or restart. Start the project's own server with run_background (for example "node server.js") and call browser_check on the URL it returns, then assert the real behavior. The static B.A.D IDE preview cannot serve the project's /api routes. Only edit if that check reports a concrete code failure.`
               : ""
           }${failedToolNote ? ` ${failedToolNote}` : ""}${runLogNote}`,
         });

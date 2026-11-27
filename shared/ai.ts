@@ -672,6 +672,8 @@ export type AiAgentAction =
   | "replace_many"
   | "append_text"
   | "run_command"
+  | "run_background"
+  | "stop_background"
   | "finish";
 
 export interface AiAgentLogEntry {

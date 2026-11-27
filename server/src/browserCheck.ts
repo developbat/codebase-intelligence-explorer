@@ -178,6 +178,27 @@ function previewUrl(projectId: string, requestedPath: string): string {
   return `${base}/api/projects/${encodeURIComponent(projectId)}/preview/${encoded}`;
 }
 
+const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "0.0.0.0", "[::1]", "::1"]);
+
+/**
+ * True when the URL points at the IDE's own Express server instead of a
+ * project dev server. The static preview route is the one legitimate IDE URL.
+ */
+function isIdeAppUrl(projectId: string, target: string): boolean {
+  try {
+    const parsed = new URL(target);
+    const ide = new URL(localBaseUrl());
+    const samePort = (parsed.port || (parsed.protocol === "https:" ? "443" : "80")) ===
+      (ide.port || (ide.protocol === "https:" ? "443" : "80"));
+    if (!samePort) return false;
+    if (!LOCAL_HOSTS.has(parsed.hostname) || !LOCAL_HOSTS.has(ide.hostname)) return false;
+    const previewPrefix = `/api/projects/${encodeURIComponent(projectId)}/preview/`;
+    return !parsed.pathname.startsWith(previewPrefix);
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Resolve a browser-check target. Agents often put a running dev-server URL in
  * `path` instead of `url`; an absolute/localhost value must be used as-is, not
@@ -194,7 +215,15 @@ export function browserCheckTarget(
     /^(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\])(?::\d+)?(?:\/|$)/i.test(candidate);
   if (looksLikeUrl) {
     const withScheme = /^https?:\/\//i.test(candidate) ? candidate : `http://${candidate}`;
-    return localUrl(withScheme);
+    const target = localUrl(withScheme);
+    if (isIdeAppUrl(projectId, target)) {
+      throw new Error(
+        `${target} is the B.A.D IDE app server, not this project's server. ` +
+          `Start the project's own server with run_background (for example "node server.js") and pass the URL it prints, ` +
+          `such as http://127.0.0.1:3000. For a static file use path="index.html".`,
+      );
+    }
+    return target;
   }
   return previewUrl(projectId, requestedPath || "index.html");
 }
@@ -529,6 +558,9 @@ export async function runBrowserCheck(
       requestedPath,
       normalizeLocalPreviewUrl(projectId, options.url),
     );
+    const usingStaticPreview = url.includes(
+      `/api/projects/${encodeURIComponent(projectId)}/preview/`,
+    );
     const checkStartedAt = Date.now();
     const response = await page.goto(url, { waitUntil: "load", timeout: timeoutMs });
     if (response && !response.ok()) {
@@ -625,6 +657,11 @@ export async function runBrowserCheck(
       meaningfulResourceErrors.length === 0 &&
       metrics.brokenImages === 0 &&
       !metrics.horizontalOverflow;
+    const staticApiMiss =
+      usingStaticPreview &&
+      meaningfulResourceErrors.some(
+        (entry) => /\b404\b/.test(entry) && /\/api\//i.test(entry),
+      );
     const summary = [
       ok ? "Browser check passed." : "Browser check found problems.",
       `${metrics.title || "(no title)"} · ${metrics.buttons} buttons · ${metrics.inputs} inputs${
@@ -635,6 +672,9 @@ export async function runBrowserCheck(
       pageErrors.length > 0 ? `Page errors: ${pageErrors.length}` : "",
       meaningfulResourceErrors.length > 0
         ? `Resource errors: ${meaningfulResourceErrors.slice(0, 5).join(", ")}`
+        : "",
+      staticApiMiss
+        ? "Hint: the page called its own /api route through the static preview and got 404. Start the project server with run_background (for example \"node server.js\") and run browser_check on the URL it prints."
         : "",
       metrics.brokenImages > 0 ? `Broken images: ${metrics.brokenImages}` : "",
       metrics.horizontalOverflow ? "Horizontal overflow detected." : "",

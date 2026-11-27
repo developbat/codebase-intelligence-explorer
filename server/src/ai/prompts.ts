@@ -254,6 +254,7 @@ Order of work:
 1b. Put all visible assertions into ONE browser_check call (up to 6 steps). Re-run it only after a code change that could affect the page.
 1c. Never kill, pkill, killall or nohup the dev server; the app manages it. If the page is stale, report the blocker instead of restarting a process.
 1d. For a canvas game, use game_check or browser_check with a real pointer/click (or eval) step and assert the HUD/score/status changes. Canvas visibility alone is not verification.
+1e. If the page calls its own /api route, the static preview cannot serve it. Start the project server with run_background (for example "node server.js") and browser_check the URL it prints; never use the B.A.D IDE port.
 2. If a relevant scenario exists under .cie/agent/scenarios, run it with run_test_scenario first. Read its JSON only if it fails or needs a new variant.
 3. Otherwise use browser_check on the real entry page with DOM selectors, visible text and public UI state.
 4. For a running dev server, pass its address in browser_check url (for example http://127.0.0.1:8501). Use path only for a static project file; never put a server URL in path.
@@ -290,6 +291,7 @@ First decide what the user wants: a question, an explanation, a code change, a m
 - Question/explanation: inspect the real project and answer with file:line citations. Do not modify files.
 - Code change: inspect first, then call the write tool. If writes are not pre-approved, the app asks the user for permission.
 - Command/verification: call run_command when needed. If commands are not pre-approved, the app asks the user for permission.
+- Long-running server: use run_background (never foreground run_command) and then browser_check the URL it returns. The static preview only serves files; a page that fetches its own /api route needs the project's own server. Use stop_background when the check is done.
 - Python: never install into the system interpreter and never use --break-system-packages. The app prepares the project .venv automatically; run Python through ./.venv/bin/python (or python3.13 to rebuild it). If a Python command exits 139/SIGSEGV, reports externally-managed-environment or a missing module, fix the environment with the venv instead of retrying the same command.
 - Resume, do not restart: when a task is resumed, completed tasks and changed files are preserved. Inspect the current files, never delete working code and only implement the missing part.
 - Read loop: if you have read the same file or range twice without editing, stop reading and make the smallest edit. Never spend a task by re-reading context you already have.
@@ -327,7 +329,7 @@ Search strategy:
 - Do not create .cie/agent/checks or .cie/agent/scenarios files for a one-off verification; use run_command/browser_check and put the evidence in the summary. Only save a reusable check when the user explicitly asks for it.
 - Batch all UI assertions into one browser_check call. Do not re-run the same verification command unless code changed since the last successful run; repeated checks only add latency.
 - The app runs the detected test/build verification automatically after your edit. Run it manually only when you need its failure output to fix a specific issue; do not run it just to confirm.
-- Never run kill, pkill, killall or nohup against a dev server. The app manages the server and its preview; if the page is stale, call browser_check on the existing URL or report the blocker.
+- Never run kill, pkill, killall or nohup against a dev server. Use run_background to start one and stop_background with its job id; if the page is stale, call browser_check on the existing URL or report the blocker.
 - Before the first edit, search for the exact feature name, symbol or label. If it already exists, verify it and finish with evidence; never add a duplicate implementation.
 - For HTML/canvas changes, run a real browser_check or game_check on the entry page before finish. If you cannot verify it, report the exact blocker; never describe an unverified change as complete.
 - Before writing a new check/script, call list_project_tools. Reuse a saved tool with run_project_tool instead of paying to recreate it. Only run a tool name that appears in the seed or in list_project_tools; never invent a name.
@@ -386,7 +388,7 @@ Rules:
 - Do not create .cie/agent/checks or .cie/agent/scenarios files for a one-off verification; use run_command/browser_check and put the evidence in the summary. Only save a reusable check when the user explicitly asks for it.
 - Batch all UI assertions into one browser_check call. Do not re-run the same verification command unless code changed since the last successful run; repeated checks only add latency.
 - The app runs the detected test/build verification automatically after your edit. Run it manually only when you need its failure output to fix a specific issue; do not run it just to confirm.
-- Never run kill, pkill, killall or nohup against a dev server. The app manages the server and its preview; if the page is stale, call browser_check on the existing URL or report the blocker.
+- Never run kill, pkill, killall or nohup against a dev server. Use run_background to start one and stop_background with its job id; if the page is stale, call browser_check on the existing URL or report the blocker.
 - Before the first edit, search for the exact feature name, symbol or label. If it already exists, verify it and finish with evidence; never add a duplicate implementation.
 - For HTML/canvas changes, run a real browser_check or game_check on the entry page before finish. If you cannot verify it, report the exact blocker; never describe an unverified change as complete.
 - Before writing a new check/script, call list_project_tools. Reuse a saved tool with run_project_tool instead of paying to recreate it. Only run a tool name that appears in the seed or in list_project_tools; never invent a name.

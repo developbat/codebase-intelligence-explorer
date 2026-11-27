@@ -3,6 +3,7 @@ import fs from "node:fs/promises";
 import { spawn, type ChildProcess } from "node:child_process";
 import path from "node:path";
 import type { TerminalSessionInfo, TerminalStreamEvent } from "../../shared/types";
+import { projectProcessEnv } from "./projectEnv";
 
 const MAX_TERMINALS_PER_PROJECT = 6;
 const DEFAULT_COLS = 100;
@@ -217,12 +218,11 @@ export async function createTerminalSession(
   const id = crypto.randomUUID();
   const child = spawn("python3", ["-u", "-c", PTY_BRIDGE, shell, String(cols), String(rows)], {
     cwd: realRoot,
-    env: {
-      ...process.env,
+    env: projectProcessEnv({
       TERM: "xterm-256color",
       COLORTERM: "truecolor",
       FORCE_COLOR: "1",
-    },
+    }),
     detached: true,
     stdio: ["pipe", "pipe", "pipe", "pipe"],
   });

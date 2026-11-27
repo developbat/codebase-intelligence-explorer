@@ -48,6 +48,34 @@ test("Code Studio file write and command runner work inside the project root", a
   }
 });
 
+test("project commands do not inherit the IDE port or CIE variables", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "cie-env-"));
+  const previousPort = process.env.PORT;
+  const previousBase = process.env.CIE_BROWSER_BASE;
+  process.env.PORT = "50442";
+  process.env.CIE_BROWSER_BASE = "http://127.0.0.1:50442";
+  try {
+    const result = await runProjectCommand(
+      root,
+      'node -e "process.stdout.write(JSON.stringify({port:process.env.PORT||null,base:process.env.CIE_BROWSER_BASE||null}))"',
+    );
+    assert.equal(result.exitCode, 0);
+    assert.deepEqual(JSON.parse(result.stdout), { port: null, base: null });
+
+    const explicit = await runProjectCommand(
+      root,
+      'PORT=3123 node -e "process.stdout.write(String(process.env.PORT))"',
+    );
+    assert.equal(explicit.stdout.trim(), "3123");
+  } finally {
+    if (previousPort === undefined) delete process.env.PORT;
+    else process.env.PORT = previousPort;
+    if (previousBase === undefined) delete process.env.CIE_BROWSER_BASE;
+    else process.env.CIE_BROWSER_BASE = previousBase;
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
 test("restores the latest editor backup for a file", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "cie-restore-"));
   const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), "cie-restore-data-"));

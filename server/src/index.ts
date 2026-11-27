@@ -190,6 +190,20 @@ const TRANSPARENT_PNG = Buffer.from(
 );
 const SERVE_WEB = process.argv.includes("--serve-web") || process.env.CIE_SERVE_WEB === "1";
 
+let cachedAppVersion = "";
+async function readAppVersion(): Promise<string> {
+  if (cachedAppVersion) return cachedAppVersion;
+  try {
+    const pkg = JSON.parse(
+      await fs.readFile(path.join(REPO_ROOT, "package.json"), "utf8"),
+    ) as { version?: string };
+    cachedAppVersion = typeof pkg.version === "string" ? pkg.version : "0.0.0";
+  } catch {
+    cachedAppVersion = "0.0.0";
+  }
+  return cachedAppVersion;
+}
+
 const app = express();
 
 // Agent runs are server-owned. Disconnecting the browser (screen lock, reload,
@@ -237,8 +251,12 @@ app.get("/favicon.ico", (_req, res) => {
   res.send(TRANSPARENT_PNG);
 });
 
-app.get("/api/health", (_req, res) => {
-  res.json({ ok: true, name: "codebase-intelligence-explorer", version: "0.2.0" });
+app.get("/api/health", async (_req, res) => {
+  res.json({
+    ok: true,
+    name: "codebase-intelligence-explorer",
+    version: await readAppVersion(),
+  });
 });
 
 app.get("/api/app/version", async (_req, res) => {
