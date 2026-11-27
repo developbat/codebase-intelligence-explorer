@@ -346,6 +346,9 @@ export async function runProjectCommand(
       cwd: realCwd,
       shell: true,
       windowsHide: true,
+      // Put the command in its own process group so abort/timeout can kill
+      // grandchildren too (a shell may leave `sleep`/dev-server children).
+      detached: process.platform !== "win32",
       env:
         options.envMode === "safe"
           ? safeProcessEnv({ CI: process.env.CI ?? "1", ...pythonEnv, ...(options.env ?? {}) })
@@ -383,15 +386,42 @@ export async function runProjectCommand(
       stderr = append(stderr, chunk, options.onStderr);
     });
 
+    const killTree = (signal: NodeJS.Signals): void => {
+      if (!child.pid) return;
+      if (process.platform === "win32") {
+        spawn("taskkill", ["/pid", String(child.pid), "/T", "/F"], {
+          windowsHide: true,
+          stdio: "ignore",
+        }).on("error", () => {
+          try {
+            child.kill(signal);
+          } catch {
+            // The process already exited.
+          }
+        });
+        return;
+      }
+      try {
+        // Negative pid targets the detached process group.
+        process.kill(-child.pid, signal);
+      } catch {
+        try {
+          child.kill(signal);
+        } catch {
+          // The process already exited.
+        }
+      }
+    };
+
     const timer = setTimeout(() => {
       timedOut = true;
-      child.kill("SIGTERM");
-      setTimeout(() => child.kill("SIGKILL"), 2_000).unref();
+      killTree("SIGTERM");
+      setTimeout(() => killTree("SIGKILL"), 2_000).unref();
     }, timeoutMs);
 
     const onAbort = () => {
-      child.kill("SIGTERM");
-      setTimeout(() => child.kill("SIGKILL"), 1_000).unref();
+      killTree("SIGTERM");
+      setTimeout(() => killTree("SIGKILL"), 1_000).unref();
     };
     if (options.signal) {
       if (options.signal.aborted) onAbort();
