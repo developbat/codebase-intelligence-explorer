@@ -10,10 +10,15 @@ set -e
 OUT="${TMPDIR:-/tmp}/bad-ide-signed-release"
 
 # Notarize only when credentials are present.
+#  1) APPLE_ID + APPLE_APP_SPECIFIC_PASSWORD (+ APPLE_TEAM_ID)
+#  2) APPLE_API_KEY (path to .p8) + APPLE_API_KEY_ID + APPLE_API_ISSUER
+#  3) APPLE_KEYCHAIN_PROFILE created with `xcrun notarytool store-credentials`
 NOTARIZE=false
 if [ -n "$APPLE_ID" ] && [ -n "$APPLE_APP_SPECIFIC_PASSWORD" ]; then
   NOTARIZE=true
 elif [ -n "$APPLE_API_KEY" ] && [ -n "$APPLE_API_KEY_ID" ] && [ -n "$APPLE_API_ISSUER" ]; then
+  NOTARIZE=true
+elif [ -n "$APPLE_KEYCHAIN_PROFILE" ]; then
   NOTARIZE=true
 fi
 
@@ -34,6 +39,7 @@ if [ -n "$APP" ]; then
   codesign --verify --deep --strict --verbose=2 "$APP"
   codesign --display --verbose=2 "$APP" 2>&1 | grep -E "Authority|TeamIdentifier" || true
   if [ "$NOTARIZE" = "true" ]; then
+    xcrun stapler validate "$APP" || true
     spctl --assess --type execute --verbose=2 "$APP" || true
   fi
 fi
