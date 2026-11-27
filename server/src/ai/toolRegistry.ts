@@ -651,6 +651,51 @@ const TOOL_SPECS: AgentToolSpec[] = [
     },
   },
   {
+    action: "batch_rename",
+    groups: ["edit"],
+    example: '{"action":"batch_rename","args":{"path":"assets","find":"icon-","replace":"asset-","apply":false}}',
+    description: "Preview or apply a batch rename rule across matching file basenames.",
+    whenToUse: "Use for bulk file renaming. Call with apply=false first to show the preview, then apply=true after the user agrees.",
+    permission: "write",
+    args: {
+      required: [["find"], ["replace"]],
+      types: { path: "string", find: "string", replace: "string", useRegex: "boolean", apply: "boolean", max: "number" },
+    },
+  },
+  {
+    action: "qr_generate",
+    groups: ["edit"],
+    example: '{"action":"qr_generate","args":{"content":"https://example.com","format":"png","size":512}}',
+    description: "Generate a QR code PNG or SVG file in the project.",
+    whenToUse: "Use when the user asks for a QR code, karekod or scannable link.",
+    permission: "write",
+    args: { required: [["content"]], types: { content: "string", path: "string", format: "string", size: "number" } },
+  },
+  {
+    action: "rss_read",
+    groups: ["core"],
+    example: '{"action":"rss_read","args":{"url":"https://example.com/feed.xml","limit":8}}',
+    description: "Read an RSS or Atom feed and return its recent items.",
+    whenToUse: "Use for news feeds, blogs, release notes and any URL that returns RSS/Atom.",
+    args: { required: [["url"]], types: { url: "string", limit: "number" } },
+  },
+  {
+    action: "current_time",
+    groups: ["core"],
+    example: '{"action":"current_time","args":{"timezone":"Europe/Istanbul"}}',
+    description: "Get the current date and time in a specific timezone.",
+    whenToUse: "Use for 'what time is it', reminders, calendar scheduling and date calculations.",
+    args: { types: { timezone: "string" } },
+  },
+  {
+    action: "get_weather",
+    groups: ["core"],
+    example: '{"action":"get_weather","args":{"location":"Istanbul","units":"celsius"}}',
+    description: "Get current weather for a city using the keyless Open-Meteo service.",
+    whenToUse: "Use when the user asks about weather, temperature or conditions. Requires internet.",
+    args: { required: [["location"]], types: { location: "string", units: "string" } },
+  },
+  {
     action: "run_project_tool",
     groups: ["command"],
     example: '{"action":"run_project_tool","args":{"name":"ui-check","input":{"url":"http://localhost:3000"}}}',
@@ -1058,6 +1103,11 @@ const TOOL_ALIASES: Record<string, string[]> = {
   create_calendar_event: [
     "calendar", "takvim", "etkinlik", "event", "toplantı", "toplanti", "meeting", "randevu",
   ],
+  batch_rename: ["toplu rename", "batch rename", "toplu adlandır", "toplu adlandir", "yeniden adlandır"],
+  qr_generate: ["qr", "karekod", "barkod"],
+  rss_read: ["rss", "feed", "haber akışı", "haber akisi", "atom"],
+  current_time: ["saat kaç", "saat kac", "what time", "current time", "saat"],
+  get_weather: ["hava durumu", "hava", "weather", "sıcaklık", "sicaklik", "temperature"],
 };
 
 const SUGGESTION_STOPWORDS = new Set([

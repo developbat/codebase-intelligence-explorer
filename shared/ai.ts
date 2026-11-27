@@ -680,6 +680,11 @@ export type AiAgentAction =
   | "list_reminders"
   | "complete_reminder"
   | "create_calendar_event"
+  | "batch_rename"
+  | "qr_generate"
+  | "rss_read"
+  | "current_time"
+  | "get_weather"
   | "finish";
 
 export interface AiAgentLogEntry {

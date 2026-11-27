@@ -128,6 +128,9 @@ test("capability gate narrows model, context, tools and research", () => {
   assert.equal(planChat("aynı dosyadan var mı?").mode, "action");
   assert.equal(planChat("disk kullanımı ne kadar?").mode, "action");
   assert.equal(planChat("hatırlatıcılarım neler?").mode, "action");
+  assert.equal(planChat("bu QR kodu oluştur").mode, "action");
+  assert.equal(planChat("İstanbul hava durumu nasıl?").mode, "action");
+  assert.equal(planChat("şu an saat kaç?").mode, "action");
 
   const action = planChat("duvar patlatma özelliği ekle");
   assert.equal(action.mode, "action");

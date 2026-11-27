@@ -45,6 +45,11 @@ import { beginCheckpoint } from "../checkpoints";
 import { findDuplicateFiles, formatBytes, summarizeStorage } from "../duplicates";
 import { buildCalendarEvent, calendarFileName } from "../calendar";
 import { addReminder, completeReminder, listReminders } from "../reminders";
+import { planBatchRename } from "../batchRename";
+import { qrOutputPath, renderQrCode } from "../qr";
+import { readRssFeed } from "../rss";
+import { getCurrentTime } from "../time";
+import { getWeather } from "../weather";
 import { analyzeProject } from "../analyzer";
 import { isWithin } from "../scanner";
 import { formatProjectFile } from "../formatter";
@@ -117,6 +122,7 @@ import {
   renameProjectPath,
   restoreLatestEditorBackup,
   runProjectCommand,
+  writeProjectAsset,
   writeSourceFile,
 } from "../editor";
 import { chat, type ChatMessage } from "./providers";
@@ -2092,6 +2098,9 @@ const READ_ONLY_ACTIONS = new Set([
   "find_duplicates",
   "storage_summary",
   "list_reminders",
+  "rss_read",
+  "current_time",
+  "get_weather",
   "browser_check",
   "game_check",
   "graphic_check",
@@ -5505,6 +5514,11 @@ export async function runAgentTask(
       "list_reminders",
       "complete_reminder",
       "create_calendar_event",
+      "batch_rename",
+      "qr_generate",
+      "rss_read",
+      "current_time",
+      "get_weather",
       "finish",
     ];
     const action = validActions.includes(rawAction as AiAgentAction)
@@ -5605,6 +5619,11 @@ export async function runAgentTask(
         list_reminders: "Reading reminders…",
         complete_reminder: "Completing reminder…",
         create_calendar_event: "Creating calendar event…",
+        batch_rename: "Planning batch rename…",
+        qr_generate: "Generating QR code…",
+        rss_read: "Reading RSS feed…",
+        current_time: "Checking the time…",
+        get_weather: "Checking the weather…",
       };
       log("tool", toolLabel[action] ?? `Running ${action}…`, agentActionTarget(args));
     }
@@ -8114,6 +8133,154 @@ export async function runAgentTask(
         observation = `Created calendar event: ${written.filePath}\n${event.start} → ${event.end}\nImport the .ics file into your calendar app.`;
         ok = true;
         log("success", "Calendar event created", written.filePath);
+      } else if (action === "batch_rename") {
+        const find = String(args.find ?? args.pattern ?? args.from ?? "").trim();
+        const replace = String(args.replace ?? args.to ?? args.replacement ?? "");
+        if (!find) throw new Error("The find text is required.");
+        const plan = planBatchRename(
+          analysis.files.map((file) => file.path),
+          {
+            path: typeof args.path === "string" ? args.path : undefined,
+            find,
+            replace,
+            useRegex: args.useRegex === true,
+            max: Number(args.max) || undefined,
+          },
+        );
+        const previewLines = plan.items
+          .slice(0, 60)
+          .map(
+            (item) =>
+              `${item.status === "ready" ? "✓" : item.status === "conflict" ? "!" : "·"} ${
+                item.from
+              } → ${item.to}${item.reason ? ` (${item.reason})` : ""}`,
+          );
+        const apply =
+          args.apply === true && args.dryRun !== true && args.preview !== true;
+        if (!apply) {
+          observation = `Batch rename preview (apply=false): ${plan.ready} ready · ${plan.conflicts} conflict · ${plan.matched} matched of ${plan.scanned} scanned.\n\n${previewLines.join("\n")}\n\nReview the list; call batch_rename again with apply=true to rename.`;
+          ok = true;
+          log("info", "Batch rename preview", `${plan.ready} ready`);
+        } else {
+          if (plan.ready === 0) {
+            observation = "No files would be renamed; the find text matched no basenames or every target is a conflict.";
+            ok = true;
+          } else {
+            const batchAllowed = await requirePermission(
+              "write",
+              "batch_rename",
+              `${plan.ready} files`,
+              `Rename ${plan.ready} files with "${find}" → "${replace}".`,
+              { preview: previewLines.join("\n").slice(0, 2_000) },
+            );
+            if (!batchAllowed) throw new Error("The user denied permission to batch rename files.");
+            let applied = 0;
+            const failures: string[] = [];
+            for (const item of plan.items.filter((entry) => entry.status === "ready")) {
+              await checkpoint?.remember(item.from);
+              try {
+                const renamed = await renameProjectPath(
+                  analysis.rootPath,
+                  item.from,
+                  item.to,
+                );
+                await renameIndexedPath(
+                  projectId,
+                  analysis.rootPath,
+                  renamed.from,
+                  renamed.to,
+                ).catch(() => undefined);
+                changedFiles.push(renamed.to);
+                evidence.push({ path: renamed.to, label: "Batch renamed" });
+                applied += 1;
+              } catch (error) {
+                failures.push(
+                  `${item.from}: ${error instanceof Error ? error.message : String(error)}`,
+                );
+              }
+            }
+            invalidateReadCaches();
+            observation = `Batch rename: ${applied} file(s) renamed, ${failures.length} failed, ${plan.conflicts} conflict(s) skipped.${
+              failures.length > 0 ? `\n${failures.slice(0, 10).join("\n")}` : ""
+            }`;
+            ok = applied > 0;
+            log("success", "Batch rename applied", `${applied} files`);
+          }
+        }
+      } else if (action === "qr_generate") {
+        const content = String(args.content ?? "").trim();
+        if (!content) throw new Error("QR content is required.");
+        const format = args.format === "svg" ? "svg" : "png";
+        const target = qrOutputPath(
+          content,
+          format,
+          typeof args.path === "string" ? args.path : undefined,
+        );
+        const qrAllowed = await requirePermission(
+          "write",
+          "qr_generate",
+          target,
+          `Generate a ${format.toUpperCase()} QR code.`,
+          { preview: content.slice(0, 500) },
+        );
+        if (!qrAllowed) throw new Error("The user denied permission to generate this QR code.");
+        await checkpoint?.remember(target);
+        const rendered = await renderQrCode(content, format, Number(args.size) || 512);
+        const written = await writeProjectAsset(
+          analysis.rootPath,
+          target,
+          rendered.buffer.toString("base64"),
+        );
+        changedFiles.push(written.filePath);
+        evidence.push({ path: written.filePath, label: "QR code" });
+        invalidateReadCaches([written.filePath]);
+        observation = `Generated QR code: ${written.filePath} (${written.bytes} bytes, ${format}).`;
+        ok = true;
+        log("success", "QR code generated", written.filePath);
+      } else if (action === "rss_read") {
+        const url = String(args.url ?? "").trim();
+        if (!url) throw new Error("An RSS URL is required.");
+        const feed = await readRssFeed(url, { limit: Number(args.limit) || 10 });
+        observation = [
+          `RSS: ${feed.title || feed.source}`,
+          feed.source,
+          "",
+          ...feed.items.map(
+            (item, itemIndex) =>
+              `${itemIndex + 1}. ${item.title || "(untitled)"}${item.published ? ` · ${item.published}` : ""}\n   ${item.link}${
+                item.summary ? `\n   ${item.summary}` : ""
+              }`,
+          ),
+        ].join("\n");
+        ok = true;
+        log("info", "RSS read", `${feed.items.length} item(s)`);
+      } else if (action === "current_time") {
+        const now = getCurrentTime(typeof args.timezone === "string" ? args.timezone : undefined);
+        observation = [
+          `Current time: ${now.formatted}`,
+          `Timezone: ${now.timezone}`,
+          `ISO: ${now.iso}`,
+          `UTC: ${now.utc}`,
+        ].join("\n");
+        ok = true;
+        log("info", "Current time", now.timezone);
+      } else if (action === "get_weather") {
+        const location = String(args.location ?? "").trim();
+        if (!location) throw new Error("A city or place is required.");
+        const units = args.units === "fahrenheit" ? "fahrenheit" : "celsius";
+        const report = await getWeather(location, units);
+        const symbol = units === "fahrenheit" ? "°F" : "°C";
+        observation = [
+          `Weather: ${report.location.name}${report.location.country ? `, ${report.location.country}` : ""}`,
+          `${report.condition} · ${report.temperature}${symbol} (feels ${report.apparentTemperature}${symbol})`,
+          `Humidity: ${report.humidity}% · Wind: ${report.wind} ${units === "fahrenheit" ? "mph" : "km/h"}`,
+          report.observedAt ? `Observed: ${report.observedAt}` : "",
+          report.location.timezone ? `Timezone: ${report.location.timezone}` : "",
+        ]
+          .filter(Boolean)
+          .join("\n");
+        ok = true;
+        log("info", "Weather fetched", report.location.name);
       }
       }
       if (actionCacheKeyValue && !cachedAction && ok) {

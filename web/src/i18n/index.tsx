@@ -25,11 +25,24 @@ function interpolate(template: string, vars?: Vars): string {
   );
 }
 
+export function localeForLanguages(languages: readonly string[]): Locale {
+  for (const language of languages) {
+    const base = language.toLowerCase().split(/[-_]/)[0];
+    const match = LOCALES.find((locale) => locale.id === base);
+    if (match) return match.id;
+  }
+  return DEFAULT_LOCALE;
+}
+
 function initialLocale(): Locale {
   if (typeof window === "undefined") return DEFAULT_LOCALE;
   const stored = window.localStorage.getItem(STORAGE_KEY);
   if (stored && LOCALES.some((locale) => locale.id === stored)) return stored as Locale;
-  return DEFAULT_LOCALE;
+  const languages =
+    window.navigator.languages && window.navigator.languages.length > 0
+      ? window.navigator.languages
+      : [window.navigator.language];
+  return localeForLanguages(languages);
 }
 
 export function I18nProvider({ children }: { children: ReactNode }) {

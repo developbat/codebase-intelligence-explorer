@@ -65,6 +65,11 @@ test("argument schemas accept path aliases and reject missing/typed values", () 
   assert.equal(validateToolArgs("create_reminder", { title: "Send report" }), null);
   assert.equal(validateToolArgs("list_reminders", {}), null);
   assert.match(validateToolArgs("create_calendar_event", { title: "Review" }) ?? "", /requires one of: start/);
+  assert.equal(validateToolArgs("batch_rename", { find: "a", replace: "b" }), null);
+  assert.match(validateToolArgs("qr_generate", {}) ?? "", /requires one of: content/);
+  assert.match(validateToolArgs("rss_read", {}) ?? "", /requires one of: url/);
+  assert.equal(validateToolArgs("current_time", { timezone: "Europe/Istanbul" }), null);
+  assert.match(validateToolArgs("get_weather", {}) ?? "", /requires one of: location/);
 });
 
 test("capability suggestions follow the request and selected groups", () => {
