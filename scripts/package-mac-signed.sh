@@ -36,6 +36,11 @@ if [ -z "$CSC_LINK" ]; then
   fi
 fi
 
+if [ "$NOTARIZE" = "true" ] && [ -z "$IDENTITY_ARGS" ] && [ -z "$CSC_LINK" ]; then
+  echo "Notarization requested but no Developer ID Application identity was found." >&2
+  exit 1
+fi
+
 rm -rf "$OUT"
 npm run build
 npm run build:server
