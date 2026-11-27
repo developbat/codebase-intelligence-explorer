@@ -795,6 +795,8 @@ export interface AiAgentPermissionRequest {
   target?: string;
   detail?: string;
   preview?: string;
+  /** "diff" renders +/- lines with review colors in the permission dialog. */
+  previewKind?: "diff" | "text";
   destructive: boolean;
   canAlways: boolean;
   createdAt: string;

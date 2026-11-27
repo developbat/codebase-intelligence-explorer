@@ -1,12 +1,16 @@
 import { useEffect, useRef, useState } from "react";
 import {
+  AlertTriangle,
   BarChart3,
   Bot,
+  CheckCircle2,
   Code2,
   Cpu,
+  Download,
   FileText,
   Globe2,
   Library,
+  Loader2,
   RefreshCw,
   Smartphone,
   ScrollText,
@@ -87,6 +91,22 @@ const TABS: { id: SettingsTab; label: string; icon: typeof Settings2 }[] = [
   { id: "tools", label: "Tools", icon: Wrench },
 ];
 
+function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = window.setTimeout(() => reject(new Error(message)), ms);
+    promise.then(
+      (value) => {
+        window.clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        window.clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+}
+
 function SettingsToggle({
   checked,
   onChange,
@@ -143,6 +163,7 @@ export function SettingsScreen({
   const [desktopUpdate, setDesktopUpdate] = useState<DesktopUpdateState | null>(null);
   const [updateBusy, setUpdateBusy] = useState(false);
   const [updateActionBusy, setUpdateActionBusy] = useState(false);
+  const [lastCheckedAt, setLastCheckedAt] = useState<Date | null>(null);
   const screenRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -175,17 +196,57 @@ export function SettingsScreen({
     if (updateBusy) return;
     const bridge = desktopUpdates();
     if (bridge) {
+      const started = Date.now();
       setUpdateBusy(true);
+      setDesktopUpdate((previous) =>
+        previous
+          ? {
+              ...previous,
+              status: "checking",
+              progress: null,
+              message: t("Checking for updates…"),
+            }
+          : previous,
+      );
       try {
-        setDesktopUpdate(await bridge.check());
+        const state = await withTimeout(
+          bridge.check(),
+          30_000,
+          t("Update check timed out. Check your network and try again."),
+        );
+        await new Promise((resolve) =>
+          window.setTimeout(resolve, Math.max(0, 600 - (Date.now() - started))),
+        );
+        setDesktopUpdate(state);
+      } catch (error) {
+        setDesktopUpdate((previous) =>
+          previous
+            ? {
+                ...previous,
+                status: "error",
+                progress: null,
+                message:
+                  error instanceof Error
+                    ? error.message
+                    : t("Update check failed. Check your network and try again."),
+              }
+            : previous,
+        );
       } finally {
+        setLastCheckedAt(new Date());
         setUpdateBusy(false);
       }
       return;
     }
+
     setUpdateBusy(true);
     try {
-      setUpdateInfo(await api.checkUpdate());
+      const info = await withTimeout(
+        api.checkUpdate(),
+        20_000,
+        t("Update check timed out. Check your network and try again."),
+      );
+      setUpdateInfo(info);
     } catch {
       setUpdateInfo({
         current: appInfo?.version ?? "0.0.0",
@@ -196,9 +257,21 @@ export function SettingsScreen({
         note: t("Update check failed. Check your network or Git remote."),
       });
     } finally {
+      setLastCheckedAt(new Date());
       setUpdateBusy(false);
     }
   }
+
+  const checkForUpdatesRef = useRef(checkForUpdates);
+  checkForUpdatesRef.current = checkForUpdates;
+
+  useEffect(() => {
+    if (!open || focusSection !== "updates") return;
+    const timer = window.setTimeout(() => {
+      void checkForUpdatesRef.current();
+    }, 250);
+    return () => window.clearTimeout(timer);
+  }, [open, focusSection]);
 
   async function downloadUpdate() {
     const bridge = desktopUpdates();
@@ -235,6 +308,11 @@ export function SettingsScreen({
       case "downloaded":
         return t("Update downloaded. Restart to finish installing.");
       case "error":
+        if (/No published versions/i.test(state.message)) {
+          return t(
+            "No published release yet. Publish a GitHub release to enable updates.",
+          );
+        }
         return `${t("Update failed")}: ${state.message}`;
       default:
         return state.message || t("Check for updates to see if a new version is available.");
@@ -447,7 +525,29 @@ export function SettingsScreen({
 
                   {desktopUpdate ? (
                     <div className="update-panel">
-                      <p>{updateStatusText(desktopUpdate)}</p>
+                      <div
+                        className={`update-status is-${desktopUpdate.status}`}
+                        role="status"
+                        aria-live="polite"
+                      >
+                        {desktopUpdate.status === "checking" ? (
+                          <Loader2 size={13} className="spin" />
+                        ) : desktopUpdate.status === "error" ? (
+                          <AlertTriangle size={13} />
+                        ) : desktopUpdate.status === "downloaded" ? (
+                          <CheckCircle2 size={13} />
+                        ) : desktopUpdate.status === "available" ? (
+                          <Download size={13} />
+                        ) : (
+                          <RefreshCw size={13} />
+                        )}
+                        <span>{updateStatusText(desktopUpdate)}</span>
+                      </div>
+                      {lastCheckedAt ? (
+                        <small className="update-last-checked">
+                          {t("Last checked")}: {lastCheckedAt.toLocaleTimeString()}
+                        </small>
+                      ) : null}
                       {desktopUpdate.status === "downloading" ? (
                         <div className="update-progress" aria-hidden="true">
                           <span style={{ width: `${desktopUpdate.progress ?? 0}%` }} />
@@ -493,12 +593,38 @@ export function SettingsScreen({
                     </div>
                   ) : (
                     <>
-                      <p>
-                        {updateInfo?.note ??
-                          t(
-                            "Source checkouts can check Git release tags. Packaged builds update from signed Electron releases, never by pulling arbitrary files.",
-                          )}
-                      </p>
+                      <div
+                        className={`update-status ${
+                          updateBusy
+                            ? "is-checking"
+                            : updateInfo?.updateAvailable
+                              ? "is-available"
+                              : "is-idle"
+                        }`}
+                        role="status"
+                        aria-live="polite"
+                      >
+                        {updateBusy ? (
+                          <Loader2 size={13} className="spin" />
+                        ) : updateInfo?.updateAvailable ? (
+                          <Download size={13} />
+                        ) : (
+                          <RefreshCw size={13} />
+                        )}
+                        <span>
+                          {updateBusy
+                            ? t("Checking for updates…")
+                            : updateInfo?.note ??
+                              t(
+                                "Source checkouts can check Git release tags. Packaged builds update from signed Electron releases, never by pulling arbitrary files.",
+                              )}
+                        </span>
+                      </div>
+                      {lastCheckedAt ? (
+                        <small className="update-last-checked">
+                          {t("Last checked")}: {lastCheckedAt.toLocaleTimeString()}
+                        </small>
+                      ) : null}
                       {updateInfo?.latest ? (
                         <p>
                           {t("Latest")}: <code>{updateInfo.latest}</code>

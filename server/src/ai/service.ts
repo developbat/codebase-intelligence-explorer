@@ -317,6 +317,38 @@ function mappedPreview(before: string, after: string): string {
     .join("\n");
 }
 
+/** A compact reviewable diff for the permission dialog (not a patch file). */
+export function permissionDiffPreview(before: string | null, after: string): string {
+  if ((before ?? "") === after) return "No changes.";
+  if (before === null) {
+    const lines = after.split("\n").slice(0, 80);
+    return ["+ (new file)", ...lines.map((line) => `+${line}`)].join("\n");
+  }
+  const lines: string[] = [];
+  const push = (line: string) => {
+    if (lines.length < 100) lines.push(line);
+  };
+  for (const part of diffLines(before, after)) {
+    const prefix = part.added ? "+" : part.removed ? "-" : " ";
+    const value = part.value.endsWith("\n") ? part.value.slice(0, -1) : part.value;
+    const chunk = value.split("\n");
+    if (!part.added && !part.removed && chunk.length > 8) {
+      push(` ${chunk[0]}`);
+      push(` ${chunk[1]}`);
+      push(`… ${chunk.length - 4} unchanged lines …`);
+      push(` ${chunk[chunk.length - 2]}`);
+      push(` ${chunk[chunk.length - 1]}`);
+    } else {
+      for (const line of chunk.slice(0, 80)) push(`${prefix}${line}`);
+    }
+    if (lines.length >= 100) {
+      push("… diff truncated …");
+      break;
+    }
+  }
+  return lines.join("\n");
+}
+
 function extractionTableOf(result: EntityResult): ExtractionTable {
   return {
     kind: result.kind,
@@ -2058,7 +2090,7 @@ const AGENT_MAX_WRITES = 60;
 const NO_PROGRESS_TOKEN_LIMIT = 300_000;
 const READ_ONLY_TOKEN_LIMIT = 500_000;
 const WORKING_TOKEN_LIMIT = 900_000;
-const AGENT_MAX_COMMANDS = 5;
+const AGENT_MAX_COMMANDS = 8;
 const AGENT_READ_CHARS = 18_000;
 const NARROW_EDIT_MAX_READ_LINES = 160;
 // A 500-800 line source file is small enough to read once. Chunking it into
@@ -4138,7 +4170,12 @@ export async function runAgentTask(
     tool: string,
     target: string | undefined,
     detail: string | undefined,
-    options: { preview?: string; destructive?: boolean; forceConfirm?: boolean } = {},
+    options: {
+      preview?: string;
+      previewKind?: "diff" | "text";
+      destructive?: boolean;
+      forceConfirm?: boolean;
+    } = {},
   ): Promise<boolean> => {
     if (readOnlyMode) {
       if (
@@ -4173,7 +4210,10 @@ export async function runAgentTask(
         tool,
         target,
         detail,
-        preview: options.preview ? options.preview.slice(0, 900) : undefined,
+        preview: options.preview
+          ? options.preview.slice(0, options.previewKind === "diff" ? 5_000 : 900)
+          : undefined,
+        previewKind: options.preview ? (options.previewKind ?? "text") : undefined,
         destructive,
         canAlways: !destructive,
       },
@@ -7541,15 +7581,18 @@ export async function runAgentTask(
           );
         }
         if (isSecretAgentPath(filePath)) throw new Error("Writing environment, key or Git internals files is denied.");
+        const previous = await readSourceFile(analysis.rootPath, filePath).catch(() => null);
         const writeAllowed = await requirePermission(
           "write",
           "write_file",
           filePath,
           `${content.split("\n").length} lines · ${Buffer.byteLength(content, "utf8")} bytes`,
-          { preview: content },
+          {
+            preview: permissionDiffPreview(previous?.content ?? null, content),
+            previewKind: "diff",
+          },
         );
         if (!writeAllowed) throw new Error("The user denied permission to write this file.");
-        const previous = await readSourceFile(analysis.rootPath, filePath).catch(() => null);
         const written = await writeSourceFile(projectId, analysis.rootPath, filePath, content);
         const effectiveChange = !previous || previous.content !== content;
         if (effectiveChange) changedFiles.push(written.filePath);
@@ -7571,15 +7614,18 @@ export async function runAgentTask(
         const occurrences = file.content.split(find).length - 1;
         if (occurrences === 0) throw new Error("The find snippet was not found in the file.");
         if (occurrences > 1) throw new Error(`The find snippet occurs ${occurrences} times; make it unique.`);
+        const nextContent = file.content.replace(find, replace);
         const replaceAllowed = await requirePermission(
           "write",
           "replace_in_file",
           filePath,
           `Replace 1 snippet · ${find.length} → ${replace.length} chars`,
-          { preview: `- ${find.slice(0, 420)}\n+ ${replace.slice(0, 420)}` },
+          {
+            preview: permissionDiffPreview(file.content, nextContent),
+            previewKind: "diff",
+          },
         );
         if (!replaceAllowed) throw new Error("The user denied permission to edit this file.");
-        const nextContent = file.content.replace(find, replace);
         const written = await writeSourceFile(projectId, analysis.rootPath, filePath, nextContent);
         const effectiveChange = nextContent !== file.content;
         if (effectiveChange && !changedFiles.includes(written.filePath)) changedFiles.push(written.filePath);
@@ -7605,16 +7651,20 @@ export async function runAgentTask(
           observation = `The requested content is already at the end of ${filePath}; no change was needed.`;
           ok = true;
         } else {
+          const separator =
+            existing && existing.content.length > 0 && !existing.content.endsWith("\n") ? "\n" : "";
+          const nextContent = `${existing?.content ?? ""}${separator}${content}`;
           const allowed = await requirePermission(
             "write",
             "append_text",
             filePath,
             `Append ${content.length} chars to the end of the file.`,
-            { preview: content.slice(0, 500) },
+            {
+              preview: permissionDiffPreview(existing?.content ?? null, nextContent),
+              previewKind: "diff",
+            },
           );
           if (!allowed) throw new Error("The user denied permission to append to this file.");
-          const separator = existing && existing.content.length > 0 && !existing.content.endsWith("\n") ? "\n" : "";
-          const nextContent = `${existing?.content ?? ""}${separator}${content}`;
           const written = await writeSourceFile(projectId, analysis.rootPath, filePath, nextContent);
           const effectiveChange = nextContent !== (existing?.content ?? "");
           if (effectiveChange && !changedFiles.includes(written.filePath)) changedFiles.push(written.filePath);
@@ -7658,10 +7708,8 @@ export async function runAgentTask(
           filePath,
           `Apply ${edits.length} localized edits in one write.`,
           {
-            preview: edits
-              .slice(0, 3)
-              .map((edit) => `- ${edit.find.slice(0, 260)}\n+ ${edit.replace.slice(0, 260)}`)
-              .join("\n"),
+            preview: permissionDiffPreview(file.content, nextContent),
+            previewKind: "diff",
           },
         );
         if (!manyAllowed) throw new Error("The user denied permission to edit this file.");

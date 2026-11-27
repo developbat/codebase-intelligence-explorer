@@ -2696,11 +2696,12 @@ export function CodeStudio({
       }
       setPermissionQueue((queue) => queue.filter((item) => item.requestId !== request.requestId));
     } catch (requestError) {
-      setPermissionQueue((queue) => queue.filter((item) => item.requestId !== request.requestId));
+      // Keep the request in the queue: a transient network error must not leave
+      // the server waiting for a decision it can no longer receive.
       setError(
         requestError instanceof Error
           ? requestError.message
-          : t("Could not send the permission decision."),
+          : t("Could not send the permission decision. Try again."),
       );
     } finally {
       setPermissionBusy(false);
@@ -4944,7 +4945,13 @@ export function CodeStudio({
             >
               {agentAllowWrite && agentAllowCommands ? t("Ask every time") : t("Allow both")}
             </button>
-            {readOnlyMode ? <small>{t("Plan mode is read-only")}</small> : null}
+            {readOnlyMode ? (
+              <small>{t("Plan mode is read-only")}</small>
+            ) : agentAllowWrite ? (
+              <small className="studio-perms-hint">
+                {t("Uncheck Writes to review each diff")}
+              </small>
+            ) : null}
           </div>
 
           {attachment ? (

@@ -26680,3 +26680,91 @@ button.canvas-stat {
     display: none;
   }
 }
+
+/* Update check feedback */
+.update-status {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid rgba(139, 168, 206, 0.22);
+  border-radius: 8px;
+  background: rgba(11, 18, 28, 0.6);
+  color: #b9d4f3;
+  font-size: 10.5px;
+  line-height: 1.45;
+}
+
+.update-status svg {
+  flex: none;
+  margin-top: 1px;
+}
+
+.update-status.is-checking {
+  border-color: rgba(96, 165, 250, 0.42);
+  background: rgba(37, 99, 235, 0.12);
+  color: #dbeafe;
+}
+
+.update-status.is-available {
+  border-color: rgba(52, 211, 153, 0.42);
+  background: rgba(16, 185, 129, 0.1);
+  color: #a7f3d0;
+}
+
+.update-status.is-downloaded {
+  border-color: rgba(52, 211, 153, 0.5);
+  background: rgba(16, 185, 129, 0.14);
+  color: #bbf7d0;
+}
+
+.update-status.is-error {
+  border-color: rgba(248, 113, 113, 0.42);
+  background: rgba(239, 68, 68, 0.1);
+  color: #fecaca;
+}
+
+.update-last-checked {
+  display: block;
+  margin-top: -4px;
+  color: #6f8bab;
+  font-size: 9px;
+}
+
+/* Permission diff review */
+.agent-permission-preview.is-diff {
+  display: block;
+  padding: 8px 10px;
+  max-height: 320px;
+  font-size: 9.5px;
+  line-height: 1.55;
+}
+
+.agent-permission-preview.is-diff span {
+  display: block;
+  padding: 0 4px;
+  border-radius: 2px;
+  white-space: pre-wrap;
+}
+
+.agent-permission-preview.is-diff span.is-add {
+  background: rgba(16, 185, 129, 0.12);
+  color: #6ee7b7;
+}
+
+.agent-permission-preview.is-diff span.is-del {
+  background: rgba(239, 68, 68, 0.12);
+  color: #fca5a5;
+}
+
+.agent-permission-preview.is-diff span.is-ctx {
+  color: #8ba8ce;
+}
+
+.agent-permission-preview.is-diff span.is-truncated {
+  color: #fbbf24;
+}
+
+.studio-composer-perms small.studio-perms-hint {
+  color: #7f9cbd;
+}

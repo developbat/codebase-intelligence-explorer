@@ -51,7 +51,37 @@ export function AgentPermissionDialog({ request, busy, onDecide }: AgentPermissi
         {request.detail ? <p className="agent-permission-detail">{request.detail}</p> : null}
 
         {request.preview ? (
-          <pre className="agent-permission-preview">{request.preview}</pre>
+          <>
+            {request.previewKind === "diff" ? (
+              <p className="agent-permission-note">
+                {t("Review the diff. The file is not changed until you allow it.")}
+              </p>
+            ) : null}
+            <pre
+              className={`agent-permission-preview${
+                request.previewKind === "diff" ? " is-diff" : ""
+              }`}
+            >
+              {request.previewKind === "diff"
+                ? request.preview.split("\n").map((line, index) => (
+                    <span
+                      key={`${index}-${line.slice(0, 12)}`}
+                      className={
+                        line.startsWith("+")
+                          ? "is-add"
+                          : line.startsWith("-")
+                            ? "is-del"
+                            : line.startsWith("…")
+                              ? "is-truncated"
+                              : "is-ctx"
+                      }
+                    >
+                      {line}
+                    </span>
+                  ))
+                : request.preview}
+            </pre>
+          </>
         ) : null}
 
         {request.destructive ? (

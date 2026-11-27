@@ -13,6 +13,7 @@ interface PermissionInput {
   target?: string;
   detail?: string;
   preview?: string;
+  previewKind?: "diff" | "text";
   destructive?: boolean;
   canAlways?: boolean;
 }
@@ -44,6 +45,7 @@ export function requestPermission(
     target: input.target,
     detail: input.detail,
     preview: input.preview,
+    previewKind: input.previewKind,
     destructive,
     canAlways: destructive ? false : input.canAlways !== false,
     createdAt: new Date().toISOString(),
