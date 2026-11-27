@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import type { AnalysisResult } from "../../shared/types";
-import { listRecent, saveAnalysis, touchProject } from "./store";
+import { clearRecentProjects, listRecent, saveAnalysis, touchProject } from "./store";
 
 function makeAnalysis(index: number): AnalysisResult {
   return {
@@ -60,5 +60,25 @@ test("concurrent analysis saves keep the recent index intact", async () => {
     if (previous === undefined) delete process.env.CIE_DATA_DIR;
     else process.env.CIE_DATA_DIR = previous;
     await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("clears the recent project history without deleting other data", async () => {
+  const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), "cie-store-clear-"));
+  const previous = process.env.CIE_DATA_DIR;
+  process.env.CIE_DATA_DIR = dataDir;
+  try {
+    await fs.writeFile(
+      path.join(dataDir, "index.json"),
+      JSON.stringify({ projects: [{ id: "aaaaaaaaaaaaaaaa", projectName: "Demo" }] }),
+    );
+    const cleared = await clearRecentProjects();
+    assert.equal(cleared, 1);
+    const index = JSON.parse(await fs.readFile(path.join(dataDir, "index.json"), "utf8"));
+    assert.deepEqual(index.projects, []);
+  } finally {
+    if (previous === undefined) delete process.env.CIE_DATA_DIR;
+    else process.env.CIE_DATA_DIR = previous;
+    await fs.rm(dataDir, { recursive: true, force: true });
   }
 });

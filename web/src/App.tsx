@@ -1582,6 +1582,11 @@ export default function App() {
         testTimeout={prefs.testTimeout}
         onTestTimeoutChange={(value) => updateStudioPrefs({ testTimeout: value })}
         onRescan={() => void rescan()}
+        onClearRecent={async () => {
+          const result = await api.clearRecent();
+          setRecent([]);
+          return result.cleared;
+        }}
         onClose={() => {
           setSettingsOpen(false);
           setSettingsFocus(null);

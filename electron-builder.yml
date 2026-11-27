@@ -20,13 +20,26 @@ extraResources:
     filter: ["**/*", "!**/._*"]
   - from: node_modules/playwright-core
     to: app/node_modules/playwright-core
-    filter: ["**/*", "!**/._*"]
+    filter:
+      - "**/*"
+      - "!**/._*"
+      - "!**/*.log"
+      - "!**/.log*"
   - from: node_modules/fsevents
     to: app/node_modules/fsevents
-    filter: ["**/*", "!**/._*"]
+    filter:
+      - "**/*"
+      - "!**/._*"
+      - "!**/*.log"
+      - "!**/.log*"
   - from: node_modules/typescript
     to: app/node_modules/typescript
-    filter: ["**/*", "!**/._*"]
+    filter:
+      - "**/*"
+      - "!**/._*"
+      - "!**/*.log"
+      - "!**/.log*"
+      - "!**/ti-*.log"
 
 asar: false
 

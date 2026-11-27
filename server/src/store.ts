@@ -131,6 +131,15 @@ export async function getRecentProject(id: string): Promise<RecentProject | unde
   return (await readIndex()).projects.find((project) => project.id === id);
 }
 
+/** Clear the recent-project history without deleting analyses or settings. */
+export async function clearRecentProjects(): Promise<number> {
+  return enqueueFile(indexPath(), async () => {
+    const index = await readIndex();
+    await writeIndex({ projects: [] });
+    return index.projects.length;
+  });
+}
+
 export async function removeAnalysis(id: string): Promise<void> {
   if (!isValidProjectId(id)) throw new Error("Invalid project id.");
   await enqueueFile(indexPath(), async () => {

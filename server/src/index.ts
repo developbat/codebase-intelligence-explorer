@@ -172,6 +172,7 @@ import {
   getDataDir,
   getRecentProject,
   isValidProjectId,
+  clearRecentProjects,
   listRecent,
   loadAnalysis,
   removeAnalysis,
@@ -2993,6 +2994,14 @@ app.post("/api/projects/:id/agent/permissions/:requestId", (req, res) => {
 app.get("/api/recent", async (_req, res) => {
   try {
     res.json({ projects: await listRecent() });
+  } catch (error) {
+    handleError(res, error);
+  }
+});
+
+app.delete("/api/recent", async (_req, res) => {
+  try {
+    res.json({ cleared: await clearRecentProjects() });
   } catch (error) {
     handleError(res, error);
   }

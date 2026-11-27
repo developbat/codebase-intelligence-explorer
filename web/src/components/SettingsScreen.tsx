@@ -16,6 +16,7 @@ import {
   ScrollText,
   Settings2,
   ShieldCheck,
+  Trash2,
   Wrench,
   Sparkles,
   X,
@@ -73,6 +74,7 @@ interface SettingsScreenProps {
   testTimeout: number;
   onTestTimeoutChange: (value: number) => void;
   onRescan?: () => void;
+  onClearRecent?: () => Promise<number | void>;
   onClose: () => void;
 }
 
@@ -153,6 +155,7 @@ export function SettingsScreen({
   testTimeout,
   onTestTimeoutChange,
   onRescan,
+  onClearRecent,
   onClose,
 }: SettingsScreenProps) {
   const { t, locale, locales, setLocale } = useI18n();
@@ -164,6 +167,7 @@ export function SettingsScreen({
   const [updateBusy, setUpdateBusy] = useState(false);
   const [updateActionBusy, setUpdateActionBusy] = useState(false);
   const [lastCheckedAt, setLastCheckedAt] = useState<Date | null>(null);
+  const [clearRecentBusy, setClearRecentBusy] = useState(false);
   const screenRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -316,6 +320,23 @@ export function SettingsScreen({
         return `${t("Update failed")}: ${state.message}`;
       default:
         return state.message || t("Check for updates to see if a new version is available.");
+    }
+  }
+
+  async function clearRecentHistory(): Promise<void> {
+    if (!onClearRecent || clearRecentBusy) return;
+    if (
+      !window.confirm(
+        t("Clear the recent project list? Project files and analyses are not deleted."),
+      )
+    ) {
+      return;
+    }
+    setClearRecentBusy(true);
+    try {
+      await onClearRecent();
+    } finally {
+      setClearRecentBusy(false);
     }
   }
 
@@ -643,6 +664,28 @@ export function SettingsScreen({
                     )}
                   </p>
                 </section>
+                {onClearRecent ? (
+                  <section className="settings-section">
+                    <h3>{t("Recent projects")}</h3>
+                    <p>
+                      {t(
+                        "Clear the saved project history without deleting project files or analyses.",
+                      )}
+                    </p>
+                    <button
+                      className="ghost-button"
+                      onClick={() => void clearRecentHistory()}
+                      disabled={clearRecentBusy}
+                    >
+                      {clearRecentBusy ? (
+                        <Loader2 size={12} className="spin" />
+                      ) : (
+                        <Trash2 size={12} />
+                      )}{" "}
+                      {t("Clear recent projects")}
+                    </button>
+                  </section>
+                ) : null}
               </div>
             ) : null}
 

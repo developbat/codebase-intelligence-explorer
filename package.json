@@ -32,7 +32,8 @@
     "build:electron": "node scripts/build-electron.mjs",
     "publish:mac": "npm run build && npm run build:server && npm run build:electron && electron-builder --mac dmg zip --publish always",
     "publish:win": "npm run build && npm run build:server && npm run build:electron && electron-builder --win nsis --x64 --publish always",
-    "package:win:arm64": "npm run build && npm run build:server && npm run build:electron && electron-builder --win nsis --arm64"
+    "package:win:arm64": "npm run build && npm run build:server && npm run build:electron && electron-builder --win nsis --arm64",
+    "verify:package": "node scripts/verify-package.mjs"
   },
   "dependencies": {
     "@codemirror/autocomplete": "^6.20.4",

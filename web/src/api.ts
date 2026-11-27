@@ -152,6 +152,9 @@ export const api = {
       note: string;
     }>("/api/app/update-check"),
 
+  clearRecent: () =>
+    request<{ cleared: number }>("/api/recent", { method: "DELETE" }),
+
   checkpoints: (id: string) =>
     request<{ checkpoints: ProjectCheckpoint[] }>(`/api/projects/${id}/checkpoints`),
 
