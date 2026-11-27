@@ -21,7 +21,9 @@
     "eval:templates": "tsx server/src/templateE2E.ts",
     "eval:verify": "tsx server/src/evalVerify.ts",
     "eval:chat": "tsx server/src/evalChat.ts",
-    "eval:chat:live": "tsx server/src/evalChatLive.ts"
+    "eval:chat:live": "tsx server/src/evalChatLive.ts",
+    "eval:patch": "tsx server/src/evalPatch.ts",
+    "reset:agent": "tsx server/src/resetAgentMemory.ts"
   },
   "dependencies": {
     "@codemirror/autocomplete": "^6.20.4",

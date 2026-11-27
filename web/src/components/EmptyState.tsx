@@ -282,6 +282,9 @@ export function OpenProjectDialog({
 
   const selectedTemplate = templates.find((item) => item.id === template) ?? null;
   const canCreate = Boolean(parentPath.trim() && !busy);
+  const destinationName =
+    name.trim() || (useCase === "daily" ? "bad-note-…" : "bad-project-…");
+  const destinationPath = `${parentPath.trim().replace(/[\\/]+$/, "")}/${destinationName}`;
 
   return (
     <div className="modal-backdrop" onMouseDown={onClose}>
@@ -403,7 +406,7 @@ export function OpenProjectDialog({
             </div>
 
             <label className="create-field">
-              <span>{t("Parent folder")}</span>
+              <span>{t("Project location (parent folder)")}</span>
               <div className="modal-input-row">
                 <FolderOpen size={15} />
                 <input
@@ -437,6 +440,14 @@ export function OpenProjectDialog({
               />
               <small>{t("Letters, numbers, dots, dashes and underscores only. Leave blank for an automatic name.")}</small>
             </label>
+
+            <div className="create-destination">
+              <FolderPlus size={14} />
+              <span>
+                {t("Project will be created at")}{" "}
+                <code>{destinationPath}</code>
+              </span>
+            </div>
 
             <label className="create-field">
               <span>{useCase === "daily" ? t("What do you want to do?") : t("What do you want to build?")}</span>

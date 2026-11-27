@@ -120,6 +120,17 @@ button:disabled {
   gap: 10px;
   padding: 0 16px;
   border-right: 1px solid var(--line);
+  cursor: pointer;
+}
+
+.brand:hover .brand-title,
+.brand:focus-visible .brand-title {
+  color: var(--teal);
+}
+
+.brand:focus-visible {
+  outline: 2px solid rgba(94, 234, 212, 0.55);
+  outline-offset: -4px;
 }
 
 .brand-mark {
@@ -15664,6 +15675,25 @@ button.canvas-stat {
   color: #617994;
   font-size: 8.5px;
   line-height: 1.45;
+}
+
+.create-destination {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  margin: 2px 0 8px;
+  padding: 9px 10px;
+  border: 1px dashed rgba(94, 234, 212, 0.28);
+  border-radius: 8px;
+  background: rgba(94, 234, 212, 0.05);
+  color: #b9d4f3;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.create-destination code {
+  color: #7ee7a6;
+  word-break: break-all;
 }
 
 .template-grid {

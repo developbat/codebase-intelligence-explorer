@@ -48,7 +48,10 @@
           "wall"
         ]
       ],
-      "noToolJson": true
+      "noToolJson": true,
+      "expectNotContains": [
+        "app.js"
+      ]
     },
     {
       "id": "patch-energy",
@@ -63,6 +66,24 @@
         [
           "enerji",
           "energy"
+        ]
+      ],
+      "noToolJson": true
+    },
+    {
+      "id": "insufficient-context",
+      "instruction": "app.js içindeki nonexistentFunction nasıl çalışıyor?",
+      "promptId": "chat.answer",
+      "language": "tr",
+      "context": "Bu bağlamda app.js veya nonexistentFunction yok. Yalnızca game.js:move ve blastWall verildi.",
+      "expectAny": [
+        [
+          "yok",
+          "bulunamadı",
+          "mevcut değil",
+          "missing",
+          "not present",
+          "not in"
         ]
       ],
       "noToolJson": true

@@ -286,6 +286,21 @@ export default function App() {
     return () => window.removeEventListener("keydown", handler);
   }, []);
 
+  function goHome() {
+    setAnalysis(null);
+    setDialogOpen(false);
+    setError(null);
+    setProduct("intelligence");
+    setMode("universe");
+    setSelectedFolder(null);
+    setSelectedFile(null);
+    setFocusNodeId(null);
+    setSelectedNodeId(null);
+    setSelectedEdgeId(null);
+    localStorage.removeItem(LAST_PROJECT_KEY);
+    localStorage.setItem("cie:product", "intelligence");
+  }
+
   function applyAnalysis(result: AnalysisResult, reset = true) {
     setAnalysis(result);
     setGitStatus(null);
@@ -825,7 +840,19 @@ export default function App() {
   return (
     <div className={`app ${analysis ? "" : "no-analysis"} ${analysis && !inspectorOpen ? "inspector-closed" : ""}`}>
       <header className="topbar">
-        <div className="brand">
+        <div
+          className="brand"
+          role="button"
+          tabIndex={0}
+          onClick={goHome}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              goHome();
+            }
+          }}
+          title={t("Back to start")}
+        >
           <img className="brand-logo" src={`/cbe.png?v=${logoVersion}`} alt="" width={31} height={31} />
           <div className="brand-text">
             <span className="brand-title">B.A.D IDE</span>

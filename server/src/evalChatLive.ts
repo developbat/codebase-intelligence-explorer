@@ -11,6 +11,7 @@ interface ContentCase {
   expectContains?: string[];
   expectNotContains?: string[];
   expectAny?: string[][];
+  expectCitation?: boolean;
   noToolJson?: boolean;
 }
 
@@ -63,6 +64,16 @@ async function main(): Promise<void> {
         if (!alternatives.some((item) => lower.includes(item.toLowerCase()))) {
           failures.push(`missing any of: ${alternatives.join(" | ")}`);
         }
+      }
+      if (
+        testCase.expectCitation &&
+        !/\b[\w./-]+\.(?:[cm]?[jt]sx?|vue|svelte|html?|css|scss|php|py|go|rs|java|kt|cs|rb|swift|json|toml|ya?ml):\d+/.test(
+          answer,
+        ) &&
+        !/\b(?:satır|satirlar|line|lines)\s*\d+/.test(answer) &&
+        !/\b\d+\s*[-–]\s*\d+\b/.test(answer)
+      ) {
+        failures.push("missing file/line citation");
       }
       if (testCase.noToolJson && looksLikeToolJson(answer)) {
         failures.push("answer looks like a tool-call JSON");
