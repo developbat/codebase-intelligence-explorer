@@ -26625,3 +26625,58 @@ button.canvas-stat {
 .update-link:hover {
   text-decoration: underline;
 }
+
+/* Code Studio bulk pre-approvals */
+.studio-composer-perms {
+  gap: 6px 10px;
+  font-size: 9px;
+}
+
+.studio-composer-perms .studio-perms-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #8fb4e8;
+  font-size: 8px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.studio-composer-perms input {
+  width: 11px;
+  height: 11px;
+  margin: 0 2px 0 0;
+}
+
+.studio-perms-all {
+  height: 20px;
+  padding: 0 8px;
+  border: 1px solid rgba(139, 168, 206, 0.3);
+  border-radius: 999px;
+  background: rgba(17, 28, 44, 0.9);
+  color: #cfe2ff;
+  font-size: 8.5px;
+  cursor: pointer;
+}
+
+.studio-perms-all:hover:not(:disabled) {
+  border-color: rgba(110, 168, 254, 0.6);
+  background: rgba(37, 99, 235, 0.16);
+}
+
+.studio-perms-all:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.studio-composer-perms small {
+  color: #fbbf24;
+  font-size: 8px;
+}
+
+@media (max-width: 1080px) {
+  .topbar-updates-button span {
+    display: none;
+  }
+}

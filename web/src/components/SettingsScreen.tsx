@@ -49,6 +49,7 @@ export type SettingsTab =
 interface SettingsScreenProps {
   open: boolean;
   initialTab?: SettingsTab;
+  focusSection?: "updates" | null;
   modelsAddMode?: boolean;
   projectId?: string;
   projectName?: string;
@@ -112,6 +113,7 @@ function SettingsToggle({
 export function SettingsScreen({
   open,
   initialTab = "general",
+  focusSection = null,
   modelsAddMode = false,
   projectId,
   projectName,
@@ -263,6 +265,16 @@ export function SettingsScreen({
   }, [open]);
 
   useEffect(() => {
+    if (!open || focusSection !== "updates") return;
+    const timer = window.setTimeout(() => {
+      document
+        .getElementById("settings-updates")
+        ?.scrollIntoView({ block: "center", behavior: "smooth" });
+    }, 80);
+    return () => window.clearTimeout(timer);
+  }, [open, focusSection]);
+
+  useEffect(() => {
     if (!open) return;
     const handler = (event: KeyboardEvent) => {
       if (event.key === "Escape") onClose();
@@ -411,7 +423,7 @@ export function SettingsScreen({
                   </div>
                 </section>
 
-                <section className="settings-section">
+                <section className="settings-section" id="settings-updates">
                   <h3>{t("App & updates")}</h3>
                   <div className="settings-project-card">
                     <div>

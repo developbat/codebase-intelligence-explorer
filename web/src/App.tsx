@@ -145,6 +145,7 @@ export default function App() {
     () => (localStorage.getItem("cie:settings-tab") as SettingsTab | null) ?? "general",
   );
   const [settingsModelsAdd, setSettingsModelsAdd] = useState(false);
+  const [settingsFocus, setSettingsFocus] = useState<"updates" | null>(null);
   const [gitStatus, setGitStatus] = useState<GitStatus | null>(null);
   const [changeReport, setChangeReport] = useState<ChangeReport | null>(null);
   const [gitLoading, setGitLoading] = useState(false);
@@ -1018,11 +1019,26 @@ export default function App() {
           ) : null}
           {analysis ? <IndexStatusBadge projectId={analysis.id} /> : null}
           <button
+            className="ghost-button topbar-updates-button"
+            onClick={() => {
+              setSettingsTab("general");
+              setSettingsFocus("updates");
+              setSettingsModelsAdd(false);
+              setSettingsOpen(true);
+            }}
+            title={t("Check for updates")}
+            aria-label={t("Check for updates")}
+          >
+            <RefreshCw size={14} />
+            <span>{t("Updates")}</span>
+          </button>
+          <button
             className="ghost-button topbar-settings-button"
             onClick={() => {
               setSettingsTab(
                 (localStorage.getItem("cie:settings-tab") as SettingsTab | null) ?? "general",
               );
+              setSettingsFocus(null);
               setSettingsModelsAdd(false);
               setSettingsOpen(true);
             }}
@@ -1498,6 +1514,7 @@ export default function App() {
       <SettingsScreen
         open={settingsOpen}
         initialTab={settingsTab}
+        focusSection={settingsFocus}
         modelsAddMode={settingsModelsAdd}
         projectId={analysis?.id}
         projectName={analysis?.projectName}
@@ -1517,7 +1534,10 @@ export default function App() {
         testTimeout={prefs.testTimeout}
         onTestTimeoutChange={(value) => updateStudioPrefs({ testTimeout: value })}
         onRescan={() => void rescan()}
-        onClose={() => setSettingsOpen(false)}
+        onClose={() => {
+          setSettingsOpen(false);
+          setSettingsFocus(null);
+        }}
       />
 
       <footer className="statusbar">

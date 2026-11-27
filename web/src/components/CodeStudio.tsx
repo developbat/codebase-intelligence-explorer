@@ -110,6 +110,7 @@ import {
   Search,
   Server,
   Settings2,
+  ShieldCheck,
   Send,
   Sparkles,
   Square,
@@ -4907,6 +4908,44 @@ export function CodeStudio({
           <div className="studio-footer-body">
             {footerTab === "chat" ? (
               <div className={`studio-composer is-${studioMode}`}>
+
+          <div className="studio-composer-perms" title={t("Applies to every project")}>
+            <span className="studio-perms-label">
+              <ShieldCheck size={11} /> {t("Pre-approve")}
+            </span>
+            <label>
+              <input
+                type="checkbox"
+                checked={agentAllowWrite}
+                onChange={(event) => setAgentAllowWrite(event.target.checked)}
+                disabled={chatBusy}
+              />
+              {t("Writes")}
+            </label>
+            <label>
+              <input
+                type="checkbox"
+                checked={agentAllowCommands}
+                onChange={(event) => setAgentAllowCommands(event.target.checked)}
+                disabled={chatBusy}
+              />
+              {t("Commands")}
+            </label>
+            <button
+              type="button"
+              className="studio-perms-all"
+              onClick={() => {
+                const next = !(agentAllowWrite && agentAllowCommands);
+                setAgentAllowWrite(next);
+                setAgentAllowCommands(next);
+              }}
+              disabled={chatBusy}
+              title={t("Toggle both pre-approvals")}
+            >
+              {agentAllowWrite && agentAllowCommands ? t("Ask every time") : t("Allow both")}
+            </button>
+            {readOnlyMode ? <small>{t("Plan mode is read-only")}</small> : null}
+          </div>
 
           {attachment ? (
             <div className="studio-attachment-chip">
