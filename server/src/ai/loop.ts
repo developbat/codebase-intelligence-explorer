@@ -1590,13 +1590,13 @@ function taskInstruction(
       ? "For random-start behavior, start the game several times and assert the observed level set varies; one start does not prove randomness. Put the expected result on the eval step itself with expectText, not a separate print."
       : "",
     wallBreakTask
-      ? "For wall-breaking, verify on the real page with one browser_check eval: read the player cell, the target wall cell and the energy before; move into that wall; assert the energy decreased by the expected cost and the target cell is now walkable (or the level map cell changed). Pressing a movement key on open floor is not proof. If breaking mutates a shared LEVELS map, confirm restart/level-load resets it."
+      ? "For wall-breaking, verify on the real page with one browser_check eval: read the player cell, the target wall cell and the energy before; move into that wall; assert the energy decreased by the expected cost and the target cell is now walkable (or the level map cell changed). Return a distinctive string such as 'wallBroken=true' and put that exact value on the eval step's expectText; a printed value without expectText is not an assertion. Pressing a movement key on open floor is not proof. If breaking mutates a shared LEVELS map, confirm restart/level-load resets it."
       : "",
     mazeGenerationTask
-      ? "For procedural maze generation, start or restart several times and assert the actual layout (walls/cells) differs, not only the level name/index. If the project only has a fixed LEVELS array and shuffles its order, do not call that procedural generation; implement real generation or report the gap."
+      ? "For procedural maze generation, start or restart several times and assert the actual layout (walls/cells) differs, not only the level name/index. Return a distinctive string such as 'mazeGenerated=true' and put it on the eval step's expectText. If the project only has a fixed LEVELS array and shuffles its order, do not call that procedural generation; implement real generation or report the gap."
       : "",
     fogRevealTask
-      ? "For fog/explored reveal, move the player and assert the explored cell count or minimap pixels increase; a static canvas or visibility check is not proof."
+      ? "For fog/explored reveal, move the player and assert the explored cell count or minimap pixels increase; return 'fogRevealed=true' and put it on the eval step's expectText. A static canvas or visibility check is not proof."
       : "",
     extractionTask
       ? ""
