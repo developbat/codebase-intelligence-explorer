@@ -20,7 +20,8 @@
     "eval:tools": "tsx server/src/evalToolUse.ts",
     "eval:templates": "tsx server/src/templateE2E.ts",
     "eval:verify": "tsx server/src/evalVerify.ts",
-    "eval:chat": "tsx server/src/evalChat.ts"
+    "eval:chat": "tsx server/src/evalChat.ts",
+    "eval:chat:live": "tsx server/src/evalChatLive.ts"
   },
   "dependencies": {
     "@codemirror/autocomplete": "^6.20.4",

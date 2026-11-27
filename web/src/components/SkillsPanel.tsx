@@ -435,7 +435,12 @@ export function SkillsPanel({ projectId }: SkillsPanelProps) {
 
       <p className="skills-intro">
         {t(
-          "New skills start disabled; review the source and SKILL.md, then enable them. The agent sees a compact capability index and loads full instructions only when a task matches. Type @skill-name to force a skill for one run. Skill scripts run only after explicit approval.",
+          "New external skills start disabled; review the source and SKILL.md, then enable them. Built-in skills are enabled by default. The agent sees a compact capability index and loads full instructions only when a task matches. Type @skill-name to force a skill for one run. Skill scripts run only after explicit approval.",
+        )}
+      </p>
+      <p className="skills-intro">
+        {t(
+          "Recommended built-in pack for chat: root-cause-debugging, code-review, security-audit, test-writer, accessibility-audit. These are already available; no download is needed.",
         )}
       </p>
 
@@ -685,7 +690,7 @@ export function SkillsPanel({ projectId }: SkillsPanelProps) {
           </div>
           <small className="skills-footnote">
             {t(
-              "“Folder not created yet” is normal: the folder appears after you add a SKILL.md or install a skill pack. Installed skills are enabled by default and can be switched off from the list.",
+              "“Folder not created yet” is normal: the folder appears after you add a SKILL.md or install a skill pack. Installed external skills start disabled unless you check Enable after install; built-in skills are enabled by default.",
             )}
           </small>
         </div>

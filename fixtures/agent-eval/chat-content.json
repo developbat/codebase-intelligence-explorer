@@ -1,0 +1,71 @@
+{
+  "version": 1,
+  "description": "Live chat content eval. Requires a model; no project-specific data. Run with: npm run eval:chat:live",
+  "cases": [
+    {
+      "id": "meta-memory",
+      "instruction": "sen tam olarak nesin? hafızan var mı, ne yapabilirsin?",
+      "promptId": "chat.meta",
+      "language": "tr",
+      "expectContains": [
+        "hafıza",
+        "proje"
+      ],
+      "expectNotContains": [
+        "tool call",
+        "json action"
+      ],
+      "noToolJson": true
+    },
+    {
+      "id": "meta-memory-en",
+      "instruction": "what are you and do you have persistent memory?",
+      "promptId": "chat.meta",
+      "language": "en",
+      "expectContains": [
+        "memory",
+        "project"
+      ],
+      "noToolJson": true
+    },
+    {
+      "id": "patch-explain",
+      "instruction": "Bu patch ne değiştirdi? Dosyayı ve davranışı açıkla.",
+      "promptId": "chat.answer",
+      "language": "tr",
+      "context": "Patch (game.js):\n@@ function move(dx, dy) @@\n-  if (isWall(nx, ny)) return;\n+  if (isWall(nx, ny)) {\n+    if (!blastWall(nx, ny)) return;\n+  }\n+function blastWall(x, y) {\n+  if (state.energy < 10) return false;\n+  state.energy -= 10;\n+  currentLevel().map[y][x] = 0;\n+  return true;\n+}\n",
+      "expectContains": [
+        "game.js",
+        "blastWall"
+      ],
+      "expectAny": [
+        [
+          "enerji",
+          "energy"
+        ],
+        [
+          "duvar",
+          "wall"
+        ]
+      ],
+      "noToolJson": true
+    },
+    {
+      "id": "patch-energy",
+      "instruction": "Bu patch enerji maliyetini nasıl değiştirdi? Kısa açıkla.",
+      "promptId": "chat.answer",
+      "language": "tr",
+      "context": "Patch (game.js):\n@@ function blastWall(x, y) @@\n+  if (state.energy < 10) return false;\n+  state.energy -= 10;\n",
+      "expectContains": [
+        "10"
+      ],
+      "expectAny": [
+        [
+          "enerji",
+          "energy"
+        ]
+      ],
+      "noToolJson": true
+    }
+  ]
+}
