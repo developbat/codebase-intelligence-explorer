@@ -4884,6 +4884,17 @@ export function CodeStudio({
             <span className="studio-footer-spacer" />
             <button
               className="studio-footer-collapse"
+              onClick={() =>
+                setFooterHeight((value) =>
+                  value > 420 ? 220 : Math.round(window.innerHeight * 0.55),
+                )
+              }
+              title={footerHeight > 420 ? t("Collapse console/git panel") : t("Expand console/git panel")}
+            >
+              {footerHeight > 420 ? <Minimize2 size={11} /> : <Maximize2 size={11} />}
+            </button>
+            <button
+              className="studio-footer-collapse"
               onClick={() => setFooterHeight((value) => (value > 240 ? 220 : 320))}
               title={t("Expand or shrink footer")}
             >

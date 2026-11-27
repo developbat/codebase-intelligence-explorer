@@ -940,25 +940,7 @@ export default function App() {
         ) : null}
 
         <div className="breadcrumbs" style={{ display: analysis ? undefined : "none" }}>
-          {product === "studio" ? null : product === "chat" ? (
-            <span className="breadcrumb-item">
-              <MessageSquare size={12} className="breadcrumb-sep" />
-              <span className="is-current">{t("Chat Studio")}</span>
-              <span className="studio-top-pill">{t("No code edits")}</span>
-            </span>
-          ) : product === "image" && analysis ? (
-            <span className="breadcrumb-item">
-              <ImageIcon size={12} className="breadcrumb-sep" />
-              <span className="is-current">{t("Image Studio")}</span>
-              <span className="studio-top-pill">{t("Free generator")}</span>
-            </span>
-          ) : product === "video" && analysis ? (
-            <span className="breadcrumb-item">
-              <Clapperboard size={12} className="breadcrumb-sep" />
-              <span className="is-current">{t("Video Studio")}</span>
-              <span className="studio-top-pill">{t("Model required")}</span>
-            </span>
-          ) : (
+          {product === "studio" || product === "chat" || product === "image" || product === "video" ? null : (
             <>
               {analysis && mode !== "universe" && mode !== "3d" ? (
                 <button
@@ -1540,20 +1522,10 @@ export default function App() {
 
       <footer className="statusbar">
         <span className="status-left">
-          {product === "chat" ? (
+          {product === "chat" || product === "image" || product === "video" ? (
             <>
               <span className="status-dot" />
-              {t("Chat Studio")} · {t("No code edits")}
-            </>
-          ) : product === "image" ? (
-            <>
-              <span className="status-dot" />
-              {t("Image Studio")} · {t("Free generator")}
-            </>
-          ) : product === "video" ? (
-            <>
-              <span className="status-dot" />
-              {t("Video Studio")} · {t("Model required")}
+              {t("Ready")}
             </>
           ) : analysis ? (
             product === "studio" ? (

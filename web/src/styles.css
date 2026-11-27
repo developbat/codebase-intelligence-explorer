@@ -26483,3 +26483,45 @@ button.canvas-stat {
 .pp-plan h3 {
   color: #dce9fb;
 }
+
+/* Chat / Image / Video composers match the Code Studio input design */
+.chat-studio-composer,
+.studio-bottom-controls {
+  position: relative;
+}
+
+.chat-studio-composer textarea,
+.studio-bottom-controls > textarea {
+  min-height: 112px;
+  max-height: 360px;
+  padding: 14px 16px 58px;
+  border-radius: 13px;
+  font-size: 13.5px;
+  line-height: 1.55;
+}
+
+.chat-studio-composer .studio-composer-bottom,
+.studio-bottom-controls .studio-composer-bottom {
+  position: absolute;
+  left: 22px;
+  right: 22px;
+  bottom: 18px;
+  z-index: 2;
+  margin: 0;
+  flex-wrap: wrap;
+}
+
+.chat-studio-composer .studio-composer-bottom {
+  padding-right: 96px;
+}
+
+.chat-studio-composer > .chat-studio-send {
+  position: absolute;
+  right: 20px;
+  bottom: 16px;
+  z-index: 3;
+}
+
+.studio-bottom-controls > textarea {
+  padding-bottom: 96px;
+}

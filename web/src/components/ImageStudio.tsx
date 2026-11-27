@@ -274,7 +274,7 @@ export function ImageStudio({
       <main className="image-studio-main">
         <div className="chat-studio-head">
           <div>
-            <h2>{t("Image Studio")}</h2>
+            <h2>{t("Image")}</h2>
             <span>
               {selected.label} · {width}×{height} · seed {seed}
             </span>

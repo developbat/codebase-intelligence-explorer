@@ -89,7 +89,7 @@ export function ChatStudio({
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [useWeb, setUseWeb] = useState(true);
+  const useWeb = true;
   const [attachment, setAttachment] = useState<{ name: string; content: string } | null>(null);
   const [noteMessage, setNoteMessage] = useState<string | null>(null);
   const [attachMenuOpen, setAttachMenuOpen] = useState(false);
@@ -302,10 +302,9 @@ export function ChatStudio({
       <main className="chat-studio-main">
         <div className="chat-studio-head">
           <div>
-            <h2>{active?.title ?? t("Chat Studio")}</h2>
+            <h2>{active?.title ?? t("Chat")}</h2>
             <span>
               {model ? `${model.provider}/${model.model}` : t("Choose a model")}
-              {useWeb ? ` · ${t("Web search on")}` : ""}
             </span>
           </div>
           {messages.length > 0 ? (
@@ -531,14 +530,6 @@ export function ChatStudio({
                   </optgroup>
                 ))}
               </select>
-              <label className="studio-web-toggle">
-                <input
-                  type="checkbox"
-                  checked={useWeb}
-                  onChange={(event) => setUseWeb(event.target.checked)}
-                />
-                <Globe2 size={11} /> {t("Web search")}
-              </label>
             </div>
             {busy ? (
               <button className="chat-studio-send is-stop" onClick={stop}>

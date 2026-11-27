@@ -281,7 +281,7 @@ export function VideoStudio({
       <main className="image-studio-main">
         <div className="chat-studio-head">
           <div>
-            <h2>{t("Video Studio")}</h2>
+            <h2>{t("Video")}</h2>
             <span>
               {selected ? `${selected.provider}/${selected.model}` : t("No video model")} · {duration}s
             </span>
