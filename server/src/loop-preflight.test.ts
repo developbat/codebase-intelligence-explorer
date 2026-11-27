@@ -12,7 +12,10 @@ import {
   softTaskTokenBudget,
   summarizeToolIssues,
   summaryAllowsNoChanges,
+  summaryClaimsAlreadyPresent,
+  taskBehaviorEvidence,
   isMicroEditTask,
+  intentTask,
   taskBudgetEffort,
   taskLooksLikeWrite,
   taskTargetFiles,
@@ -338,5 +341,153 @@ test("exact file-line micro tasks use the short edit profile", () => {
       microEdit: false,
     } as unknown as Parameters<typeof isMicroEditTask>[0]),
     false,
+  );
+});
+
+test("fallback or multi-part intents are not collapsed into a single patch", () => {
+  const intent = {
+    kind: "edit",
+    understanding: "birkaç oyun değişikliği",
+    language: "tr",
+    needsClarification: false,
+    scope: "small",
+    mode: "single",
+    areas: ["game.js"],
+    verification: "browser",
+    context: "project",
+    history: "recent",
+    toolGroups: ["edit", "browser"],
+    behaviors: [
+      {
+        id: "b1",
+        action: "update",
+        surface: "game",
+        target: "the game",
+        details: "",
+        acceptance: "",
+      },
+    ],
+    constraints: [],
+    ambiguities: [],
+    confidence: 0.45,
+    approach: "",
+    needsExhaustiveEvidence: false,
+    assumptions: ["Intent analyst could not parse its reply; proceeding with one focused task."],
+  } as never;
+  const task = intentTask(
+    "oyunda birkaç değişiklik yap; maz üret ve duvarları patlat",
+    intent,
+    undefined,
+    "build",
+  );
+  assert.equal(task.patch, undefined);
+  assert.equal(task.stepBudget, undefined);
+});
+
+test("a smoke browser check does not prove maze generation, fog reveal or wall breaking", () => {
+  const task = {
+    id: "task-1",
+    title: "oyunda birkaç değişiklik: maz otomatik üret, alt kademeleri görünür yap, duvarları patlat",
+    detail: "",
+    acceptance: "",
+    status: "done",
+    effort: "standard",
+    role: "main",
+    dependsOn: [],
+    attempts: 1,
+    changedFiles: ["game.js"],
+    commands: [],
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:01:00.000Z",
+  } as never;
+  const result = {
+    changedFiles: ["game.js"],
+    steps: [
+      step({
+        args: {
+          steps: [
+            { action: "click", selector: "#start-btn" },
+            { action: "eval", value: "return {energy:100}", expectText: "100" },
+            { action: "expectVisible", selector: "#game" },
+          ],
+        },
+        observation: 'PASS #2 {"energyBefore":"100","canvasW":640} PASS #4 {"energyAfter":"100","score":"100"}',
+      }),
+    ],
+  };
+  const evidence = taskBehaviorEvidence(task, result as never, true);
+  assert.equal(evidence.ok, false);
+  assert.deepEqual(evidence.missing, [
+    "procedural maze generation",
+    "fog / explored reveal",
+    "wall breaking",
+  ]);
+});
+
+test("a behavior-bound check proves wall breaking when energy changes", () => {
+  const task = {
+    id: "task-1",
+    title: "duvarları patlatarak yol aç",
+    detail: "",
+    acceptance: "",
+    status: "done",
+    effort: "standard",
+    role: "main",
+    dependsOn: [],
+    attempts: 1,
+    changedFiles: ["game.js"],
+    commands: [],
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:01:00.000Z",
+  } as never;
+  const result = {
+    changedFiles: ["game.js"],
+    steps: [
+      step({
+        args: {
+          steps: [
+            { action: "click", selector: "#start-btn" },
+            {
+              action: "eval",
+              value:
+                "const before=state.energy; state.player={x:1,y:1}; isWall(2,1); move(1,0); return 'wallBroken='+(state.energy<before)",
+              expectText: "wallBroken=true",
+            },
+          ],
+        },
+        observation: "PASS energyBefore=100 energyAfter=90 wallBroken=true",
+      }),
+    ],
+  };
+  const evidence = taskBehaviorEvidence(task, result as never, true);
+  assert.equal(evidence.ok, true, evidence.reason);
+});
+
+test("non-game tasks do not require game behavior evidence", () => {
+  const task = {
+    id: "task-1",
+    title: "buton rengini mavi yap",
+    detail: "",
+    acceptance: "",
+    status: "done",
+    effort: "simple",
+    role: "fast",
+    dependsOn: [],
+    attempts: 1,
+    changedFiles: ["styles.css"],
+    commands: [],
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:01:00.000Z",
+  } as never;
+  const evidence = taskBehaviorEvidence(task, { changedFiles: ["styles.css"], steps: [] } as never, true);
+  assert.equal(evidence.ok, true);
+});
+
+test("already generates/produces claims require no-change evidence", () => {
+  assert.equal(
+    summaryClaimsAlreadyPresent(
+      "The maze already generates procedurally per level (LEVELS + shuffleLevels).",
+    ),
+    true,
   );
 });

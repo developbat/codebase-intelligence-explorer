@@ -73,7 +73,7 @@ import { withToolTimeout } from "./ai/tools/sandbox";
 import type { AgentToolContext } from "./ai/tools/types";
 import { getPrompt, getPromptVersion, listPrompts, renderPrompt, resetPrompt, savePrompt } from "./ai/prompts";
 import { resolvePermission } from "./ai/permissions";
-import { analyzeIntent } from "./ai/intent";
+import { analyzeIntent, shouldRequestIntentConfirmation } from "./ai/intent";
 import { decideTaskRelation } from "./ai/taskRelation";
 import { summarizeWorkState } from "./ai/workState";
 import { listPlans, readPlan } from "./plans";
@@ -2511,6 +2511,38 @@ app.post("/api/projects/:id/ai/loop/stream", async (req, res) => {
       res.end();
       return;
     }
+  }
+
+  const intentConfirmation = intent
+    ? shouldRequestIntentConfirmation({
+        intent,
+        instruction: goal,
+        resuming,
+        retryFailed,
+        confirmed: req.body?.confirmed === true,
+        clarified: req.body?.clarified === true,
+        replan: req.body?.replan === true,
+      })
+    : { needed: false, reason: "" };
+  if (intentConfirmation.needed) {
+    write({
+      type: "log",
+      entry: {
+        id: `log-${Date.now()}-intent-confirm`,
+        at: new Date().toISOString(),
+        level: "warn",
+        label: "Intent confirmation required",
+        detail: intentConfirmation.reason,
+      },
+    });
+    write({
+      type: "confirm",
+      intent,
+      original: goal,
+      reason: intentConfirmation.reason,
+    });
+    res.end();
+    return;
   }
 
   if (intent?.kind === "question" && intent.context === "none") {

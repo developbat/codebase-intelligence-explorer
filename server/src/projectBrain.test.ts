@@ -231,3 +231,91 @@ test("server-only and no-secret constraints are persisted in the brain", async (
   assert.ok(brain.constraints.length >= 3);
   assert.ok(brain.constraints.some((constraint) => constraint.kind === "security"));
 });
+
+test("task evidence is marked claimed or verified and ids include createdAt", async (t) => {
+  const { root, analysis } = await fixture();
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  await ensureProjectBrain(analysis, { force: true });
+  const task = {
+    id: "task-1",
+    title: "Break walls",
+    detail: "",
+    status: "done",
+    effort: "standard",
+    role: "main",
+    dependsOn: [],
+    attempts: 1,
+    changedFiles: ["game.js"],
+    commands: [],
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:01:00.000Z",
+  } as unknown as ProjectTask;
+  const next = await updateProjectBrainFromTask(
+    analysis,
+    task,
+    {
+      summary: "Walls break with an energy cost and the map cell becomes walkable.",
+      changedFiles: ["game.js"],
+    },
+    "done",
+    "verified",
+  );
+  const feature = next.features.find((item) => item.name === "Break walls");
+  assert.ok(feature);
+  assert.equal(feature?.evidence, "verified");
+  assert.match(feature?.id ?? "", /^task:task-1:2026-01-01/);
+  const change = next.recentChanges.find((item) => item.summary.includes("Walls break"));
+  assert.equal(change?.evidence, "verified");
+  const brief = compactProjectBrainBrief(next);
+  assert.match(brief, /unverified claims/i);
+  assert.match(brief, /\[verified\]/);
+});
+
+test("failed no-change summaries are not promoted to known issues", async (t) => {
+  const { root, analysis } = await fixture();
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  await ensureProjectBrain(analysis, { force: true });
+  const task = {
+    id: "task-2",
+    title: "Check the fallback",
+    detail: "",
+    status: "failed",
+    effort: "standard",
+    role: "main",
+    dependsOn: [],
+    attempts: 2,
+    changedFiles: [],
+    commands: [],
+    createdAt: "2026-01-02T00:00:00.000Z",
+    updatedAt: "2026-01-02T00:01:00.000Z",
+  } as unknown as ProjectTask;
+  const noChange = await updateProjectBrainFromTask(
+    analysis,
+    task,
+    {
+      summary: "No file was changed; respawnReward already meets the acceptance criteria.",
+      changedFiles: [],
+    },
+    "failed",
+    "claimed",
+  );
+  assert.ok(
+    !noChange.knownIssues.some((issue) => /No file was changed/i.test(issue.text)),
+    "no-change summary must not become a known issue",
+  );
+
+  const realError = await updateProjectBrainFromTask(
+    analysis,
+    { ...task, id: "task-3" },
+    {
+      summary: "TypeError: Cannot read properties of undefined while drawing the HUD.",
+      changedFiles: ["game.js"],
+    },
+    "failed",
+    "claimed",
+  );
+  assert.ok(
+    realError.knownIssues.some((issue) => /TypeError/.test(issue.text)),
+    "a real runtime error should stay a known issue",
+  );
+});

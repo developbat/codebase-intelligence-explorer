@@ -27,8 +27,7 @@ import {
   reviewProjectPlan,
   shouldReviewPlan,
 } from "./planReview";
-import { isContinuationInstruction } from "./intent";
-import { shouldForceRequirementsFirst } from "../skillPolicy";
+import { intentNeedsConfirmation, isContinuationInstruction } from "./intent";
 import { ensureDevServerForRequest } from "../processes";
 import { checkFileSyntax } from "../syntax";
 import { pngStats } from "../pngStats";
@@ -696,9 +695,6 @@ export async function planProjectTasks(
             ].join(", ")}`
           : "",
         projectMap ? `Project map (use it for file and symbol ownership):\n${projectMap.slice(0, 14_000)}` : "",
-        shouldForceRequirementsFirst(goal, options.intent, false)
-          ? "This goal is short/underspecified. Apply the requirements-first approach: define explicit acceptance checks before implementation."
-          : "",
         "Write task titles, details and acceptance in English. Keep quoted user text, file paths and code identifiers unchanged.",
         `Verification command: ${verification ?? "none detected"}`,
         options.intent
@@ -999,7 +995,7 @@ export function summaryAllowsNoChanges(summary: string): boolean {
   if (/\b(not complete|incomplete|not done|failed|missing|tamamlanmadı|yapılmadı|eksik)\b/i.test(summary)) {
     return false;
   }
-  return /already (?:present|exists|implemented|applied|there|complete|complete and|satisf(?:y|ies|ied)|fits|matches|implemented and verified)|no (?:further )?(?:code )?changes? (?:are |was |were )?(?:needed|required)|nothing needed to change|none needed|task[\s-]*\d*\s*(?:is\s*)?complete|görev[\s-]*\d*\s*tamamlandı|created and verified|verified|confirmed|nothing (?:was|is) (?:changed|rewritten)|no (?:changes|modifications) (?:made|required)|no files? (?:was|is|were|are) changed|already (?:meets|satisfies|matches)|zaten (?:var|mevcut|tamam|tam|işlevsel|karşılan|karşılıyor|uyumlu|uygulanmış|uyguluyor|uyguluyordur|uygundur|eklenmiş|yapılmış|mevcutmuş)|değişiklik (?:gerekmiyor|yapılmadı)|(?:hiçbir )?dosya değiştirilmedi|değişmedi|gerek yok/i.test(
+  return /already (?:present|exists|implemented|applied|there|complete|complete and|satisf(?:y|ies|ied)|fits|matches|generates|produces|uses|creates|handles|supports|includes|contains|does|implemented and verified)|no (?:further )?(?:code )?changes? (?:are |was |were )?(?:needed|required)|nothing needed to change|none needed|task[\s-]*\d*\s*(?:is\s*)?complete|görev[\s-]*\d*\s*tamamlandı|created and verified|verified|confirmed|nothing (?:was|is) (?:changed|rewritten)|no (?:changes|modifications) (?:made|required)|no files? (?:was|is|were|are) changed|already (?:meets|satisfies|matches)|zaten (?:var|mevcut|tamam|tam|işlevsel|karşılan|karşılıyor|uyumlu|uygulanmış|uyguluyor|uyguluyordur|uygundur|eklenmiş|yapılmış|mevcutmuş)|değişiklik (?:gerekmiyor|yapılmadı)|(?:hiçbir )?dosya değiştirilmedi|değişmedi|gerek yok/i.test(
     summary,
   );
 }
@@ -1010,7 +1006,7 @@ export function summaryAllowsNoChanges(summary: string): boolean {
  * task that changed another file, so it must be checked per request.
  */
 export function summaryClaimsAlreadyPresent(summary: string): boolean {
-  return /already (?:present|exists|implemented|applied|there|complete|satisf(?:y|ies|ied)|fits|matches|renders|sits|works|has)|no (?:further )?(?:code )?changes? (?:are |was |were )?(?:needed|required)|nothing needed to change|none needed|nothing (?:was|is) (?:changed|rewritten)|no (?:changes|modifications) (?:made|required)|no files? (?:was|is|were|are) changed|already (?:meets|satisfies|matches)|zaten (?:var|mevcut|tamam|tam|işlevsel|karşılan|karşılıyor|uyumlu|uygulanmış|uyguluyor|uyguluyordur|uygundur|eklenmiş|yapılmış|mevcutmuş)|değişiklik (?:gerekmiyor|yapılmadı)|(?:hiçbir )?dosya değiştirilmedi|değişmedi|gerek yok/i.test(
+  return /already (?:present|exists|implemented|applied|there|complete|satisf(?:y|ies|ied)|fits|matches|renders|sits|works|has|generates|produces|uses|creates|handles|supports|includes|contains|does)|no (?:further )?(?:code )?changes? (?:are |was |were )?(?:needed|required)|nothing needed to change|none needed|nothing (?:was|is) (?:changed|rewritten)|no (?:changes|modifications) (?:made|required)|no files? (?:was|is|were|are) changed|already (?:meets|satisfies|matches)|zaten (?:var|mevcut|tamam|tam|işlevsel|karşılan|karşılıyor|uyumlu|uygulanmış|uyguluyor|uyguluyordur|uygundur|eklenmiş|yapılmış|mevcutmuş)|değişiklik (?:gerekmiyor|yapılmadı)|(?:hiçbir )?dosya değiştirilmedi|değişmedi|gerek yok/i.test(
     summary,
   );
 }
@@ -1490,6 +1486,18 @@ function taskInstruction(
   const spawnPlacementTask = !extractionTask && taskLooksLikeSpawnPlacement(task);
   const removalTask = !extractionTask && taskLooksLikeRemoval(task);
   const randomStartTask = !extractionTask && taskLooksLikeRandomStart(task);
+  const gameBehaviorText = `${task.title}\n${task.detail}\n${task.acceptance ?? ""}`;
+  const wallBreakTask =
+    !extractionTask &&
+    /(?=.*\b(?:duvar|wall)\w*\b)(?=.*\b(?:patlat|blast|break|kır)\w*\b)/i.test(gameBehaviorText);
+  const mazeGenerationTask =
+    !extractionTask &&
+    /(?=.*\b(?:maz|maze|labirent)\b)(?=.*\b(?:otomatik|procedur|generat|üret|oluştur|random|rastgele)\b)/i.test(
+      gameBehaviorText,
+    );
+  const fogRevealTask =
+    !extractionTask &&
+    /\b(?:fog|explored|reveal|keşif|görün|minimap)\b|alt kademe/i.test(gameBehaviorText);
   const prior = priorTasks
     .filter((item) => item.status === "done" && item.resultSummary)
     .slice(-8)
@@ -1580,6 +1588,15 @@ function taskInstruction(
       : "",
     randomStartTask
       ? "For random-start behavior, start the game several times and assert the observed level set varies; one start does not prove randomness. Put the expected result on the eval step itself with expectText, not a separate print."
+      : "",
+    wallBreakTask
+      ? "For wall-breaking, verify on the real page with one browser_check eval: read the player cell, the target wall cell and the energy before; move into that wall; assert the energy decreased by the expected cost and the target cell is now walkable (or the level map cell changed). Pressing a movement key on open floor is not proof. If breaking mutates a shared LEVELS map, confirm restart/level-load resets it."
+      : "",
+    mazeGenerationTask
+      ? "For procedural maze generation, start or restart several times and assert the actual layout (walls/cells) differs, not only the level name/index. If the project only has a fixed LEVELS array and shuffles its order, do not call that procedural generation; implement real generation or report the gap."
+      : "",
+    fogRevealTask
+      ? "For fog/explored reveal, move the player and assert the explored cell count or minimap pixels increase; a static canvas or visibility check is not proof."
       : "",
     extractionTask
       ? ""
@@ -2135,6 +2152,102 @@ export function noChangeCompletionEvidence(
 }
 
 /**
+ * A changed behavior is not verified by a smoke check. When the task names a
+ * concrete game behavior (maze generation, fog reveal, wall breaking), at least
+ * one successful real-page check must exercise and assert that behavior.
+ */
+const BEHAVIOR_EVIDENCE_RULES: {
+  id: string;
+  label: string;
+  task: RegExp;
+  proof: RegExp;
+  action: RegExp;
+  requiresChange?: boolean;
+}[] = [
+  {
+    id: "maze-generation",
+    label: "procedural maze generation",
+    task: /(?=.*\b(?:maz|maze|labirent)\b)(?=.*\b(?:otomatik|procedur|generat|üret|oluştur|random|rastgele)\b)/i,
+    proof: /\b(?:LEVELS|level|map|maze|labirent|grid|oda|room)\b/i,
+    action: /\b(?:generat|procedur|random|Math\.random|shuffle|üret|oluştur|levelOrder|different|farklı)\b/i,
+    requiresChange: true,
+  },
+  {
+    id: "fog-reveal",
+    label: "fog / explored reveal",
+    task: /\b(?:fog|explored|reveal|keşif|görün|minimap)\b|alt kademe/i,
+    proof: /\b(?:explored|reveal|fog|minimap|harita|keşif|görün)\b/i,
+    action: /\b(?:reveal|explored|keşf|açıl|görün|farklı)\b/i,
+  },
+  {
+    id: "wall-break",
+    label: "wall breaking",
+    task: /(?=.*\b(?:duvar|wall)\w*\b)(?=.*\b(?:patlat|blast|break|kır)\w*\b)/i,
+    proof: /\b(?:energy|enerji|isWall|wall|duvar|map|grid|cell|hücre)\b/i,
+    action: /\b(?:isWall|wallBroken|broken|patlat|kır|map\[|cell|hücre)\b/i,
+    requiresChange: true,
+  },
+];
+
+function stepEvidenceText(step: AiAgentStep): string {
+  const raw = typeof step.args === "string" ? step.args : JSON.stringify(step.args ?? {});
+  return `${raw}\n${step.observation ?? ""}`;
+}
+
+function evidenceHasAssertion(step: AiAgentStep): boolean {
+  if (isInteractiveUiCheck(step)) return true;
+  const text = stepEvidenceText(step);
+  return (
+    /"action"\s*:\s*"(?:expectText|expectValue|expectCount|expectStable|waitForText)"/.test(text) ||
+    /"expectText"\s*:/.test(text)
+  );
+}
+
+function evidenceShowsChange(text: string): boolean {
+  for (const label of ["energy", "enerji", "score", "skor", "level", "lives", "can"]) {
+    const before = new RegExp(`${label}\\w*?(?:before|önce)\\D{0,12}(\\d+(?:\\.\\d+)?)`, "i").exec(text);
+    const after = new RegExp(`${label}\\w*?(?:after|sonra)\\D{0,12}(\\d+(?:\\.\\d+)?)`, "i").exec(text);
+    if (before && after && Number(before[1]) !== Number(after[1])) return true;
+  }
+  return /\b(?:changed|different|farklı|arttı|azaldı|düştü|generated|procedural|wallBroken|broken|true)\b/i.test(
+    text,
+  );
+}
+
+export function taskBehaviorEvidence(
+  task: ProjectTask,
+  result: Pick<AiAgentResult, "steps" | "changedFiles">,
+  projectHasUi: boolean,
+  goalText?: string,
+): { ok: boolean; missing: string[]; reason: string } {
+  if (!projectHasUi) return { ok: true, missing: [], reason: "" };
+  const taskText = goalText ?? taskFocusText(task);
+  const checks = result.steps.filter(
+    (step) =>
+      step.ok &&
+      ["browser_check", "game_check", "run_test_scenario"].includes(step.action),
+  );
+  const missing: string[] = [];
+  for (const rule of BEHAVIOR_EVIDENCE_RULES) {
+    if (!rule.task.test(taskText)) continue;
+    const proved = checks.some((step) => {
+      const text = stepEvidenceText(step);
+      if (!rule.proof.test(text) || !rule.action.test(text)) return false;
+      if (!evidenceHasAssertion(step)) return false;
+      if (rule.requiresChange && !evidenceShowsChange(text)) return false;
+      return true;
+    });
+    if (!proved) missing.push(rule.label);
+  }
+  if (missing.length === 0) return { ok: true, missing: [], reason: "" };
+  return {
+    ok: false,
+    missing,
+    reason: `No runtime check proved the requested behavior: ${missing.join(", ")}. Add a real-page check that exercises it and asserts a concrete change (energy, map cell, score, level or visibility); a smoke check or expectVisible is not proof.`,
+  };
+}
+
+/**
  * Compact, user-facing summary of failed tool/protocol calls in one task.
  * Keeps the task card useful without making users read the full live log.
  */
@@ -2627,6 +2740,7 @@ export function intentTask(
     workspaceMode === "build" &&
     !readOnly &&
     !isContinuationInstruction(goal) &&
+    !intentNeedsConfirmation(intent, goal).needed &&
     intent.kind === "edit" &&
     (intent.scope === "trivial" || intent.scope === "small") &&
     (intent.behaviors?.length ?? 0) <= 1 &&
@@ -2914,9 +3028,13 @@ export async function runProjectLoop(
   // spending the whole budget on one monolithic task.
   const lowConfidenceLargeGoal =
     goal.trim().length >= 800 && (intent?.confidence ?? 1) < 0.8;
+  const needsIntentConfirmation = intent
+    ? intentNeedsConfirmation(intent, goal).needed
+    : false;
   const patchGoal =
     workspaceMode === "build" &&
     !isContinuationInstruction(goal) &&
+    !needsIntentConfirmation &&
     intent?.kind === "edit" &&
     (intent?.scope === "trivial" || intent?.scope === "small") &&
     (intent?.behaviors?.length ?? 0) <= 1 &&
@@ -2924,7 +3042,10 @@ export async function runProjectLoop(
   const intentSingle =
     workspaceMode !== "build" ||
     patchGoal ||
-    (intent?.mode === "single" && !multiPartGoal && !lowConfidenceLargeGoal);
+    (intent?.mode === "single" &&
+      !multiPartGoal &&
+      !lowConfidenceLargeGoal &&
+      !needsIntentConfirmation);
   const diagnosisWanted =
     workspaceMode === "build" &&
     !patchGoal &&
@@ -4016,6 +4137,14 @@ ${collapsed.tasks[0].checklist
       taskLooksLikeRandomStart(task) &&
       projectHasUi &&
       !result.steps.some(isRandomStartEvidenceCheck);
+    const behaviorEvidence = taskBehaviorEvidence(
+      task,
+      result,
+      projectHasUi,
+      queue.tasks.length === 1 ? queue.goal : undefined,
+    );
+    const missingBehaviorVerification =
+      !inspectionTask && projectHasUi && !behaviorEvidence.ok;
     const brainForConstraints = await ensureProjectBrain(analysis).catch(() => null);
     const constraintAudit = auditProjectConstraints({
       constraints: brainForConstraints?.constraints ?? [],
@@ -4052,7 +4181,8 @@ ${collapsed.tasks[0].checklist
             missingVisualVerification ||
             missingSpawnVerification ||
             missingRemovalVerification ||
-            missingRandomVerification
+            missingRandomVerification ||
+            missingBehaviorVerification
           ? "failed"
           : "done";
     if (!constraintAudit.ok) status = "failed";
@@ -4067,12 +4197,28 @@ ${collapsed.tasks[0].checklist
           !missingVisualVerification &&
           !missingSpawnVerification &&
           !missingRemovalVerification &&
-          !missingRandomVerification)) &&
+          !missingRandomVerification &&
+          !missingBehaviorVerification)) &&
       constraintAudit.ok
     ) {
       status = "done";
     }
-    await updateProjectBrainFromTask(analysis, current, result, status).catch(() => undefined);
+    const brainEvidence: "verified" | "claimed" =
+      status === "done" &&
+      !missingUiVerification &&
+      !missingVisualVerification &&
+      !missingSpawnVerification &&
+      !missingRemovalVerification &&
+      !missingRandomVerification &&
+      !missingBehaviorVerification &&
+      result.steps.some(
+        (step) =>
+          step.ok &&
+          ["browser_check", "game_check", "run_test_scenario"].includes(step.action),
+      )
+        ? "verified"
+        : "claimed";
+    await updateProjectBrainFromTask(analysis, current, result, status, brainEvidence).catch(() => undefined);
     const unavailableModel = /error 410\b|end of life|no longer available|model_not_found|model .* not found|does not exist/i.test(
       result.summary,
     );
@@ -4657,6 +4803,10 @@ ${collapsed.tasks[0].checklist
           }${
             missingRandomVerification
               ? " No random-start check ran. Start the game several times and assert the observed level set varies; one start does not prove randomness."
+              : ""
+          }${
+            missingBehaviorVerification
+              ? ` ${behaviorEvidence.reason}`
               : ""
           }${
             missingUiVerification

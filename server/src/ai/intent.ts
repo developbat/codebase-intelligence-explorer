@@ -853,6 +853,75 @@ export function isContinuationInstruction(instruction: string): boolean {
   return text.length > 0 && text.length <= 40 && CONTINUATION_PATTERN.test(text);
 }
 
+const MULTI_PART_SIGNAL =
+  /\b(?:bir ?kaç|birkaç|çeşitli|several|multiple|bir dizi)\b|;\s*\S|[0-9]+[.)]\s+/i;
+
+/**
+ * A low-confidence or parse-fallback intent must not silently collapse a
+ * multi-part request into one patch. The UI already has a confirmation card;
+ * this helper decides when it must be shown and when the loop must plan
+ * instead of taking the single-patch shortcut.
+ */
+export function intentNeedsConfirmation(
+  intent: IntentAnalysis,
+  instruction: string,
+): { needed: boolean; reason: string } {
+  if (!["edit", "scaffold", "run"].includes(intent.kind)) {
+    return { needed: false, reason: "" };
+  }
+  const fallback = (intent.assumptions ?? []).some((assumption) =>
+    /could not parse|could not run|one focused task/i.test(assumption),
+  );
+  if (fallback) {
+    return {
+      needed: true,
+      reason: "Intent analysis fell back after a parse or run failure; the interpreted behaviors may be incomplete.",
+    };
+  }
+  const multiPart = MULTI_PART_SIGNAL.test(instruction);
+  const collapsedMultiPart = multiPart && (intent.behaviors?.length ?? 0) <= 1;
+  if (collapsedMultiPart) {
+    return {
+      needed: true,
+      reason: "The request names several changes but was interpreted as one behavior.",
+    };
+  }
+  const confidence = intent.confidence ?? 0.6;
+  if (confidence < 0.6) {
+    return {
+      needed: true,
+      reason: `Intent confidence is low (${Math.round(confidence * 100)}%).`,
+    };
+  }
+  return { needed: false, reason: "" };
+}
+
+/**
+ * The endpoint-level gate: resuming, manual retry, a clarified request and an
+ * explicit confirmation suppress the card. Everything else defers to the
+ * intent-level heuristic above.
+ */
+export function shouldRequestIntentConfirmation(options: {
+  intent: IntentAnalysis;
+  instruction: string;
+  resuming?: boolean;
+  retryFailed?: boolean;
+  confirmed?: boolean;
+  clarified?: boolean;
+  replan?: boolean;
+}): { needed: boolean; reason: string } {
+  if (
+    options.resuming ||
+    options.retryFailed ||
+    options.confirmed ||
+    options.clarified ||
+    options.replan
+  ) {
+    return { needed: false, reason: "" };
+  }
+  return intentNeedsConfirmation(options.intent, options.instruction);
+}
+
 /**
  * Resolve a short reference ("listeyi yap", "devam et") to the last
  * substantive user request so the previous list/plan is not re-typed,

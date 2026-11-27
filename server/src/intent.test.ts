@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { AnalysisResult } from "../../shared/types";
-import { parseIntentResponse } from "./ai/intent";
+import { intentNeedsConfirmation, parseIntentResponse, shouldRequestIntentConfirmation } from "./ai/intent";
 
 const analysis = {
   projectName: "demo",
@@ -283,4 +283,119 @@ test("parses the structured intent spec", () => {
   assert.equal(intent.behaviors?.[1]?.surface, "ui");
   assert.deepEqual(intent.constraints, ["do not change the scoring"]);
   assert.equal(intent.confidence, 0.92);
+});
+
+test("low-confidence and fallback intents require confirmation", () => {
+  const fallback = {
+    kind: "edit" as const,
+    confidence: 0.45,
+    behaviors: [
+      {
+        id: "b1",
+        action: "update" as const,
+        surface: "other" as const,
+        target: "şimdi oyunda bir kaç değişiklik yapmak istiyorum",
+        details: "",
+        acceptance: "",
+      },
+    ],
+    assumptions: ["Intent analyst could not parse its reply; proceeding with one focused task."],
+  };
+  const fallbackResult = intentNeedsConfirmation(
+    fallback as never,
+    "bir kaç değişiklik yap: maz üret ve duvarları patlat",
+  );
+  assert.equal(fallbackResult.needed, true);
+  assert.match(fallbackResult.reason, /fell back|fallback/i);
+
+  const lowConfidence = intentNeedsConfirmation(
+    { kind: "edit", confidence: 0.55, behaviors: [], assumptions: [] } as never,
+    "make the screen nicer",
+  );
+  assert.equal(lowConfidence.needed, true);
+  assert.match(lowConfidence.reason, /confidence/i);
+});
+
+test("confirmation is skipped for confident single behavior and questions", () => {
+  const single = intentNeedsConfirmation(
+    {
+      kind: "edit",
+      confidence: 0.92,
+      behaviors: [
+        {
+          id: "b1",
+          action: "update",
+          surface: "ui",
+          target: "button color",
+          details: "blue",
+          acceptance: "button is blue",
+        },
+      ],
+      assumptions: [],
+    } as never,
+    "butonu mavi yap",
+  );
+  assert.equal(single.needed, false);
+
+  const question = intentNeedsConfirmation(
+    { kind: "question", confidence: 0.4, behaviors: [], assumptions: [] } as never,
+    "bu proje ne yapıyor?",
+  );
+  assert.equal(question.needed, false);
+});
+
+test("a multi-part signal with one collapsed behavior requires confirmation", () => {
+  const result = intentNeedsConfirmation(
+    {
+      kind: "edit",
+      confidence: 0.9,
+      behaviors: [
+        {
+          id: "b1",
+          action: "update",
+          surface: "other",
+          target: "the game",
+          details: "",
+          acceptance: "",
+        },
+      ],
+      assumptions: [],
+    } as never,
+    "oyunda birkaç değişiklik yap; maz üret ve duvarları patlat",
+  );
+  assert.equal(result.needed, true);
+  assert.match(result.reason, /several changes|one behavior/i);
+});
+
+test("endpoint confirmation gate suppresses resume, retry and explicit confirmation", () => {
+  const intent = {
+    kind: "edit",
+    confidence: 0.45,
+    behaviors: [],
+    assumptions: ["Intent analyst could not parse its reply; proceeding with one focused task."],
+  } as never;
+  assert.equal(
+    shouldRequestIntentConfirmation({ intent, instruction: "birkaç değişiklik yap" }).needed,
+    true,
+  );
+  assert.equal(
+    shouldRequestIntentConfirmation({ intent, instruction: "birkaç değişiklik yap", resuming: true }).needed,
+    false,
+  );
+  assert.equal(
+    shouldRequestIntentConfirmation({ intent, instruction: "birkaç değişiklik yap", retryFailed: true }).needed,
+    false,
+  );
+  assert.equal(
+    shouldRequestIntentConfirmation({ intent, instruction: "birkaç değişiklik yap", confirmed: true }).needed,
+    false,
+  );
+  assert.equal(
+    shouldRequestIntentConfirmation({ intent, instruction: "birkaç değişiklik yap", clarified: true }).needed,
+    false,
+  );
+  assert.equal(
+    shouldRequestIntentConfirmation({ intent, instruction: "birkaç değişiklik yap", replan: true }).needed,
+    false,
+  );
 });

@@ -350,18 +350,35 @@ function statusOf(task: ProjectTask): ProjectBrainFeature["status"] {
   return "broken";
 }
 
-function featureFromTask(task: ProjectTask, at: string): ProjectBrainFeature {
+const NO_CHANGE_SUMMARY =
+  /(?:already (?:present|exists|implemented|applied|there|complete|satisf|fits|matches|renders|sits|works|has|generates|produces|uses|creates|handles|supports|includes|contains|does)|no files? (?:was|is|were|are) changed|no (?:further )?(?:code )?changes? (?:needed|required)|nothing (?:was|is) (?:changed|rewritten)|zaten (?:var|mevcut|uyguluyor|uygulanmış|yapılmış)|hiçbir dosya değiştirilmedi|dosya değiştirilmedi|değişiklik (?:gerekmiyor|yapılmadı))/i;
+const ISSUE_SIGNAL =
+  /\b(?:error|exception|crash|failed|failure|blocked|blocker|cannot|can't|unable|missing|not found|timeout|regression|broken)\b|hata|başarısız|engellendi|bulunamadı|eksik|çalışmıyor|bozuk|regresyon/i;
+
+function looksLikeRealIssue(text: string): boolean {
+  return ISSUE_SIGNAL.test(text) && !NO_CHANGE_SUMMARY.test(text);
+}
+
+function featureFromTask(
+  task: ProjectTask,
+  at: string,
+  evidence: "verified" | "claimed" = "claimed",
+): ProjectBrainFeature {
   return {
-    id: `task:${task.id}`,
+    id: `task:${task.id}:${task.createdAt}`,
     name: clip(task.title, 160) || `Task ${task.id}`,
     status: statusOf(task),
     files: task.changedFiles.slice(0, 8),
     notes: clip(redactSecrets(task.resultSummary ?? task.notes ?? ""), 420),
+    evidence,
     updatedAt: task.updatedAt || at,
   };
 }
 
-function recentFromTask(task: ProjectTask): ProjectBrainChange | null {
+function recentFromTask(
+  task: ProjectTask,
+  evidence: "verified" | "claimed" = "claimed",
+): ProjectBrainChange | null {
   if (!task.resultSummary && task.changedFiles.length === 0) return null;
   return {
     at: task.updatedAt,
@@ -370,6 +387,7 @@ function recentFromTask(task: ProjectTask): ProjectBrainChange | null {
     files: task.changedFiles.slice(0, 12),
     taskId: task.id,
     status: task.status,
+    evidence,
   };
 }
 
@@ -584,9 +602,14 @@ export async function buildProjectBrain(
     ...analysis.warnings.slice(0, 6).map((text) => ({ text, severity: "medium" as const })),
     ...(queue?.tasks ?? [])
       .filter((task) => task.status === "failed" || task.status === "blocked")
-      .slice(0, 6)
       .map((task) => ({
+        task,
         text: clip(redactSecrets(task.notes ?? task.resultSummary ?? task.title), 420),
+      }))
+      .filter(({ text }) => looksLikeRealIssue(text))
+      .slice(0, 6)
+      .map(({ task, text }) => ({
+        text,
         severity: "high" as const,
         files: task.changedFiles.slice(0, 8),
         at: task.updatedAt,
@@ -673,6 +696,7 @@ export async function updateProjectBrainFromTask(
   task: ProjectTask,
   result: Pick<AiAgentResult, "summary" | "changedFiles">,
   status: ProjectTask["status"],
+  evidence: "verified" | "claimed" = "claimed",
 ): Promise<ProjectBrain> {
   const brain = await ensureProjectBrain(analysis);
   const updatedTask: ProjectTask = {
@@ -682,12 +706,13 @@ export async function updateProjectBrainFromTask(
     changedFiles: result.changedFiles ?? task.changedFiles,
     updatedAt: nowIso(),
   };
-  const feature = featureFromTask(updatedTask, nowIso());
-  const change = recentFromTask(updatedTask);
+  const feature = featureFromTask(updatedTask, nowIso(), evidence);
+  const change = recentFromTask(updatedTask, evidence);
+  const issueText = clip(redactSecrets(result.summary ?? task.notes ?? task.title), 420);
   const issue: ProjectBrainIssue | null =
-    status === "failed" || status === "blocked"
+    (status === "failed" || status === "blocked") && looksLikeRealIssue(issueText)
       ? {
-          text: clip(redactSecrets(result.summary ?? task.notes ?? task.title), 420),
+          text: issueText,
           severity: "high",
           files: updatedTask.changedFiles.slice(0, 8),
           at: nowIso(),
@@ -741,11 +766,11 @@ export function compactProjectBrainBrief(
     .join("\n");
   const features = brain.features
     .slice(0, 8)
-    .map((feature) => `- [${feature.status}] ${feature.name}${feature.files.length ? ` — ${feature.files.slice(0, 3).join(", ")}` : ""}`)
+    .map((feature) => `- [${feature.status}${feature.evidence ? `/${feature.evidence}` : ""}] ${feature.name}${feature.files.length ? ` — ${feature.files.slice(0, 3).join(", ")}` : ""}`)
     .join("\n");
   const recent = brain.recentChanges
     .slice(0, 6)
-    .map((change) => `- ${change.at.slice(0, 10)} ${clip(change.summary, 150)}${change.files.length ? ` — ${change.files.slice(0, 3).join(", ")}` : ""}`)
+    .map((change) => `- ${change.at.slice(0, 10)} [${change.evidence ?? "claimed"}] ${clip(change.summary, 150)}${change.files.length ? ` — ${change.files.slice(0, 3).join(", ")}` : ""}`)
     .join("\n");
   const constraints = brain.constraints
     .slice(0, 6)
@@ -758,7 +783,7 @@ export function compactProjectBrainBrief(
 
   const blocks: string[] = [
     `## Project brain — ${identity.name} (${identity.kind})`,
-    "Persistent project memory. Trust this before rediscovering the repository; read only the exact files/line ranges you still need.",
+    "Persistent project memory. Project facts are authoritative. Work-history, recent-change and task summaries are unverified claims unless marked verified; confirm them against code or a real-page check before relying on them. Read only the exact files/line ranges you still need.",
     `Stack: ${identity.stack.join(", ") || "unknown"}${identity.frameworks.length ? ` · frameworks: ${identity.frameworks.join(", ")}` : ""}`,
     `Entry: ${identity.entryPoints.join(", ") || "unknown"}${commandLine ? ` · ${commandLine}` : ""}`,
     `Architecture: ${brain.architecture.summary}`,
@@ -836,7 +861,7 @@ export function renderProjectBrainMarkdown(brain: ProjectBrain): string {
   lines.push("", "## Work history");
   if (brain.features.length === 0) lines.push("- Nothing recorded yet.");
   for (const feature of brain.features) {
-    lines.push(`- [${feature.status}] ${feature.name}${feature.files.length ? ` — ${feature.files.join(", ")}` : ""}`);
+    lines.push(`- [${feature.status}${feature.evidence ? `/${feature.evidence}` : ""}] ${feature.name}${feature.files.length ? ` — ${feature.files.join(", ")}` : ""}`);
     if (feature.notes) lines.push(`  - ${feature.notes}`);
   }
   lines.push("", "## Conventions");
@@ -848,7 +873,7 @@ export function renderProjectBrainMarkdown(brain: ProjectBrain): string {
   lines.push("", "## Recent changes");
   if (brain.recentChanges.length === 0) lines.push("- Nothing recorded yet.");
   for (const change of brain.recentChanges) {
-    lines.push(`- ${change.at} · ${change.summary}${change.files.length ? ` — ${change.files.join(", ")}` : ""}`);
+    lines.push(`- ${change.at} [${change.evidence ?? "claimed"}] · ${change.summary}${change.files.length ? ` — ${change.files.join(", ")}` : ""}`);
   }
   lines.push("", "## Known issues");
   if (brain.knownIssues.length === 0) lines.push("- None recorded.");

@@ -92,6 +92,8 @@ export interface ProjectBrainFeature {
   status: "done" | "active" | "planned" | "broken";
   files: string[];
   notes?: string;
+  /** A task summary is a claim unless a real-page/scenario check verified it. */
+  evidence?: "verified" | "claimed";
   updatedAt: string;
 }
 
@@ -102,6 +104,8 @@ export interface ProjectBrainChange {
   files: string[];
   taskId?: string;
   status?: string;
+  /** A task summary is a claim unless a real-page/scenario check verified it. */
+  evidence?: "verified" | "claimed";
 }
 
 export interface ProjectBrainConstraint {

@@ -122,7 +122,6 @@ import { AGENT_TOOL_GROUPS } from "../../../shared/intent";
 import { pickAlternateAgentModel } from "./agents";
 import { getPrompt, renderPrompt } from "./prompts";
 import { listSkills, loadSkillForRun, loadSkillsForPrompt, renderSkillsForPrompt, runSkillScript, setSkillEnabled } from "../skills";
-import { shouldForceRequirementsFirst } from "../skillPolicy";
 import {
   renderAgentToolCatalog,
   suggestToolsForInstruction,
@@ -132,8 +131,7 @@ import {
 } from "./toolRegistry";
 import { runRegisteredTool } from "./tools/registry";
 import type { AgentToolContext } from "./tools/types";
-import { appendLesson, readLessons } from "../tasks";
-import { ensureProjectMap } from "../projectMap";
+import { appendLesson } from "../tasks";
 import { addProjectConstraints, compactProjectBrainBrief, ensureProjectBrain } from "../projectBrain";
 import { buildChangeReport } from "../changes";
 import { auditClaims } from "./claims";
@@ -4341,13 +4339,6 @@ export async function runAgentTask(
       ? `Work brief: complete extraction task (kind=${workBrief.kind}). Call extract_entities with kind="${workBrief.kind}". Omit scope to scan the whole project unless the user restricted specific files. This is a read-only list task: ignore any generic task-loop boilerplate about reading context files, editing or browser checks. Do not use shell/grep, list_items or browser_check. Do not manually enumerate. Finish with every item in a table written in the user's language; do not summarize or omit entries.`
       : `Work brief: change task (kind=${workBrief.kind}). First call extract_entities with kind="${workBrief.kind}" to identify the current targets; then apply the requested change with replace_many or apply_mapped_changes and verify it. Do not rewrite whole files or invent existing items. After apply_mapped_changes reports Verification with 0 remaining, call finish immediately; do not chase rgb/rgba equivalents, variable names or visual variants unless the user explicitly asked for them.`
     : "";
-  const projectMap =
-    contextMode === "none" || testTask || options.microEdit === true
-      ? ""
-      : await ensureProjectMap(analysis).catch(() => "");
-  if (projectMap) {
-    log("info", "Project map loaded", `${projectMap.length} chars`);
-  }
   const instructionHasProjectBrain = /Persistent project brain/i.test(instruction);
   const projectBrainBrief =
     instructionHasProjectBrain || contextMode === "none" || testTask || options.microEdit === true
@@ -4397,19 +4388,6 @@ export async function runAgentTask(
     log("info", "Capability suggestions", suggestedTools.join(", "));
   }
   const projectToolList = await listProjectTools(analysis.rootPath).catch(() => null);
-  const seed =
-    contextMode === "none" || options.microEdit === true
-      ? ""
-      : await agentSeedContext(analysis, instruction, options.activeFile, projectToolList);
-  const seedLimit =
-    testTask ? 1_200 : contextMode === "focused" ? 2_000 : fastTask ? 3_000 : 5_000;
-  const seedText =
-    seed.length > seedLimit
-      ? `${seed.slice(0, seedLimit)}\n… seed context truncated to keep the prompt small …`
-      : seed;
-  if (seed.length > seedLimit) {
-    log("info", "Seed context truncated", `${seed.length} → ${seedLimit} chars`);
-  }
   const focusedFiles = [
     ...new Set(
       [options.activeFile, ...(options.intent?.areas ?? [])].filter(
@@ -4417,9 +4395,6 @@ export async function runAgentTask(
       ),
     ),
   ].slice(0, 8);
-  const lessonsRaw =
-    options.microEdit === true ? "" : await readLessons(analysis.rootPath).catch(() => "");
-  const lessons = testTask && lessonsRaw.length > 1_500 ? lessonsRaw.slice(0, 1_500) : lessonsRaw;
   const projectContext =
     contextMode === "none" || options.microEdit === true
       ? ""
@@ -4437,14 +4412,8 @@ export async function runAgentTask(
   const conversation = selectHistory(options.history, historyMode);
   const context = [
     projectContext,
-    projectMap
-      ? `Project map (file roles, indexed symbols and search hints — use it before scanning):\n${projectMap.slice(
-          0,
-          1_500,
-        )}`
-      : "",
     projectBrainBrief
-      ? `Persistent project brain (authoritative project memory; trust this before rediscovering the repository):\n${projectBrainBrief}`
+      ? `Persistent project brain (authoritative project facts; task summaries are unverified claims):\n${projectBrainBrief}`
       : "",
     "",
     options.intent?.approach ? `Intent approach: ${options.intent.approach}` : "",
@@ -4460,13 +4429,10 @@ export async function runAgentTask(
       : `Permissions: write=${writeApproved ? "pre-approved" : "ask the user before writing"}; commands=${
           commandsApproved ? "pre-approved" : "ask the user before running commands"
         }; delete and rename always need confirmation.`,
-    seedText,
     options.codeContext ?? "",
     continuation
       ? `Continuation of your previous answer — implement these findings directly.\nDo not re-research or rescan the project. The findings below are authoritative. Read only the exact lines you will edit or confirm, then make the change and verify it on the real app.\n\n${continuation}`
       : "",
-    lessons ? `Lessons from previous failures (do not repeat):
-${lessons}` : "",
     latestProjectPlan
       ? `${
           workspaceMode === "plan"
@@ -4520,14 +4486,7 @@ ${lessons}` : "",
       : "";
   const requestedSkills = [...(options.intent?.skills ?? [])];
   const goalText = (options.goalText || instruction).trim();
-  if (
-    shouldForceRequirementsFirst(goalText, options.intent, options.microEdit === true) &&
-    !requestedSkills.includes("requirements-first")
-  ) {
-    requestedSkills.unshift("requirements-first");
-    log("info", "Requirements-first forced", "short/underspecified goal");
-  }
-  const skillLoad = await loadSkillsForPrompt(analysis.rootPath, projectId, instruction, {
+  const skillLoad = await loadSkillsForPrompt(analysis.rootPath, projectId, goalText, {
     requested: requestedSkills.slice(0, 3),
   }).catch(() => ({
     skills: [] as never[],
@@ -4620,9 +4579,6 @@ ${lessons}` : "",
         : "scenario-first · max 12 model turns · project map and full skills skipped",
     );
   }
-  if (lessons) {
-    log("info", "Lessons loaded", `${lessons.length} chars from LESSONS.md`);
-  }
   log(
     "info",
     "Context profile",
@@ -4647,9 +4603,7 @@ ${lessons}` : "",
   log(
     "info",
     "Context plan",
-    `prompt=${prompt.id} · system=${systemContent.length}c · task=${context.length}c · history=${conversation.length} · map=${
-      projectMap ? "on" : "off"
-    } · seed=${seedText.length}c · skills=${includeSkills ? "full" : "index"}`,
+    `prompt=${prompt.id} · system=${systemContent.length}c · task=${context.length}c · history=${conversation.length} · brain=${projectBrainBrief.length}c · skills=${includeSkills ? "full" : "index"}`,
   );
   if (contextChars > 30_000) {
     log(
