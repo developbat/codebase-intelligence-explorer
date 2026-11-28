@@ -89,6 +89,7 @@ import {
 } from "./modelStats";
 import { estimateUsageCost } from "./pricing";
 import { briefPromptFacts, prepareTaskBrief } from "./taskBrief";
+import { applyBriefCoverage, remapCoverage } from "./coverage";
 import { removeIndexedPath } from "../indexer";
 import { formatUsd } from "../../../shared/pricing";
 import { resolveWorkBrief } from "../extractors";
@@ -278,11 +279,16 @@ export function applyPlanReview(
       updatedAt: at,
     };
   });
+  const planMeta = createPlanMeta(goal, review, (queue.planMeta?.reviewCount ?? 0) + 1);
+  if (queue.planMeta?.coverage) {
+    planMeta.coverage = remapCoverage(queue.planMeta.coverage.items, tasks);
+    planMeta.missing = planMeta.coverage.missing;
+  }
   return {
     ...queue,
     tasks: [...done, ...tasks],
     status: "idle",
-    planMeta: createPlanMeta(goal, review, (queue.planMeta?.reviewCount ?? 0) + 1),
+    planMeta,
   };
 }
 
@@ -930,19 +936,38 @@ export async function planProjectTasks(
     }
   }
 
+  const coverageResult = taskBrief
+    ? applyBriefCoverage(
+        tasks,
+        taskBrief,
+        options.language ?? options.intent?.language,
+        verification,
+      )
+    : null;
+  if (coverageResult) tasks = coverageResult.tasks;
+
   if (options.dryRun) {
+    const planMeta = createPlanMeta(goal);
+    if (coverageResult) {
+      planMeta.coverage = coverageResult.plan;
+      planMeta.missing = coverageResult.plan.missing;
+    }
     return {
       ...emptyQueue(projectId, goal.trim()),
       tasks,
       updatedAt: nowIso(),
       stageUsage: tokenUsage ? { planner: tokenUsage } : undefined,
-      planMeta: createPlanMeta(goal),
+      planMeta,
     };
   }
 
   const queue = await createQueue(analysis.rootPath, projectId, goal.trim(), tasks);
   queue.intent = options.intent;
   queue.planMeta = createPlanMeta(goal);
+  if (coverageResult) {
+    queue.planMeta.coverage = coverageResult.plan;
+    queue.planMeta.missing = coverageResult.plan.missing;
+  }
   if (tokenUsage) queue.stageUsage = { ...(queue.stageUsage ?? {}), planner: tokenUsage };
   await saveQueue(analysis.rootPath, queue);
   await appendTaskContext(
@@ -958,6 +983,23 @@ export async function planProjectTasks(
       .filter(Boolean)
       .join("\n"),
   );
+  if (coverageResult) {
+    await appendTaskContext(
+      analysis.rootPath,
+      `Coverage · ${new Date().toLocaleString()}`,
+      [
+        `Covered: ${coverageResult.plan.items.filter((item) => item.coveredBy.length > 0).length}/${coverageResult.plan.items.length}`,
+        coverageResult.plan.addedTasks > 0
+          ? `Added ${coverageResult.plan.addedTasks} task(s) for missing brief groups.`
+          : "",
+        coverageResult.plan.missing.length > 0
+          ? `Still missing:\n${coverageResult.plan.missing.map((item) => `- ${item}`).join("\n")}`
+          : "",
+      ]
+        .filter(Boolean)
+        .join("\n"),
+    ).catch(() => undefined);
+  }
   return queue;
 }
 
@@ -3293,10 +3335,9 @@ export async function runProjectLoop(
         plannedNow = true;
         queue = applyPlanReview(queue, goal, review);
       } else {
-        queue = {
-          ...queue,
-          planMeta: createPlanMeta(goal, review, (queue.planMeta?.reviewCount ?? 0) + 1),
-        };
+        const planMeta = createPlanMeta(goal, review, (queue.planMeta?.reviewCount ?? 0) + 1);
+        if (queue.planMeta?.coverage) planMeta.coverage = queue.planMeta.coverage;
+        queue = { ...queue, planMeta };
       }
       queue = await saveQueue(analysis.rootPath, queue);
       emit({ type: "task", queue });
@@ -4088,9 +4129,12 @@ ${collapsed.tasks[0].checklist
           )}. Correct the arguments and re-issue the same tool; the file path key is "path" and the text key is "content". Do not stop while a correctable tool call is failing.`
       : "";
     const runLogNote = runLogPath ? ` Full step log: ${runLogPath}` : "";
-    const verificationLog = result.logs?.find(
-      (entry) => entry.label === "Verification passed" || entry.label === "Verification failed",
-    );
+    const verificationLogs =
+      result.logs?.filter(
+        (entry) =>
+          entry.label === "Verification passed" || entry.label === "Verification failed",
+      ) ?? [];
+    const verificationLog = verificationLogs[verificationLogs.length - 1];
     const taskVerification = verificationLog
       ? {
           command: verificationLog.detail,
@@ -4098,6 +4142,42 @@ ${collapsed.tasks[0].checklist
           output: verificationLog.detail,
         }
       : undefined;
+    const browserChecks = result.steps.filter((step) =>
+      ["browser_check", "game_check", "run_test_scenario"].includes(step.action),
+    );
+    const lastBrowserCheck = browserChecks[browserChecks.length - 1];
+    const browserVerification = lastBrowserCheck
+      ? {
+          command: lastBrowserCheck.action,
+          ok: lastBrowserCheck.ok,
+          output: lastBrowserCheck.observation.slice(0, 2_000),
+        }
+      : undefined;
+    const verificationCandidates = [taskVerification, browserVerification].filter(
+      (
+        value,
+      ): value is {
+        command: string;
+        ok: boolean;
+        output: string;
+      } => Boolean(value),
+    );
+    const failedVerification = verificationCandidates.find((value) => !value.ok);
+    const effectiveVerification = failedVerification
+      ? failedVerification
+      : verificationCandidates.length > 0
+        ? {
+            command: verificationCandidates
+              .map((value) => value.command)
+              .filter(Boolean)
+              .join(" + "),
+            ok: true,
+            output: verificationCandidates
+              .map((value) => value.output)
+              .join("\n")
+              .slice(0, 4_000),
+          }
+        : undefined;
     const malformedToolReply = /provider-native tool call omitted|use the JSON action protocol/i.test(
       result.summary,
     );
@@ -4372,7 +4452,7 @@ ${collapsed.tasks[0].checklist
               {
                 role: "user" as const,
                 content: `Task: ${current.title}\n${current.detail}\n\nAcceptance: ${current.acceptance ?? ""}\n\nAgent result:\n${(result.summary ?? "").slice(0, 2_000)}\n\nVerification: ${
-                  taskVerification ? `${taskVerification.command ?? ""} ok=${taskVerification.ok}` : "none"
+                  effectiveVerification ? `${effectiveVerification.command ?? ""} ok=${effectiveVerification.ok}` : "none"
                 }\n\nChanged files:\n${files
                   .map((file) => `--- ${file.path} ---\n${file.content}`)
                   .join("\n\n")}`,
@@ -4518,7 +4598,7 @@ ${collapsed.tasks[0].checklist
     if (
       review?.verdict === "issues" &&
       status === "done" &&
-      !taskVerification?.ok &&
+      !effectiveVerification?.ok &&
       !scenarioVerified
     ) {
       status = "failed";
@@ -4543,7 +4623,7 @@ ${collapsed.tasks[0].checklist
       verification:
         scenarioVerification ??
         microVerification ??
-        taskVerification ??
+        effectiveVerification ??
         (verification ? { command: verification } : undefined),
       review,
     });

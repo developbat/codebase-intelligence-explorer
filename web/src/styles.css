@@ -27021,3 +27021,28 @@ button.canvas-stat {
   color: var(--muted-2);
   font-size: 8px;
 }
+
+.task-queue-coverage {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 5px 9px;
+  border-bottom: 1px solid var(--line);
+  font-size: 7.5px;
+}
+
+.task-queue-coverage.is-warning {
+  color: #f0b46a;
+  background: rgba(240, 180, 106, 0.06);
+}
+
+.task-queue-coverage.is-ok {
+  color: #8ed3b6;
+}
+
+.task-queue-coverage details ul {
+  margin: 4px 0 0;
+  padding-left: 14px;
+  color: #9fb3cc;
+}

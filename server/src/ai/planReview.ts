@@ -28,7 +28,8 @@ Rules:
 - For random selection, ordering or repeat policy, do not ask: choose the literal reading and record a safe assumption. "Random" allows repeats; "different/farklı" means pick from the set, and enforce no immediate repeat only when the user explicitly says "never repeat" or "üst üste gelmesin".
 - Do not ask which files to inspect or where the code lives; the executor handles that.
 - Keep the user's exact qualifiers (only, never, smaller/larger, do not change X).
-- Write titles, details and acceptance in English. Keep quoted user text and identifiers unchanged.`;
+- The queue may include planMeta.coverage: treat every coverage item as required. If planMeta.coverage.missing is non-empty, return "replan" and make the tasks cover every missing item.
+- Write titles, details and acceptance in the output language requested in the prompt. Keep quoted user text and identifiers unchanged.`;
 
 export interface PlanReviewQuestion {
   question: string;
@@ -284,6 +285,7 @@ export async function reviewProjectPlan(
       role: "user" as const,
       content: [
         `User goal:\n${goal.trim()}`,
+        `Output language: ${options.intent?.language ?? "the user's request language"}. Write titles, details and acceptance in this language; keep identifiers and paths unchanged.`,
         options.intent
           ? `Intent: ${options.intent.kind} · ${options.intent.scope} · ${options.intent.mode}\n${options.intent.understanding}${
               options.intent.normalizedRequest

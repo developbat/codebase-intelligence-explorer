@@ -134,6 +134,17 @@ export interface ProjectTaskQueue {
     assumptions: string[];
     /** How many AI plan reviews have run for this queue. */
     reviewCount?: number;
+    /** Deterministic brief-to-task coverage matrix. */
+    coverage?: {
+      items: Array<{
+        id: string;
+        kind: "invariant" | "norm" | "ux" | "extra" | "component" | "acceptance";
+        text: string;
+        coveredBy: string[];
+      }>;
+      missing: string[];
+      addedTasks: number;
+    };
   };
 }
 

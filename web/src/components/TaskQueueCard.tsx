@@ -99,8 +99,34 @@ export function TaskQueueCard({
     queue.tasks.find((task) => task.status === "pending");
   const totalTokens = queue.tasks.reduce((sum, task) => sum + (task.tokenUsage?.totalTokens ?? 0), 0);
   const totalCost = queue.tasks.reduce((sum, task) => sum + (task.costUsd ?? 0), 0);
+  const coverage = queue.planMeta?.coverage;
+  const coveredItems = coverage
+    ? coverage.items.filter((item) => item.coveredBy.length > 0).length
+    : 0;
   const content = (
     <>
+      {coverage ? (
+        <div className={`task-queue-coverage ${coverage.missing.length > 0 ? "is-warning" : "is-ok"}`}>
+          <span>
+            {t("Coverage")}: <b>{coveredItems}/{coverage.items.length}</b>
+            {coverage.addedTasks > 0
+              ? ` · ${t("{count} tasks added", { count: coverage.addedTasks })}`
+              : ""}
+          </span>
+          {coverage.missing.length > 0 ? (
+            <details>
+              <summary>
+                {coverage.missing.length} {t("missing")}
+              </summary>
+              <ul>
+                {coverage.missing.slice(0, 8).map((item) => (
+                  <li key={item}>{item}</li>
+                ))}
+              </ul>
+            </details>
+          ) : null}
+        </div>
+      ) : null}
       <div className="task-queue-list">
         {queue.tasks.map((task, taskIndex) => (
           <div
@@ -246,7 +272,8 @@ export function TaskQueueCard({
                   {task.verification?.command ? (
                     <span className={`task-queue-verify ${task.verification.ok ? "is-ok" : "is-failed"}`}>
                       {task.verification.ok ? <CheckCircle2 size={9} /> : <MinusCircle size={9} />}
-                      {task.verification.command}
+                      <b>{task.verification.ok ? t("Verified") : t("Verification failed")}</b>
+                      <code>{task.verification.command}</code>
                     </span>
                   ) : null}
                   {editable ? (

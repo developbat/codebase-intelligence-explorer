@@ -2240,5 +2240,7 @@ export const tr: Dictionary = {
   "Controls what the agent may do without asking. When an option is off, the agent pauses and asks Allow once / Always allow / Deny before that action.": "Ajanın sormadan neler yapabileceğini belirler. Bir seçenek kapalıysa ajan, o işlemden önce Bir kez izin ver / Her zaman izin ver / Reddet seçenekleriyle durur.",
   "Default saved": "Varsayılan kaydedildi",
   "Default location: {path}": "Varsayılan konum: {path}",
+  "Coverage": "Kapsam",
+  "{count} tasks added": "{count} görev eklendi",
   "Usage is always recorded and reported. Off runs to completion (a hard lifetime safety cap still applies); warn only logs; stop at the limit.": "Kullanım her zaman kaydedilir ve raporlanır. Kapalı, çalışmayı tamamlar (yine de sert ömür güvenlik sınırı geçerlidir); yalnızca uyar, sadece kaydeder; sınırda dur, sınırda durdurur."
 };
