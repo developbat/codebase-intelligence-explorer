@@ -445,15 +445,27 @@ function packageVersion(packageJsonPath: string): string | undefined {
   }
 }
 
-function packageCandidates(definition: Definition, projectRoot?: string): { path: string; label: string }[] {
+function packageCandidates(
+  definition: Definition,
+  projectRoot?: string,
+  localRoots: string[] = [],
+): { path: string; label: string }[] {
   if (!definition.packageName) return [];
   const packageName = definition.packageName;
   const candidates: { path: string; label: string }[] = [];
-  if (definition.local && projectRoot) {
-    candidates.push({
-      path: path.join(projectRoot, "node_modules", packageName, "package.json"),
-      label: `${packageName} (project)`,
-    });
+  if (definition.local) {
+    const roots =
+      localRoots.length > 0
+        ? localRoots
+        : projectRoot
+          ? [path.join(projectRoot, "node_modules")]
+          : [];
+    for (const root of roots) {
+      candidates.push({
+        path: path.join(root, packageName, "package.json"),
+        label: `${packageName} (local)`,
+      });
+    }
   }
   candidates.push({
     path: path.join(process.cwd(), "node_modules", packageName, "package.json"),
@@ -484,11 +496,23 @@ function packageCandidates(definition: Definition, projectRoot?: string): { path
   return candidates;
 }
 
-function commandCandidates(definition: Definition, projectRoot?: string): string[] {
+function commandCandidates(
+  definition: Definition,
+  projectRoot?: string,
+  localRoots: string[] = [],
+): string[] {
   const candidates: string[] = [];
-  if (definition.local && projectRoot) {
+  if (definition.local) {
+    const roots =
+      localRoots.length > 0
+        ? localRoots
+        : projectRoot
+          ? [path.join(projectRoot, "node_modules")]
+          : [];
     for (const command of definition.commands) {
-      candidates.push(path.resolve(projectRoot, "node_modules", ".bin", command));
+      for (const root of roots) {
+        candidates.push(path.resolve(root, ".bin", command));
+      }
     }
   }
   for (const command of definition.commands) {
@@ -535,11 +559,49 @@ function windowsInstallHint(): string {
     : "";
 }
 
+const npmRootCache = new Map<string, { roots: string[]; at: number }>();
+
+/**
+ * Node resolves packages from the project's node_modules and its ancestors.
+ * npm workspaces and some global prefixes put the package outside the project
+ * folder, so detect those locations too. `npm root` is authoritative and is
+ * cached per project to keep repeated toolchain checks cheap.
+ */
+async function localNodeModulesRoots(projectRoot?: string): Promise<string[]> {
+  if (!projectRoot) return [];
+  const cachedRoots = npmRootCache.get(projectRoot);
+  if (cachedRoots && Date.now() - cachedRoots.at < CACHE_MS) return cachedRoots.roots;
+  const roots: string[] = [];
+  try {
+    const result = await execFileAsync("npm", ["root"], {
+      cwd: projectRoot,
+      timeout: 5_000,
+      maxBuffer: 128 * 1024,
+      env: { ...process.env, PATH: toolchainPath() },
+    });
+    const root = `${result.stdout ?? ""}`.trim().split(/\r?\n/).pop();
+    if (root) roots.push(path.resolve(root));
+  } catch {
+    // npm may be missing; filesystem candidates still work.
+  }
+  let current = path.resolve(projectRoot);
+  for (let depth = 0; depth < 3; depth += 1) {
+    roots.push(path.join(current, "node_modules"));
+    const parent = path.dirname(current);
+    if (parent === current) break;
+    current = parent;
+  }
+  const unique = [...new Set(roots)];
+  npmRootCache.set(projectRoot, { roots: unique, at: Date.now() });
+  return unique;
+}
+
 async function checkDefinition(
   definition: Definition,
   projectRoot?: string,
+  localRoots: string[] = [],
 ): Promise<ToolchainTool> {
-  for (const candidate of packageCandidates(definition, projectRoot)) {
+  for (const candidate of packageCandidates(definition, projectRoot, localRoots)) {
     if (!fs.existsSync(candidate.path)) continue;
     const version = packageVersion(candidate.path);
     return {
@@ -562,7 +624,7 @@ async function checkDefinition(
       note: definition.note,
     };
   }
-  for (const command of commandCandidates(definition, projectRoot)) {
+  for (const command of commandCandidates(definition, projectRoot, localRoots)) {
     try {
       const result = await execFileAsync(command, definition.args, {
         timeout: 5_000,
@@ -679,9 +741,10 @@ export async function checkToolchains(
   if (!force && hit && Date.now() - hit.at < CACHE_MS) return hit.report;
 
   const recommended = new Set(recommendedToolIds(languages, context.files));
+  const localRoots = await localNodeModulesRoots(context.rootPath);
   const tools = await Promise.all(
     DEFINITIONS.map(async (definition) => {
-      const tool = await checkDefinition(definition, context.rootPath);
+      const tool = await checkDefinition(definition, context.rootPath, localRoots);
       return { ...tool, recommended: recommended.has(definition.id) };
     }),
   );
@@ -829,11 +892,27 @@ export async function installToolchain(
   const after = await checkToolchains(true, { rootPath: projectRoot });
   const installedTool = after.tools.find((item) => item.id === id);
   if (!installedTool?.installed) {
+    const roots = await localNodeModulesRoots(projectRoot);
+    const checked = packageCandidates(definition, projectRoot, roots)
+      .map((candidate) => candidate.path)
+      .slice(0, 6);
     return {
       id,
       command,
       ok: false,
-      output: `${output}\n\n${tool.name} is still not detected after the install command. Check the npm prefix/global path or run the command manually.`.trim(),
+      output: [
+        output,
+        "",
+        `${tool.name} is still not detected after the install command.`,
+        projectRoot ? `Project: ${projectRoot}` : "",
+        roots.length > 0 ? `Checked node_modules: ${roots.join(", ")}` : "",
+        checked.length > 0 ? `Checked packages: ${checked.join(", ")}` : "",
+        "Run the command manually in the project and retry; if it installed elsewhere, add that path to PATH.",
+      ]
+        .filter(Boolean)
+        .join("\n")
+        .trim()
+        .slice(-8_000),
     };
   }
   const eslintNote =

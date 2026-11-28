@@ -1,7 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import fs from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
-import { installToolchain, normalizeLanguages, recommendedToolIds } from "./toolchains";
+import {
+  checkToolchains,
+  installToolchain,
+  normalizeLanguages,
+  recommendedToolIds,
+} from "./toolchains";
 import { toolchainPath } from "./shellPath";
 
 test("language recommendation maps project languages to managed tools", () => {
@@ -46,4 +53,29 @@ test("toolchain PATH is non-empty and deduplicated", () => {
   assert.ok(entries.length > 0);
   assert.equal(entries.some((entry) => entry.trim() === ""), false);
   assert.equal(toolchainPath(), toolchainPath());
+});
+
+
+test("detects project tools hoisted to a workspace root", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "cie-hoisted-"));
+  try {
+    const app = path.join(root, "packages", "app");
+    await fs.mkdir(path.join(root, "node_modules", "eslint"), { recursive: true });
+    await fs.writeFile(
+      path.join(root, "node_modules", "eslint", "package.json"),
+      '{"name":"eslint","version":"9.1.2"}',
+      "utf8",
+    );
+    await fs.mkdir(app, { recursive: true });
+    const report = await checkToolchains(true, {
+      rootPath: app,
+      languages: ["typescript"],
+      files: ["src/app.ts"],
+    });
+    const eslint = report.tools.find((tool) => tool.id === "eslint");
+    assert.equal(eslint?.installed, true);
+    assert.match(eslint?.version ?? "", /9\.1\.2/);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
 });
