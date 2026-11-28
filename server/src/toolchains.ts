@@ -474,6 +474,20 @@ function packageCandidates(
         label: `${packageName} (local)`,
       });
     }
+  } else {
+    // App-managed global tools live outside the app and the project. Checking
+    // the package manifest is also how tools without a --version flag (such as
+    // Intelephense) are detected.
+    candidates.push(
+      {
+        path: path.join(managedToolsRoot(), "lib", "node_modules", packageName, "package.json"),
+        label: `${packageName} (managed)`,
+      },
+      {
+        path: path.join(managedToolsRoot(), "node_modules", packageName, "package.json"),
+        label: `${packageName} (managed)`,
+      },
+    );
   }
   candidates.push({
     path: path.join(process.cwd(), "node_modules", packageName, "package.json"),
@@ -520,6 +534,13 @@ function commandCandidates(
     for (const command of definition.commands) {
       for (const root of roots) {
         candidates.push(path.resolve(root, ".bin", command));
+      }
+    }
+  } else {
+    for (const command of definition.commands) {
+      candidates.push(path.join(managedToolsBin(), command));
+      if (process.platform === "win32") {
+        candidates.push(path.join(managedToolsBin(), `${command}.cmd`));
       }
     }
   }
@@ -945,7 +966,7 @@ export async function installToolchain(
     const roots = await localNodeModulesRoots(projectRoot);
     const checked = packageCandidates(definition, projectRoot, roots)
       .map((candidate) => candidate.path)
-      .slice(0, 6);
+      .slice(0, 8);
     return {
       id,
       command,

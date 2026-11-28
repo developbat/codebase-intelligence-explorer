@@ -101,3 +101,38 @@ test("PATH starts with app-managed tools and includes the bundled runtime", () =
     resetToolchainPathCache();
   }
 });
+
+test("detects an app-managed global tool by its package manifest", async () => {
+  const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), "cie-managed-tool-"));
+  const previous = process.env.CIE_DATA_DIR;
+  process.env.CIE_DATA_DIR = dataDir;
+  try {
+    const packageDir = path.join(
+      dataDir,
+      "tools",
+      "lib",
+      "node_modules",
+      "intelephense",
+    );
+    await fs.mkdir(packageDir, { recursive: true });
+    await fs.writeFile(
+      path.join(packageDir, "package.json"),
+      '{"name":"intelephense","version":"1.18.5"}',
+      "utf8",
+    );
+    resetToolchainPathCache();
+    const report = await checkToolchains(true, {
+      languages: ["php"],
+      files: ["index.php"],
+    });
+    const tool = report.tools.find((item) => item.id === "intelephense");
+    assert.equal(tool?.installed, true);
+    assert.match(tool?.version ?? "", /1\.18\.5/);
+    assert.ok(report.runtime?.managedToolsDir.endsWith(path.join("tools")));
+  } finally {
+    if (previous === undefined) delete process.env.CIE_DATA_DIR;
+    else process.env.CIE_DATA_DIR = previous;
+    resetToolchainPathCache();
+    await fs.rm(dataDir, { recursive: true, force: true });
+  }
+});

@@ -93,23 +93,10 @@ const tempDir = path.join(root, "vendor", "node", `.extract-${process.pid}-${Dat
 await fsp.rm(tempDir, { recursive: true, force: true });
 await fsp.mkdir(tempDir, { recursive: true });
 try {
-  if (platform === "win32") {
-    if (process.platform === "win32") {
-      execFileSync(
-        "powershell",
-        [
-          "-NoProfile",
-          "-Command",
-          `Expand-Archive -LiteralPath '${archivePath}' -DestinationPath '${tempDir}' -Force`,
-        ],
-        { stdio: "inherit" },
-      );
-    } else {
-      execFileSync("unzip", ["-q", archivePath, "-d", tempDir], { stdio: "inherit" });
-    }
-  } else {
-    execFileSync("tar", ["-xzf", archivePath, "-C", tempDir], { stdio: "inherit" });
-  }
+  // bsdtar (macOS, Windows 10+) and GNU tar both auto-detect tar.gz and zip.
+  // Do not use PowerShell Expand-Archive: the runner's PowerShell 7 module
+  // fails with "Cannot find an overload for ExtractToDirectory".
+  execFileSync("tar", ["-xf", archivePath, "-C", tempDir], { stdio: "inherit" });
   const entries = await fsp.readdir(tempDir, { withFileTypes: true });
   const extracted = entries.find((entry) => entry.isDirectory());
   if (!extracted) throw new Error(`Unexpected Node archive layout for ${archiveName}.`);
