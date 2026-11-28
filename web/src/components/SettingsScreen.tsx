@@ -39,6 +39,7 @@ import { ToolsPanel } from "./ToolsPanel";
 
 export type SettingsTab =
   | "general"
+  | "permissions"
   | "models"
   | "model-picker"
   | "agents"
@@ -80,6 +81,7 @@ interface SettingsScreenProps {
 
 const TABS: { id: SettingsTab; label: string; icon: typeof Settings2 }[] = [
   { id: "general", label: "General", icon: Globe2 },
+  { id: "permissions", label: "Permissions", icon: ShieldCheck },
   { id: "models", label: "Model providers", icon: Cpu },
   { id: "model-picker", label: "Model selection", icon: Sparkles },
   { id: "agents", label: "Agent workers", icon: Bot },
@@ -477,38 +479,6 @@ export function SettingsScreen({
                 <ToolchainsPanel projectId={projectId} />
 
                 <section className="settings-section">
-                  <h3>{t("General approvals")}</h3>
-                  <p>
-                    {t(
-                      "Defaults for projects without their own override. When off, the agent pauses and asks Allow once / Always allow / Deny before the action. Code Studio can override these per project.",
-                    )}
-                  </p>
-                  <div className="settings-toggle-list">
-                    <SettingsToggle
-                      checked={agentAllowWrite}
-                      onChange={onAgentAllowWriteChange}
-                      title={t("Pre-approve file writes")}
-                      description={t("Writes still create a timestamped local backup.")}
-                    />
-                    <SettingsToggle
-                      checked={agentAllowCommands}
-                      onChange={onAgentAllowCommandsChange}
-                      title={t("Pre-approve commands")}
-                      description={t("Build, test and typecheck commands can run without an extra prompt.")}
-                    />
-                  </div>
-                </section>
-
-                <section className="settings-section settings-note">
-                  <ShieldCheck size={14} />
-                  <p>
-                    {t(
-                      "Delete and rename always require a fresh confirmation. Dangerous commands such as sudo, git push, git reset --hard and curl | sh remain blocked.",
-                    )}
-                  </p>
-                </section>
-
-                <section className="settings-section">
                   <h3>{t("Model behavior")}</h3>
                   <div className="settings-toggle-list">
                     <SettingsToggle
@@ -686,6 +656,42 @@ export function SettingsScreen({
                     </button>
                   </section>
                 ) : null}
+              </div>
+            ) : null}
+
+            {tab === "permissions" ? (
+              <div className="settings-stack">
+                <section className="settings-section">
+                  <h3>{t("Agent permissions")}</h3>
+                  <p>
+                    {t(
+                      "Controls what the agent may do without asking. When an option is off, the agent pauses and asks Allow once / Always allow / Deny before that action.",
+                    )}
+                  </p>
+                  <div className="settings-toggle-list">
+                    <SettingsToggle
+                      checked={agentAllowWrite}
+                      onChange={onAgentAllowWriteChange}
+                      title={t("Pre-approve file writes")}
+                      description={t("Writes still create a timestamped local backup.")}
+                    />
+                    <SettingsToggle
+                      checked={agentAllowCommands}
+                      onChange={onAgentAllowCommandsChange}
+                      title={t("Pre-approve commands")}
+                      description={t("Build, test and typecheck commands can run without an extra prompt.")}
+                    />
+                  </div>
+                </section>
+
+                <section className="settings-section settings-note">
+                  <ShieldCheck size={14} />
+                  <p>
+                    {t(
+                      "Delete and rename always require a fresh confirmation. Dangerous commands such as sudo, git push, git reset --hard and curl | sh remain blocked.",
+                    )}
+                  </p>
+                </section>
               </div>
             ) : null}
 

@@ -27008,3 +27008,16 @@ button.canvas-stat {
 .toolchains-runtime code {
   font-family: var(--mono);
 }
+
+.create-location-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+  flex-wrap: wrap;
+}
+
+.create-location-actions small {
+  color: var(--muted-2);
+  font-size: 8px;
+}

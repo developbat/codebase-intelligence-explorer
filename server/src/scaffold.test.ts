@@ -100,7 +100,7 @@ test("scaffolds Python, PHP and blank projects", async () => {
   }
 });
 
-test("rejects unsafe names, missing parents and non-empty targets", async () => {
+test("rejects unsafe names and non-empty targets", async () => {
   const parent = await tempParent();
   try {
     await assert.rejects(
@@ -111,11 +111,6 @@ test("rejects unsafe names, missing parents and non-empty targets", async () => 
       () => scaffoldProject({ parentPath: parent, name: ".hidden", template: "blank" }),
       /project name/i,
     );
-    await assert.rejects(
-      () => scaffoldProject({ parentPath: path.join(parent, "missing"), name: "app", template: "blank" }),
-      /parent folder/i,
-    );
-
     const target = path.join(parent, "taken");
     await fs.mkdir(target);
     await fs.writeFile(path.join(target, "keep.txt"), "do not touch");
@@ -242,6 +237,22 @@ test("blank is the default skeleton and static avoids demo filler", async () => 
     assert.doesNotMatch(html, /click me/i);
     const script = await fs.readFile(path.join(result.rootPath, "app.js"), "utf8");
     assert.doesNotMatch(script, /addEventListener/i);
+  } finally {
+    await fs.rm(parent, { recursive: true, force: true });
+  }
+});
+
+test("creates a missing parent folder for a new project", async () => {
+  const parent = await tempParent();
+  try {
+    const nested = path.join(parent, "nested", "projects");
+    const result = await scaffoldProject({
+      parentPath: nested,
+      name: "blank-nested",
+      template: "blank",
+    });
+    assert.deepEqual(result.filesCreated, ["README.md", ".gitignore"]);
+    assert.equal(result.rootPath, path.join(await fs.realpath(nested), "blank-nested"));
   } finally {
     await fs.rm(parent, { recursive: true, force: true });
   }

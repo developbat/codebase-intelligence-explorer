@@ -168,13 +168,32 @@ interface OpenProjectDialogProps {
   }) => void;
 }
 
+const DEFAULT_PROJECT_PARENT_KEY = "bad.defaultProjectParent";
+const FALLBACK_PROJECT_PARENT = "~/Desktop";
+
+function storedDefaultProjectParent(): string {
+  try {
+    return localStorage.getItem(DEFAULT_PROJECT_PARENT_KEY)?.trim() || "";
+  } catch {
+    return "";
+  }
+}
+
+function rememberDefaultProjectParent(value: string): void {
+  try {
+    localStorage.setItem(DEFAULT_PROJECT_PARENT_KEY, value.trim());
+  } catch {
+    // Private mode / storage disabled: keep the in-memory value only.
+  }
+}
+
 function autoProjectName(useCase: "coding" | "daily"): string {
   const stamp = new Date()
     .toISOString()
     .replace(/[-:TZ.]/g, "")
     .slice(0, 12);
   const suffix = Math.random().toString(36).slice(2, 5);
-  return `${useCase === "daily" ? "bad-note" : "bad-project"}-${stamp}-${suffix}`;
+  return `${useCase === "daily" ? "bad-note" : "badide-project"}-${stamp}-${suffix}`;
 }
 
 function parentOf(folderPath: string): string {
@@ -199,7 +218,13 @@ export function OpenProjectDialog({
   const [path, setPath] = useState(lastPath);
   const [browserOpen, setBrowserOpen] = useState(false);
   const [browserTarget, setBrowserTarget] = useState<"path" | "parent">("path");
-  const [parentPath, setParentPath] = useState(() => parentOf(lastPath) || "~");
+  const [parentPath, setParentPath] = useState(
+    () => storedDefaultProjectParent() || parentOf(lastPath) || FALLBACK_PROJECT_PARENT,
+  );
+  const [savedDefaultParent, setSavedDefaultParent] = useState(() =>
+    storedDefaultProjectParent(),
+  );
+  const [defaultSaved, setDefaultSaved] = useState(false);
   const [name, setName] = useState("");
   const [template, setTemplate] = useState<ProjectTemplateId>("blank");
   const [brief, setBrief] = useState("");
@@ -212,7 +237,10 @@ export function OpenProjectDialog({
     if (open) {
       setMode(initialMode);
       setPath(lastPath);
-      setParentPath((current) => current || parentOf(lastPath) || "~");
+      setParentPath(
+        (current) =>
+          current || storedDefaultProjectParent() || parentOf(lastPath) || FALLBACK_PROJECT_PARENT,
+      );
     }
   }, [open, initialMode, lastPath]);
 
@@ -247,6 +275,10 @@ export function OpenProjectDialog({
   }, [open, mode, templates.length]);
 
   useEffect(() => {
+    setDefaultSaved(false);
+  }, [parentPath]);
+
+  useEffect(() => {
     if (!open) return;
     const handler = (event: KeyboardEvent) => {
       if (event.key === "Escape") onClose();
@@ -256,6 +288,14 @@ export function OpenProjectDialog({
   }, [open, onClose]);
 
   if (!open) return null;
+
+  const saveDefaultParent = () => {
+    const value = parentPath.trim();
+    if (!value) return;
+    rememberDefaultProjectParent(value);
+    setSavedDefaultParent(value);
+    setDefaultSaved(true);
+  };
 
   const selectedTemplate = templates.find((item) => item.id === template) ?? null;
   const canCreate = Boolean(parentPath.trim() && !busy);
@@ -347,8 +387,13 @@ export function OpenProjectDialog({
               event.preventDefault();
               if (!canCreate) return;
               const daily = useCase === "daily";
+              const parent = parentPath.trim();
+              if (parent) {
+                rememberDefaultProjectParent(parent);
+                setSavedDefaultParent(parent);
+              }
               onCreate({
-                parentPath: parentPath.trim(),
+                parentPath: parent,
                 name: name.trim() || autoProjectName(useCase),
                 template: daily ? "blank" : template,
                 brief: brief.trim(),
@@ -404,6 +449,21 @@ export function OpenProjectDialog({
                   <FolderSearch size={13} /> {t("Browse…")}
                 </button>
               </div>
+              <div className="create-location-actions">
+                <button
+                  type="button"
+                  className="ghost-button"
+                  onClick={saveDefaultParent}
+                  disabled={!parentPath.trim()}
+                >
+                  {defaultSaved ? t("Default saved") : t("Set as default")}
+                </button>
+                <small>
+                  {savedDefaultParent
+                    ? t("Default location: {path}", { path: savedDefaultParent })
+                    : t("Default location: {path}", { path: FALLBACK_PROJECT_PARENT })}
+                </small>
+              </div>
             </label>
 
             <label className="create-field">
@@ -412,7 +472,7 @@ export function OpenProjectDialog({
                 className="text-input mono"
                 value={name}
                 onChange={(event) => setName(event.target.value)}
-                placeholder="my-app"
+                placeholder="badide-project"
                 spellCheck={false}
               />
               <small>{t("Letters, numbers, dots, dashes and underscores only. Leave blank for an automatic name.")}</small>

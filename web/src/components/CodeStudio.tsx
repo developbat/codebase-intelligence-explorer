@@ -4919,50 +4919,6 @@ export function CodeStudio({
             {footerTab === "chat" ? (
               <div className={`studio-composer is-${studioMode}`}>
 
-          <div className="studio-composer-perms" title={t("Applies to this project")}>
-            <span className="studio-perms-label">
-              <ShieldCheck size={11} /> {t("Pre-approve")}
-            </span>
-            <label>
-              <input
-                type="checkbox"
-                checked={agentAllowWrite}
-                onChange={(event) => setAgentAllowWrite(event.target.checked)}
-                disabled={chatBusy}
-              />
-              {t("Writes")}
-            </label>
-            <label>
-              <input
-                type="checkbox"
-                checked={agentAllowCommands}
-                onChange={(event) => setAgentAllowCommands(event.target.checked)}
-                disabled={chatBusy}
-              />
-              {t("Commands")}
-            </label>
-            <button
-              type="button"
-              className="studio-perms-all"
-              onClick={() => {
-                const next = !(agentAllowWrite && agentAllowCommands);
-                setAgentAllowWrite(next);
-                setAgentAllowCommands(next);
-              }}
-              disabled={chatBusy}
-              title={t("Toggle both pre-approvals")}
-            >
-              {agentAllowWrite && agentAllowCommands ? t("Ask every time") : t("Allow both")}
-            </button>
-            {readOnlyMode ? (
-              <small>{t("Plan mode is read-only")}</small>
-            ) : agentAllowWrite ? (
-              <small className="studio-perms-hint">
-                {t("Uncheck Writes to review each diff")}
-              </small>
-            ) : null}
-          </div>
-
           {attachment ? (
             <div className="studio-attachment-chip">
               <Paperclip size={13} />

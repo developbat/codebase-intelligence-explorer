@@ -2236,5 +2236,8 @@ export const tr: Dictionary = {
   "Start a job in Chat; planned and completed tasks appear here.":
     "Sohbet'ten bir iş başlat; planlanan ve tamamlanan görevler burada görünür.",
   "Earlier work": "Önceki çalışmalar",
-  "Untitled goal": "Başlıksız hedef"
+  "Untitled goal": "Başlıksız hedef",
+  "Controls what the agent may do without asking. When an option is off, the agent pauses and asks Allow once / Always allow / Deny before that action.": "Ajanın sormadan neler yapabileceğini belirler. Bir seçenek kapalıysa ajan, o işlemden önce Bir kez izin ver / Her zaman izin ver / Reddet seçenekleriyle durur.",
+  "Default saved": "Varsayılan kaydedildi",
+  "Default location: {path}": "Varsayılan konum: {path}"
 };

@@ -752,7 +752,14 @@ export async function scaffoldProject(request: ScaffoldProjectRequest): Promise<
   try {
     realParent = await fs.realpath(expandedParent);
   } catch {
-    throw new Error("The parent folder does not exist.");
+    // Non-technical users often type a new parent folder. Creating it is
+    // friendlier than failing, and the target is still validated below.
+    try {
+      await fs.mkdir(expandedParent, { recursive: true });
+      realParent = await fs.realpath(expandedParent);
+    } catch {
+      throw new Error("The parent folder does not exist and could not be created.");
+    }
   }
   const parentStat = await fs.stat(realParent);
   if (!parentStat.isDirectory()) throw new Error("The parent path is not a folder.");
