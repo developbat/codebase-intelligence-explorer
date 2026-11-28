@@ -219,7 +219,8 @@ Rules:
 - Distinguish the level data table from the level selection UI. "Remove the level/map list" means remove the selection UI, not the LEVELS/map data needed for random starts.
 - For "random on every start" behavior, the acceptance must start/restart at least 5 times and observe a different level each time; do not require calls to hidden internals such as state or startRound.
 - If the preflight code already implements the requested rule, do not create an edit task that claims a flat bonus or missing guard; create a verification-only task or fold the verification into the behavior task.
-- If a domain brief is provided, treat its rules, defaults and pitfalls as constraints and turn its verification checklist into concrete acceptance checks for the relevant tasks. Do not override the brief with generic memory.`;
+- If a domain brief is provided, treat its rules, defaults and pitfalls as constraints and turn its verification checklist into concrete acceptance checks for the relevant tasks. Do not override the brief with generic memory.
+- Implement every user extra (theme, colors, mascot, style) in a task with its own acceptance. A theme must never change domain rules; keep rules and presentation separate.`;
 
 export function applyPlanReview(
   queue: ProjectTaskQueue,
@@ -733,6 +734,11 @@ export async function planProjectTasks(
               options.intent.needsExhaustiveEvidence ? "This answer must be exhaustive; collect every item and verify the total." : "",
               options.intent.areas.length > 0
                 ? `Likely areas: ${options.intent.areas.join(", ")}`
+                : "",
+              options.intent.extras && options.intent.extras.length > 0
+                ? `User extras (required; separate from domain rules): ${options.intent.extras.join(
+                    ", ",
+                  )}`
                 : "",
               options.intent.assumptions.length > 0
                 ? `Assumptions: ${options.intent.assumptions.join("; ")}`

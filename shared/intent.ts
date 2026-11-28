@@ -88,6 +88,8 @@ export interface IntentAnalysis {
   behaviors?: IntentBehavior[];
   /** Explicit user constraints (do not change X, only Y, preserve Z). */
   constraints?: string[];
+  /** Required preferences such as a cat theme; separate from domain rules. */
+  extras?: string[];
   /** Product decisions that would change the outcome if guessed wrong. */
   ambiguities?: IntentAmbiguity[];
   /** Intent confidence from 0 to 1. */

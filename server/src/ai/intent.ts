@@ -44,6 +44,13 @@ import {
   domainPromptFacts,
   matchDomainCards,
 } from "./domainKnowledge";
+import {
+  analyzeRequestFrame,
+  isEffectivelyEmptyProject,
+  requestFrameFacts,
+  requestMentionsExtra,
+  type RequestFrame,
+} from "./requestFrame";
 
 const MAX_OUTPUT_TOKENS = 1_600;
 const TIMEOUT_MS = 35_000;
@@ -147,6 +154,8 @@ Rules:
 - Never make the user choose a model or restate the whole request.
 - If the user already answered a clarification, needsClarification must be false.
 - If a "Domain reference" is present, treat its rules as authoritative over your own memory, use its vocabulary, and prefer its high-impact questions when the request is a new build and leaves that decision open. Never ask what the request already answers.
+- If the "Request frame" says action=build or newBuild=true, use kind="scaffold". A new build belongs to the active project even when that project is empty; never ask which project it belongs to.
+- Treat userExtras (theme, colors, mascots, style) as required behaviors separate from domain rules. Never drop them; do not let a theme change the rules or the meaning of decision options.
 
 Good clarification example:
 User: "add a task detail field"
@@ -244,12 +253,16 @@ async function userPrompt(
   instruction: string,
   options: IntentOptions,
   domainFacts?: string,
+  frameFacts?: string,
 ): Promise<string> {
   return [
     await projectFacts(analysis, options.activeFile),
     existingCodeHints(analysis, instruction),
     `Interface language (use for understanding, question and option labels): ${options.language ?? "unknown"}`,
     options.clarified ? "The user already clarified the request. Do not ask again." : "",
+    frameFacts
+      ? `Request frame (deterministic; treat as authoritative for action, domain, extras and newBuild):\n${frameFacts}`
+      : "",
     domainFacts
       ? `Domain reference (authoritative; use its rules instead of memory and ask only what the request leaves open):\n${domainFacts}`
       : "",
@@ -331,6 +344,176 @@ function fallbackIntentSpec(
     ambiguities: [],
     confidence: 0.45,
   };
+}
+
+export function fallbackIntentFromFrame(frame: RequestFrame, instruction: string): IntentAnalysis {
+  const kind: IntentKind =
+    frame.action === "build"
+      ? "scaffold"
+      : frame.action === "edit"
+        ? "edit"
+        : frame.action === "run"
+          ? "run"
+          : frame.action === "question"
+            ? "question"
+            : "analyze";
+  const verification: IntentVerification =
+    frame.surface === "game" || frame.surface === "ui"
+      ? "browser"
+      : frame.surface === "api" || frame.surface === "data"
+        ? "test"
+        : "none";
+  const behaviors: IntentBehavior[] = [];
+  if (kind === "scaffold" || kind === "edit") {
+    behaviors.push({
+      id: "b1",
+      action: kind === "scaffold" ? "create" : "update",
+      surface: frame.surface,
+      target: frame.deliverable,
+      details: instruction.trim(),
+      acceptance:
+        frame.surface === "game"
+          ? "The game follows the domain rules and is playable in the browser."
+          : "The requested behavior is visible and usable in the running app.",
+    });
+    if (frame.extras.length > 0) {
+      behaviors.push({
+        id: `b${behaviors.length + 1}`,
+        action: "update",
+        surface: frame.surface,
+        target: `Apply ${frame.extras.join(", ")}`,
+        details: `Integrate ${frame.extras.join(", ")} without changing the domain rules.`,
+        acceptance: `The UI visibly uses ${frame.extras.join(", ")} and the rules still hold.`,
+      });
+    }
+  } else if (kind === "run") {
+    behaviors.push({
+      id: "b1",
+      action: "run",
+      surface: "other",
+      target: instruction.trim().slice(0, 120),
+      details: instruction.trim(),
+      acceptance: "The command runs and its output is reported.",
+    });
+  } else if (kind === "question") {
+    behaviors.push({
+      id: "b1",
+      action: "verify",
+      surface: "other",
+      target: instruction.trim().slice(0, 120),
+      details: instruction.trim(),
+      acceptance: "Answer the question with project evidence where relevant.",
+    });
+  } else {
+    behaviors.push({
+      id: "b1",
+      action: "other",
+      surface: frame.surface,
+      target: frame.deliverable,
+      details: instruction.trim(),
+      acceptance: "Report the requested findings.",
+    });
+  }
+  return {
+    kind,
+    understanding: instruction.trim().slice(0, 500),
+    language: frame.language,
+    needsClarification: false,
+    scope: frame.newBuild ? "large" : kind === "edit" ? "small" : "small",
+    mode: frame.newBuild || behaviors.length > 1 ? "loop" : "single",
+    areas: [],
+    verification,
+    context: "project",
+    history: "recent",
+    toolGroups:
+      kind === "question" || kind === "analyze"
+        ? []
+        : kind === "run"
+          ? ["command"]
+          : ["edit", "command", "browser"],
+    skills: [],
+    normalizedRequest: instruction.trim().slice(0, 220),
+    behaviors,
+    constraints: frame.constraints,
+    ambiguities: [],
+    confidence: frame.newBuild && frame.domain ? 0.62 : 0.5,
+    approach: frame.domain
+      ? `Use ${frame.domain.card.name} invariants as constraints, research current norms, then build one small behavior at a time.`
+      : "Break the request into small behaviors and verify each in the running app.",
+    needsExhaustiveEvidence: false,
+    assumptions: ["Intent model was unavailable; used the deterministic request frame."],
+    extras: frame.extras,
+  };
+}
+
+export function applyRequestFrame(intent: IntentAnalysis, frame: RequestFrame): IntentAnalysis {
+  let next = intent;
+  const buildRequest = frame.action === "build";
+  if (buildRequest && frame.newBuild && (next.kind === "edit" || next.kind === "analyze")) {
+    next = {
+      ...next,
+      kind: "scaffold",
+      scope: next.scope === "trivial" ? "medium" : next.scope,
+      assumptions: [
+        ...next.assumptions.filter((item) => !/request frame marks/i.test(item)),
+        "Request frame marks this as a new build; using scaffold.",
+      ].slice(0, 8),
+    };
+  }
+  if (buildRequest && next.kind === "question" && !next.needsClarification) {
+    next = {
+      ...next,
+      kind: "scaffold",
+      scope: next.scope === "trivial" ? "medium" : next.scope,
+      assumptions: [
+        ...next.assumptions.filter((item) => !/request frame marks/i.test(item)),
+        "Request frame marks this as a build; using scaffold.",
+      ].slice(0, 8),
+    };
+  }
+
+  if (frame.extras.length > 0) {
+    const behaviors = [...(next.behaviors ?? [])];
+    const haystack = [
+      next.understanding,
+      next.normalizedRequest ?? "",
+      ...behaviors.flatMap((behavior) => [
+        behavior.target,
+        behavior.details,
+        behavior.acceptance,
+      ]),
+      ...(next.constraints ?? []),
+      ...(next.assumptions ?? []),
+    ]
+      .join(" ")
+      .toLowerCase();
+    const missing = frame.extras.filter((extra) => !requestMentionsExtra(extra, haystack));
+    if (missing.length > 0) {
+      behaviors.push({
+        id: `b${behaviors.length + 1}`,
+        action: "update",
+        surface: frame.surface,
+        target: `Apply ${missing.join(", ")}`,
+        details: `Integrate ${missing.join(", ")} without changing the domain rules.`,
+        acceptance: `The UI visibly uses ${missing.join(", ")} and the rules still hold.`,
+      });
+    }
+    next = {
+      ...next,
+      behaviors,
+      extras: [...new Set([...(next.extras ?? []), ...frame.extras])],
+    };
+  }
+  if (frame.constraints.length > 0) {
+    next = {
+      ...next,
+      constraints: [...new Set([...(next.constraints ?? []), ...frame.constraints])],
+    };
+  }
+  if ((next.behaviors?.length ?? 0) > 1 && next.mode === "single") {
+    next = { ...next, mode: "loop" };
+  }
+  return next;
 }
 
 function ensureIntentSpec(intent: IntentAnalysis, instruction: string): IntentAnalysis {
@@ -794,6 +977,11 @@ export function projectMismatchClarification(
 ): IntentAnalysis | null {
   if (intent.kind === "scaffold") return null;
   if (intent.context === "none") return null;
+  // A new app in an empty/docs-only project belongs to the active project.
+  if (isEffectivelyEmptyProject(analysis)) return null;
+  if (analyzeRequestFrame(instruction, analysis, intent.language || language).newBuild) {
+    return null;
+  }
   if (!requestMentionsUi(instruction)) return null;
   // Run/preview/start is always about the active project.
   if (requestIsRunPreview(instruction)) return null;
@@ -1079,7 +1267,9 @@ export async function analyzeIntent(
     };
   }
   const config = await resolveIntentModel(options);
-  const domainMatch = matchDomainCards(instruction, { limit: 1 })[0];
+  const frame = analyzeRequestFrame(instruction, analysis, options.language);
+  const frameFacts = requestFrameFacts(frame);
+  const domainMatch = frame.domain ?? matchDomainCards(instruction, { limit: 1 })[0];
   const domainFacts = domainMatch ? domainPromptFacts(domainMatch) : "";
   const skillList = await listSkills(analysis.rootPath, projectId).catch(() => null);
   const skillFeedback = await readSkillFeedback(analysis.rootPath).catch(() => null);
@@ -1096,7 +1286,13 @@ export async function analyzeIntent(
     { role: "system" as const, content: systemPrompt() },
     {
       role: "user" as const,
-      content: await userPrompt(analysis, instruction, { ...options, skillIndex }, domainFacts),
+      content: await userPrompt(
+        analysis,
+        instruction,
+        { ...options, skillIndex },
+        domainFacts,
+        frameFacts,
+      ),
     },
   ];
   let tokenUsage = { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
@@ -1137,30 +1333,14 @@ export async function analyzeIntent(
     // Do not lose the user's message because the small intent call was rate
     // limited. Continue with a safe heuristic intent; the executor can still
     // inspect the project and ask for clarification later if needed.
-    const questionLike = /\?|^(ne|neden|nasıl|niçin|ne zaman|nerede|kim|what|why|how|where|when|who)\b/i.test(
-      instruction.trim(),
-    );
+    const fallback = fallbackIntentFromFrame(frame, instruction);
+    fallback.assumptions = [
+      ...fallback.assumptions,
+      `Intent analysis could not run (${config.id}/${config.model}: ${message.slice(0, 240)}). Continuing with the deterministic request frame.`,
+    ].slice(0, 8);
+    console.warn(`[intent] model call failed: ${message}`);
     return {
-      intent: {
-        kind: questionLike ? "question" : "edit",
-        understanding: instruction.trim().slice(0, 500),
-        language: options.language ?? "unknown",
-        needsClarification: false,
-        scope: questionLike ? "small" : "medium",
-        mode: "single",
-        areas: options.activeFile ? [options.activeFile] : [],
-        verification: "none",
-        context: options.activeFile ? "focused" : "project",
-        history: "recent",
-        toolGroups: [],
-        skills: [],
-        ...fallbackIntentSpec(instruction, questionLike ? "question" : "edit"),
-        approach: "",
-        needsExhaustiveEvidence: false,
-        assumptions: [
-          `Intent analysis could not run (${config.id}/${config.model}: ${message.slice(0, 240)}). Continuing with a safe ${questionLike ? "question" : "edit"} default so the message is not lost.`,
-        ],
-      },
+      intent: fallback,
       provider: config.id,
       model: config.model,
       totalTokens: 0,
@@ -1194,6 +1374,7 @@ export async function analyzeIntent(
                   .join(", ")}`,
                 `User request:\n${instruction.trim()}`,
                 `Interface language: ${options.language ?? "unknown"}`,
+                `Request frame (authoritative):\n${frameFacts}`,
                 domainFacts
                   ? `Domain reference (authoritative):\n${domainFacts.slice(0, 2_000)}`
                   : "",
@@ -1213,33 +1394,18 @@ export async function analyzeIntent(
         );
         intent = parseIntentResponse(minimal, analysis, instruction, options.clarified);
       } catch {
-        const questionFallback = /\?|^(ne|neden|nasıl|niçin|ne zaman|nerede|kim|what|why|how|where|when|who)\b/i.test(
-          instruction.trim(),
-        );
-        intent = {
-          // A parse failure must not turn a question into an edit request.
-          kind: questionFallback ? "question" : "edit",
-          understanding: instruction.trim().slice(0, 500),
-          language: options.language ?? "unknown",
-          needsClarification: false,
-          scope: "small",
-          mode: "single",
-          areas: [],
-          verification: "none",
-          context: "project",
-          history: "recent",
-          toolGroups: [],
-          skills: [],
-          ...fallbackIntentSpec(instruction, questionFallback ? "question" : "edit"),
-          approach: "",
-          needsExhaustiveEvidence: false,
-          assumptions: ["Intent analyst could not parse its reply; proceeding with one focused task."],
-        };
+        intent = fallbackIntentFromFrame(frame, instruction);
+        intent.assumptions = [
+          ...intent.assumptions,
+          "Intent analyst could not parse its reply; used the deterministic request frame.",
+        ].slice(0, 8);
+        console.warn("[intent] parse failed twice; using request frame");
       }
     }
   }
 
   intent = ensureIntentSpec(intent, instruction);
+  intent = applyRequestFrame(intent, frame);
   intent = suppressRedundantClarification(intent, instruction, analysis);
   intent = forceExplicitEditIntent(intent, instruction);
   intent = preserveNegations(intent, instruction);
