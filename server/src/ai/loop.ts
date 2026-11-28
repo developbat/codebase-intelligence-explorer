@@ -88,7 +88,7 @@ import {
   recordModelFallback,
 } from "./modelStats";
 import { estimateUsageCost } from "./pricing";
-import { prepareDomainBrief } from "./domainKnowledge";
+import { briefPromptFacts, prepareTaskBrief } from "./taskBrief";
 import { removeIndexedPath } from "../indexer";
 import { formatUsd } from "../../../shared/pricing";
 import { resolveWorkBrief } from "../extractors";
@@ -211,7 +211,7 @@ Rules:
 - Do not invent cleanup/dedup tasks unless the project map or a concrete duplicate shows it is needed. Verify first.
 - If the Existing-code preflight shows a requested feature already exists, either omit it or make it a verification-only task that changes no files. A verification-only task must assert presence AND the requested shape, placement and acceptance on the real page; a symbol, icon constant, element id or plain "visible" check is not enough. Never create a task that re-adds it.
 - The context notes in .cie/agent/context.md and .cie/agent/TASKS.md are for continuity; you may mention them.
-- Write task titles, details and acceptance in English. Keep quoted user text, file paths, function names and code identifiers unchanged.
+- Write task titles, details and acceptance in the output language requested in the prompt. Keep quoted user text, file paths, function names and code identifiers unchanged.
 - Never return placeholder tasks such as "...", "TODO", "TBD" or "fill me". Every task must contain a real title, detail and acceptance.
 - When an intent spec with behaviors is provided, create one task per behavior and copy its action/surface. Do not merge independent behaviors.
 - Preserve the user's exact rule and qualifiers (smaller/larger/only/never). Never replace them with an example-specific shortcut: if the user says the smaller of the two operands, write min(a,b), not "the second operand"; examples are illustrations, not the rule.
@@ -219,7 +219,7 @@ Rules:
 - Distinguish the level data table from the level selection UI. "Remove the level/map list" means remove the selection UI, not the LEVELS/map data needed for random starts.
 - For "random on every start" behavior, the acceptance must start/restart at least 5 times and observe a different level each time; do not require calls to hidden internals such as state or startRound.
 - If the preflight code already implements the requested rule, do not create an edit task that claims a flat bonus or missing guard; create a verification-only task or fold the verification into the behavior task.
-- If a domain brief is provided, treat its rules, defaults and pitfalls as constraints and turn its verification checklist into concrete acceptance checks for the relevant tasks. Do not override the brief with generic memory.
+- If a task brief is provided, treat its invariants and acceptance checks as mandatory constraints. Map relevant researched norms and components to tasks; cite source URLs in task details when a norm is used. Do not override the brief with generic memory.
 - Implement every user extra (theme, colors, mascot, style) in a task with its own acceptance. A theme must never change domain rules; keep rules and presentation separate.`;
 
 export function applyPlanReview(
@@ -644,7 +644,7 @@ export async function planProjectTasks(
   const analysis = await loadAnalysis(projectId);
   const verification = preferredVerificationCommand(analysis.tooling);
   const config = await resolveAgentRole("planner");
-  const [projectMap, preflightHints, skillLoad, projectBrainBrief, domainBrief] = await Promise.all([
+  const [projectMap, preflightHints, skillLoad, projectBrainBrief, taskBrief] = await Promise.all([
     ensureProjectMap(analysis).catch(() => ""),
     featurePreflightHints(analysis, goal).catch(() => []),
     loadSkillsForPrompt(analysis.rootPath, projectId, goal, {
@@ -656,9 +656,13 @@ export async function planProjectTasks(
     ensureProjectBrain(analysis)
       .then((brain) => compactProjectBrainBrief(brain))
       .catch(() => ""),
-    prepareDomainBrief(analysis.rootPath, goal, { write: options.dryRun !== true }).catch(
-      () => null,
-    ),
+    prepareTaskBrief(analysis.rootPath, goal, analysis, {
+      language: options.language,
+      intent: options.intent,
+      write: options.dryRun !== true,
+      projectId,
+      signal: options.signal,
+    }).catch(() => null),
   ]);
   const goalTokens = [...new Set((goal.toLowerCase().match(/[a-z0-9_]{3,}/g) ?? []))].filter(
     (token) => !["the", "and", "for", "with", "add", "fix", "make", "get", "set", "use", "from", "this", "that", "var", "let", "const"].includes(token),
@@ -681,8 +685,8 @@ export async function planProjectTasks(
         projectBrainBrief
           ? `Persistent project brain (authoritative; reuse it instead of rediscovering the project):\n${projectBrainBrief}`
           : "",
-        domainBrief
-          ? `Domain brief (authoritative; use its rules as constraints and derive acceptance checks from its verification checklist):\n${domainBrief.facts}\nBrief file: ${domainBrief.relPath}`
+        taskBrief
+          ? `Task brief (authoritative; researched norms and components with sources; derive acceptance from its checks):\n${briefPromptFacts(taskBrief)}\nBrief file: .cie/agent/briefs/${taskBrief.key}.md`
           : "",
         options.diagnosis
           ? `Pre-edit diagnosis (authoritative; build tasks from this, do not repeat the analysis):\n${compactDiagnosisBrief(options.diagnosis)}`
@@ -703,7 +707,7 @@ export async function planProjectTasks(
             ].join(", ")}`
           : "",
         projectMap ? `Project map (use it for file and symbol ownership):\n${projectMap.slice(0, 14_000)}` : "",
-        "Write task titles, details and acceptance in English. Keep quoted user text, file paths and code identifiers unchanged.",
+        `Output language: ${options.language ?? options.intent?.language ?? "the user's request language"}. Write task titles, details and acceptance in this language. Keep quoted user text, file paths, code identifiers and commands unchanged.`,
         `Verification command: ${verification ?? "none detected"}`,
         options.intent
           ? [
@@ -1556,7 +1560,7 @@ function taskInstruction(
         : "Read .cie/agent/context-digest.md first for compact prior context. Read .cie/agent/context.md only when the digest and summaries are insufficient; if it is large, search it with find_in_file or read only the relevant tail. Append useful durable context if you learn something new.",
     extractionTask
       ? ""
-      : "For game or domain-specific work, read the matching .cie/agent/knowledge/*.md brief before deciding rules or mechanics.",
+      : "For game or domain-specific work, read the matching .cie/agent/knowledge/*.md and .cie/agent/briefs/*.md files before deciding rules, norms or mechanics.",
     extractionTask
       ? "Do not edit files and do not add runtime checks; the extraction table is the evidence."
       : inspection

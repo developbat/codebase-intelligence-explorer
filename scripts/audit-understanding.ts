@@ -4,7 +4,7 @@ import { analyzeProject } from "../server/src/analyzer";
 import { saveAnalysis, removeAnalysis } from "../server/src/store";
 import { analyzeIntent } from "../server/src/ai/intent";
 import { planProjectTasks } from "../server/src/ai/loop";
-import { prepareDomainBrief } from "../server/src/ai/domainKnowledge";
+import { prepareTaskBrief } from "../server/src/ai/taskBrief";
 
 /**
  * Dev-only audit: run intent + domain brief + planner with dryRun, without
@@ -22,7 +22,12 @@ const analysis = await analyzeProject(root);
 await saveAnalysis(analysis);
 try {
   const analyzed = await analyzeIntent(analysis.id, instruction, { language });
-  const brief = await prepareDomainBrief(root, instruction, { write: false });
+  const brief = await prepareTaskBrief(root, instruction, analysis, {
+    language,
+    intent: analyzed.intent,
+    write: true,
+    projectId: analysis.id,
+  });
   const queue = await planProjectTasks(analysis.id, instruction, {
     language,
     intent: analyzed.intent,
@@ -33,7 +38,23 @@ try {
     language,
     projectRoot: root,
     intent: analyzed.intent,
-    domainFacts: brief?.facts ?? null,
+    brief: {
+      key: brief.key,
+      language: brief.language,
+      summary: brief.summary,
+      invariants: brief.invariants,
+      norms: brief.norms,
+      components: brief.components,
+      dataModel: brief.dataModel,
+      ux: brief.ux,
+      pitfalls: brief.pitfalls,
+      acceptance: brief.acceptance,
+      openDecisions: brief.openDecisions,
+      extras: brief.extras,
+      sources: brief.sources,
+      verifiedAt: brief.verifiedAt,
+      fallback: brief.fallback,
+    },
     tasks: queue.tasks.map((task) => ({
       title: task.title,
       detail: task.detail,
