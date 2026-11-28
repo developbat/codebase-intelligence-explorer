@@ -22,11 +22,19 @@ export function ToolchainsPanel({ projectId }: { projectId?: string }) {
   const [message, setMessage] = useState<string | null>(null);
 
   async function install(id: string) {
+    const tool = report?.tools.find((item) => item.id === id);
     setInstalling(id);
-    setMessage(null);
+    setMessage(`${t("Installing")} ${tool?.name ?? id}…`);
     try {
       const result = await api.installToolchain(id, projectId);
-      setMessage(result.output || (result.ok ? t("Installed.") : t("Install failed.")));
+      const status = result.skipped
+        ? t("Skipped")
+        : result.ok
+          ? t("Installed successfully")
+          : t("Failed");
+      setMessage(
+        `${status}: ${tool?.name ?? id}${result.command ? `\n$ ${result.command}` : ""}\n\n${result.output}`.trim(),
+      );
       await refresh(true);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : t("Install failed."));
@@ -38,7 +46,9 @@ export function ToolchainsPanel({ projectId }: { projectId?: string }) {
   async function installRecommendedTools() {
     if (
       !window.confirm(
-        t("Install the missing recommended language tools for this project?"),
+        t(
+          "Install the missing recommended tools? This may install system runtimes such as Node.js or Git and can take a few minutes.",
+        ),
       )
     ) {
       return;
@@ -50,9 +60,12 @@ export function ToolchainsPanel({ projectId }: { projectId?: string }) {
       setMessage(
         result.results.length > 0
           ? result.results
-              .map((item) => `${item.id}: ${item.ok ? "ok" : "failed"}\n${item.output.slice(-1_200)}`)
+              .map(
+                (item) =>
+                  `${item.id}: ${item.skipped ? t("skipped") : item.ok ? t("ok") : t("failed")}\n${item.output.slice(-1_200)}`,
+              )
               .join("\n\n")
-          : t("No safe automatic installs were available; use the Install buttons."),
+          : t("No recommended installs were needed."),
       );
       await refresh(true);
     } catch (error) {
@@ -126,6 +139,7 @@ export function ToolchainsPanel({ projectId }: { projectId?: string }) {
                 const installCommand = tool.installCommands.find(
                   (item) => item.platform === report.platform,
                 )?.command;
+                const needsProject = tool.local === true && !projectId;
                 return (
                   <div key={tool.id} className={tool.installed ? "is-installed" : "is-missing"}>
                     <span>
@@ -137,13 +151,20 @@ export function ToolchainsPanel({ projectId }: { projectId?: string }) {
                         {tool.installed ? ` · ${tool.version ?? t("installed")}` : ` · ${t("missing")}`}
                       </small>
                       {tool.note ? <small>{tool.note}</small> : null}
+                      {needsProject ? (
+                        <small>{t("Open a project to install this tool.")}</small>
+                      ) : null}
                     </span>
                     {!tool.installed && installCommand ? (
                       <button
                         className="ghost-button"
                         onClick={() => void install(tool.id)}
-                        disabled={installing !== null}
-                        title={installCommand}
+                        disabled={installing !== null || needsProject}
+                        title={
+                          needsProject
+                            ? t("Open a project to install this tool locally.")
+                            : installCommand
+                        }
                       >
                         {installing === tool.id ? <Loader2 size={9} className="spin" /> : <Download size={9} />}
                         {t("Install")}

@@ -10,6 +10,8 @@ import type {
   ToolchainTool,
 } from "../../shared/toolchains";
 
+import { toolchainPath } from "./shellPath";
+
 const execFileAsync = promisify(execFile);
 
 function hasEslintConfig(rootPath?: string): boolean {
@@ -517,6 +519,7 @@ async function hasCommand(command: string): Promise<boolean> {
     await execFileAsync(process.platform === "win32" ? "where" : "which", [command], {
       timeout: 3_000,
       maxBuffer: 256 * 1024,
+      env: { ...process.env, PATH: toolchainPath() },
     });
     commandAvailability.set(command, true);
     return true;
@@ -555,6 +558,7 @@ async function checkDefinition(
       required: definition.required,
       autoInstall: definition.autoInstall,
       managed: definition.managed,
+      local: definition.local,
       note: definition.note,
     };
   }
@@ -564,6 +568,7 @@ async function checkDefinition(
         timeout: 5_000,
         maxBuffer: 1024 * 1024,
         cwd: projectRoot,
+        env: { ...process.env, PATH: toolchainPath() },
       });
       const output = `${result.stdout ?? ""}\n${result.stderr ?? ""}`.trim();
       return {
@@ -582,6 +587,7 @@ async function checkDefinition(
         required: definition.required,
         autoInstall: definition.autoInstall,
         managed: definition.managed,
+        local: definition.local,
         note: definition.note,
       };
     } catch {
@@ -603,6 +609,7 @@ async function checkDefinition(
     required: definition.required,
     autoInstall: definition.autoInstall,
     managed: definition.managed,
+    local: definition.local,
     note: definition.note,
   };
 }
@@ -695,6 +702,60 @@ export async function checkToolchains(
   return report;
 }
 
+async function resolveInstallCommand(
+  definition: Definition,
+  platformName: Platform,
+  projectRoot: string | undefined,
+  command: string,
+): Promise<{ command?: string; error?: string }> {
+  // Project-local tools (eslint, prettier, TypeScript server) need a workspace;
+  // otherwise npm would write into the app bundle and fail.
+  if (definition.local === true && !projectRoot) {
+    return {
+      error: `${definition.name} installs into a project's dev dependencies. Open a project first, or run manually: ${command}`,
+    };
+  }
+  if (command.startsWith("brew ")) {
+    if (await hasCommand("brew")) return { command };
+    if (definition.packageName && (await hasCommand("npm"))) {
+      return { command: `npm install -g ${definition.packageName}` };
+    }
+    return {
+      error: `Homebrew (brew) was not found. Install it from https://brew.sh, or run manually: ${command}`,
+    };
+  }
+  if (command.startsWith("npm ")) {
+    if (await hasCommand("npm")) return { command };
+    return {
+      error: `npm was not found. Install Node.js first, then run: ${command}`,
+    };
+  }
+  if (command.startsWith("sudo ")) {
+    if (typeof process.getuid === "function" && process.getuid() === 0) {
+      return { command: command.replace(/^sudo\s+/, "") };
+    }
+    const passwordless = await execFileAsync("sudo", ["-n", "true"], {
+      timeout: 3_000,
+      env: { ...process.env, PATH: toolchainPath() },
+    })
+      .then(() => true)
+      .catch(() => false);
+    if (!passwordless) {
+      return {
+        error: `Administrator permission is required. Run this in a terminal: ${command}`,
+      };
+    }
+    return { command: command.replace(/^sudo\s+/, "sudo -n ") };
+  }
+  const executable = command.split(/\s+/)[0];
+  if (executable && !(await hasCommand(executable))) {
+    return {
+      error: `"${executable}" was not found. Install it first, then run: ${command}`,
+    };
+  }
+  return { command };
+}
+
 export async function installToolchain(
   id: string,
   projectRoot?: string,
@@ -711,8 +772,13 @@ export async function installToolchain(
         : "";
     return { id, command: "", ok: true, output: `${tool.name} is already installed.${note}` };
   }
-  let command = tool.installCommands.find((item) => item.platform === report.platform)?.command;
-  if (!command) throw new Error(`No automatic install command is available for ${tool.name} on ${report.platform}.`);
+  const installCommand = tool.installCommands.find(
+    (item) => item.platform === report.platform,
+  )?.command;
+  if (!installCommand) {
+    throw new Error(`No automatic install command is available for ${tool.name} on ${report.platform}.`);
+  }
+  let command = installCommand;
   if (report.platform === "win32") {
     if ((await hasCommand("choco")) === false && command.startsWith("choco ")) {
       const wingetId = WINGET_IDS[id];
@@ -728,6 +794,16 @@ export async function installToolchain(
       }
     }
   }
+  const resolved = await resolveInstallCommand(
+    definition,
+    report.platform,
+    projectRoot,
+    command,
+  );
+  if (resolved.error) {
+    return { id, command, ok: false, output: resolved.error };
+  }
+  command = resolved.command ?? command;
   let output = "";
   try {
     const result = await execAsync(command, {
@@ -736,9 +812,12 @@ export async function installToolchain(
       shell: process.platform === "win32" ? process.env.COMSPEC || "cmd.exe" : "/bin/bash",
       cwd: projectRoot,
       windowsHide: true,
+      env: { ...process.env, PATH: toolchainPath() },
     });
     output = `${result.stdout ?? ""}${result.stderr ?? ""}`.trim().slice(-8_000);
   } catch (error) {
+    // The install may have added a binary; do not keep a stale "missing" cache.
+    commandAvailability.clear();
     return {
       id,
       command,
@@ -746,6 +825,7 @@ export async function installToolchain(
       output: `${error instanceof Error ? error.message : "Toolchain install failed."}${windowsInstallHint()}`.slice(-8_000),
     };
   }
+  commandAvailability.clear();
   const after = await checkToolchains(true, { rootPath: projectRoot });
   const installedTool = after.tools.find((item) => item.id === id);
   if (!installedTool?.installed) {
@@ -773,15 +853,35 @@ export async function installRecommended(
 ): Promise<{ results: ToolchainInstallResult[]; report: ToolchainReport }> {
   const report = await checkToolchains(true, context);
   const platformName = report.platform;
-  const targets = report.tools.filter(
-    (tool) =>
-      tool.recommended &&
-      !tool.installed &&
-      tool.autoInstall === true &&
-      tool.installCommands.some((command) => command.platform === platformName),
-  );
+  const categoryRank = (tool: ToolchainTool): number =>
+    tool.category === "runtime" || tool.category === "package-manager"
+      ? 0
+      : tool.category === "version-control"
+        ? 1
+        : tool.category === "lsp"
+          ? 2
+          : 3;
+  const targets = report.tools
+    .filter(
+      (tool) =>
+        tool.recommended &&
+        !tool.installed &&
+        (tool.autoInstall === true || tool.required === true) &&
+        tool.installCommands.some((command) => command.platform === platformName),
+    )
+    .sort((left, right) => categoryRank(left) - categoryRank(right));
   const results: ToolchainInstallResult[] = [];
   for (const tool of targets) {
+    if (tool.local === true && !context.rootPath) {
+      results.push({
+        id: tool.id,
+        command: "",
+        ok: false,
+        skipped: true,
+        output: `${tool.name} installs into a project's dev dependencies. Open a project first, or install it from the tool's Install button inside a project.`,
+      });
+      continue;
+    }
     // Sequential installs keep package-manager state deterministic.
     // eslint-disable-next-line no-await-in-loop
     results.push(await installToolchain(tool.id, context.rootPath));

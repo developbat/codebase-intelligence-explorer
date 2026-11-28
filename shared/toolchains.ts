@@ -34,6 +34,8 @@ export interface ToolchainTool {
   autoInstall?: boolean;
   /** The app can manage this tool locally instead of a system-wide install. */
   managed?: boolean;
+  /** Installs into the open project's dev dependencies instead of system-wide. */
+  local?: boolean;
   note?: string;
 }
 
@@ -51,5 +53,7 @@ export interface ToolchainInstallResult {
   id: string;
   command: string;
   ok: boolean;
+  /** True when the tool needs an open project (or manual install) and was not run. */
+  skipped?: boolean;
   output: string;
 }

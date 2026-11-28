@@ -1,3 +1,4 @@
+import { ensureProcessPath } from "./shellPath";
 import express from "express";
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
@@ -185,6 +186,10 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = process.env.CIE_APP_ROOT
   ? path.resolve(process.env.CIE_APP_ROOT)
   : path.resolve(HERE, "../..");
+// GUI launches inherit a minimal PATH; make Homebrew/nvm/cargo visible to
+// toolchain checks, installs and project commands.
+ensureProcessPath();
+
 const PORT = Number(process.env.PORT || 4317);
 const TRANSPARENT_PNG = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
