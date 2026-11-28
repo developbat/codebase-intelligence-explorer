@@ -15,12 +15,12 @@ test("lists the built-in project templates", () => {
   assert.deepEqual(
     templates.map((item) => item.id),
     [
+      "blank",
       "static",
       "react-vite",
       "node-express",
       "python-fastapi",
       "php-web",
-      "blank",
       "canvas-game",
       "pwa-mobile",
       "expo-mobile",
@@ -222,6 +222,26 @@ test("scaffolds a Godot 4 game project", async () => {
     const script = await fs.readFile(path.join(result.rootPath, "Main.gd"), "utf8");
     assert.match(script, /extends Node2D/);
     assert.match(script, /_unhandled_input/);
+  } finally {
+    await fs.rm(parent, { recursive: true, force: true });
+  }
+});
+
+test("blank is the default skeleton and static avoids demo filler", async () => {
+  const templates = listProjectTemplates();
+  assert.equal(templates[0]?.id, "blank");
+
+  const parent = await tempParent();
+  try {
+    const result = await scaffoldProject({
+      parentPath: parent,
+      name: "static-skeleton",
+      template: "static",
+    });
+    const html = await fs.readFile(path.join(result.rootPath, "index.html"), "utf8");
+    assert.doesNotMatch(html, /click me/i);
+    const script = await fs.readFile(path.join(result.rootPath, "app.js"), "utf8");
+    assert.doesNotMatch(script, /addEventListener/i);
   } finally {
     await fs.rm(parent, { recursive: true, force: true });
   }

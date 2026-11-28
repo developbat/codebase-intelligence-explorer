@@ -1409,7 +1409,8 @@ export async function analyzeIntent(
   intent = suppressRedundantClarification(intent, instruction, analysis);
   intent = forceExplicitEditIntent(intent, instruction);
   intent = preserveNegations(intent, instruction);
-  intent = await applyProjectMismatchGuard(intent, instruction, analysis, options);
+  // Every conversation has an active project, even when it is empty. Never ask
+  // "which project should I use?"; adapt to the current project instead.
   intent = applyDomainClarification(
     intent,
     instruction,

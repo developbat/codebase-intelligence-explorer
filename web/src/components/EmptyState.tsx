@@ -201,7 +201,7 @@ export function OpenProjectDialog({
   const [browserTarget, setBrowserTarget] = useState<"path" | "parent">("path");
   const [parentPath, setParentPath] = useState(() => parentOf(lastPath) || "~");
   const [name, setName] = useState("");
-  const [template, setTemplate] = useState<ProjectTemplateId>("static");
+  const [template, setTemplate] = useState<ProjectTemplateId>("blank");
   const [brief, setBrief] = useState("");
   const [useCase, setUseCase] = useState<"coding" | "daily">("coding");
   const [templates, setTemplates] = useState<ProjectTemplate[]>([]);

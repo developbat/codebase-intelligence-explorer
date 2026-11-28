@@ -48,7 +48,7 @@ __pycache__/
 const STATIC_TEMPLATE: TemplateDefinition = {
   id: "static",
   name: "Static HTML",
-  description: "Plain HTML, CSS and JavaScript with no build step or dependencies.",
+  description: "Minimal HTML, CSS and JavaScript skeleton with no build step or demo content.",
   language: "HTML / CSS / JavaScript",
   framework: "Vanilla",
   files: ["index.html", "styles.css", "app.js", "README.md", ".gitignore"],
@@ -65,13 +65,7 @@ const STATIC_TEMPLATE: TemplateDefinition = {
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
-    <main class="card">
-      <p class="eyebrow">Static starter</p>
-      <h1>${name}</h1>
-      <p>Edit <code>index.html</code>, <code>styles.css</code> and <code>app.js</code> to build your page.</p>
-      <button id="action" type="button">Click me</button>
-      <p id="output" class="output" aria-live="polite"></p>
-    </main>
+    <main id="app"></main>
     <script src="./app.js"></script>
   </body>
 </html>
@@ -93,73 +87,12 @@ const STATIC_TEMPLATE: TemplateDefinition = {
 body {
   min-height: 100vh;
   margin: 0;
-  display: grid;
-  place-items: center;
-  background: radial-gradient(circle at top, #14243b, #080b10 55%);
-}
-
-.card {
-  width: min(560px, calc(100vw - 32px));
-  padding: 32px;
-  border: 1px solid #233246;
-  border-radius: 18px;
-  background: rgba(13, 20, 31, 0.9);
-  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.45);
-}
-
-.eyebrow {
-  margin: 0 0 8px;
-  color: #5eead4;
-  font-size: 12px;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-}
-
-h1 {
-  margin: 0 0 12px;
-  font-size: clamp(28px, 6vw, 44px);
-}
-
-p {
-  color: #9fb3cc;
-  line-height: 1.6;
-}
-
-code {
-  color: #c5dcff;
-}
-
-button {
-  margin-top: 8px;
-  padding: 10px 16px;
-  border: 1px solid #2b5f8f;
-  border-radius: 8px;
-  background: #153352;
-  color: #d7ecff;
-  font: inherit;
-  cursor: pointer;
-}
-
-button:hover {
-  background: #1b4168;
-}
-
-.output {
-  min-height: 24px;
-  color: #8ed3b6;
 }
 `,
     },
     {
       path: "app.js",
-      content: `const action = document.querySelector("#action");
-const output = document.querySelector("#output");
-let clicks = 0;
-
-action?.addEventListener("click", () => {
-  clicks += 1;
-  if (output) output.textContent = "Button clicked " + clicks + " time" + (clicks === 1 ? "" : "s") + ".";
-});
+      content: `// Add the app code here.
 `,
     },
     {
@@ -178,7 +111,7 @@ action?.addEventListener("click", () => {
         "```",
       ]),
     },
-    { path: ".gitignore", content: "node_modules/\n.DS_Store\n*.log\n" },
+    { path: ".gitignore", content: GITIGNORE },
   ],
 };
 
@@ -317,19 +250,10 @@ createRoot(document.getElementById("root")!).render(
     },
     {
       path: "src/App.tsx",
-      content: `import { useState } from "react";
-
-export function App() {
-  const [count, setCount] = useState(0);
-
+      content: `export function App() {
   return (
-    <main className="card">
-      <p className="eyebrow">React + Vite starter</p>
+    <main>
       <h1>${name}</h1>
-      <p>Edit src/App.tsx and save. Vite updates the page instantly.</p>
-      <button type="button" onClick={() => setCount((value) => value + 1)}>
-        Count is {count}
-      </button>
     </main>
   );
 }
@@ -792,12 +716,12 @@ const BLANK_TEMPLATE: TemplateDefinition = {
 };
 
 const TEMPLATES: TemplateDefinition[] = [
+  BLANK_TEMPLATE,
   STATIC_TEMPLATE,
   REACT_TEMPLATE,
   EXPRESS_TEMPLATE,
   FASTAPI_TEMPLATE,
   PHP_TEMPLATE,
-  BLANK_TEMPLATE,
   ...EXTRA_TEMPLATES,
 ];
 
