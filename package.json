@@ -1,7 +1,7 @@
 {
   "name": "codebase-intelligence-explorer",
   "private": true,
-  "version": "0.2.8",
+  "version": "0.2.9",
   "type": "module",
   "description": "Read-only code intelligence explorer: static analysis, knowledge graph, Git change impact, and optional multi-provider AI analysis.",
   "scripts": {
