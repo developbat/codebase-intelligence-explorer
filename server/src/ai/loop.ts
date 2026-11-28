@@ -88,6 +88,7 @@ import {
   recordModelFallback,
 } from "./modelStats";
 import { estimateUsageCost } from "./pricing";
+import { prepareDomainBrief } from "./domainKnowledge";
 import { removeIndexedPath } from "../indexer";
 import { formatUsd } from "../../../shared/pricing";
 import { resolveWorkBrief } from "../extractors";
@@ -218,7 +219,7 @@ Rules:
 - Distinguish the level data table from the level selection UI. "Remove the level/map list" means remove the selection UI, not the LEVELS/map data needed for random starts.
 - For "random on every start" behavior, the acceptance must start/restart at least 5 times and observe a different level each time; do not require calls to hidden internals such as state or startRound.
 - If the preflight code already implements the requested rule, do not create an edit task that claims a flat bonus or missing guard; create a verification-only task or fold the verification into the behavior task.
-- Work in any programming language.`;
+- If a domain brief is provided, treat its rules, defaults and pitfalls as constraints and turn its verification checklist into concrete acceptance checks for the relevant tasks. Do not override the brief with generic memory.`;
 
 export function applyPlanReview(
   queue: ProjectTaskQueue,
@@ -642,7 +643,7 @@ export async function planProjectTasks(
   const analysis = await loadAnalysis(projectId);
   const verification = preferredVerificationCommand(analysis.tooling);
   const config = await resolveAgentRole("planner");
-  const [projectMap, preflightHints, skillLoad, projectBrainBrief] = await Promise.all([
+  const [projectMap, preflightHints, skillLoad, projectBrainBrief, domainBrief] = await Promise.all([
     ensureProjectMap(analysis).catch(() => ""),
     featurePreflightHints(analysis, goal).catch(() => []),
     loadSkillsForPrompt(analysis.rootPath, projectId, goal, {
@@ -654,6 +655,9 @@ export async function planProjectTasks(
     ensureProjectBrain(analysis)
       .then((brain) => compactProjectBrainBrief(brain))
       .catch(() => ""),
+    prepareDomainBrief(analysis.rootPath, goal, { write: options.dryRun !== true }).catch(
+      () => null,
+    ),
   ]);
   const goalTokens = [...new Set((goal.toLowerCase().match(/[a-z0-9_]{3,}/g) ?? []))].filter(
     (token) => !["the", "and", "for", "with", "add", "fix", "make", "get", "set", "use", "from", "this", "that", "var", "let", "const"].includes(token),
@@ -675,6 +679,9 @@ export async function planProjectTasks(
         projectFacts(analysis),
         projectBrainBrief
           ? `Persistent project brain (authoritative; reuse it instead of rediscovering the project):\n${projectBrainBrief}`
+          : "",
+        domainBrief
+          ? `Domain brief (authoritative; use its rules as constraints and derive acceptance checks from its verification checklist):\n${domainBrief.facts}\nBrief file: ${domainBrief.relPath}`
           : "",
         options.diagnosis
           ? `Pre-edit diagnosis (authoritative; build tasks from this, do not repeat the analysis):\n${compactDiagnosisBrief(options.diagnosis)}`
@@ -1541,6 +1548,9 @@ function taskInstruction(
       : continuation
         ? "This is a continuation of your previous answer. Its findings are authoritative. Do not rescan or re-read the project; read only the exact lines you will edit, then apply the change and verify it on the real app."
         : "Read .cie/agent/context-digest.md first for compact prior context. Read .cie/agent/context.md only when the digest and summaries are insufficient; if it is large, search it with find_in_file or read only the relevant tail. Append useful durable context if you learn something new.",
+    extractionTask
+      ? ""
+      : "For game or domain-specific work, read the matching .cie/agent/knowledge/*.md brief before deciding rules or mechanics.",
     extractionTask
       ? "Do not edit files and do not add runtime checks; the extraction table is the evidence."
       : inspection

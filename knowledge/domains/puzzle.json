@@ -1,0 +1,159 @@
+{
+  "id": "puzzle",
+  "name": "Puzzle game",
+  "aliases": ["puzzle", "bulmaca", "yapboz"],
+  "signals": [
+    "puzzle",
+    "bulmaca",
+    "yapboz",
+    "match 3",
+    "match3",
+    "eslestirme",
+    "kaydirmali",
+    "sliding puzzle",
+    "sokoban",
+    "jigsaw",
+    "hidden object",
+    "gizli nesne",
+    "sudoku",
+    "nonogram",
+    "tetris"
+  ],
+  "summary": "A family of grid/board games where the player manipulates tiles or pieces to reach a win condition. Subtypes differ a lot: match-3, jigsaw, sliding tiles, sokoban, hidden-object and logic grids.",
+  "entities": [
+    "board or grid (rows, columns, cell size)",
+    "tiles/pieces with type, position and state",
+    "move counter, timer, score and target",
+    "level definition (grid, goal, move limit, hints)",
+    "win/lose state and progression"
+  ],
+  "mechanics": [
+    "Match-3: swap adjacent tiles, match 3+ of a kind, remove them, apply gravity, refill and resolve cascades.",
+    "Sliding puzzle: one empty cell, tiles slide into it; win when the arrangement matches the target.",
+    "Jigsaw: drag/rotate pieces into a target layout; snap when close enough.",
+    "Sokoban: push boxes onto targets; player cannot pull and cannot move through walls.",
+    "Hidden object: find listed objects in a scene; click accuracy and hint budget matter.",
+    "Logic grids (sudoku/nonogram): validate rows, columns and regions after every input.",
+    "Most puzzles need a no-moves/shuffle rule, a hint rule and a restart rule."
+  ],
+  "ux": [
+    "Pointer and touch input; large hit areas on mobile.",
+    "Animate swap/match/fall but block input until the cascade settles.",
+    "Show moves/score/time, hint button, restart, level select and best score.",
+    "Persist progress locally; show a clear win/lose overlay with retry."
+  ],
+  "pitfalls": [
+    "Generating a board with no possible moves (or an immediate accidental match).",
+    "Infinite cascades or score inflation; not capping chain resolution.",
+    "Accepting input during animation; double-counting a match.",
+    "Confusing row/column indices; off-by-one grid mapping.",
+    "Unlicensed art/audio; huge images that break mobile memory.",
+    "Difficulty spikes with no level tuning; hints that reveal nothing."
+  ],
+  "defaults": [
+    "6x6 match-3 grid, swap adjacent tiles, 3+ match, gravity and refill, 20 moves.",
+    "No timer, score target, hint after 10 seconds of inactivity, restart button.",
+    "5 hand-tuned levels, local progress, cat-themed tile art if the user asked for cats."
+  ],
+  "questions": [
+    {
+      "id": "mechanic",
+      "highImpact": true,
+      "ask": {
+        "en": "Which puzzle mechanic should the game use?",
+        "tr": "Oyun hangi puzzle mekaniğini kullansın?"
+      },
+      "answeredBy": [
+        "match 3",
+        "match3",
+        "eslestirme",
+        "jigsaw",
+        "yapboz",
+        "sliding",
+        "kaydirmali",
+        "sokoban",
+        "hidden object",
+        "gizli nesne",
+        "sudoku",
+        "nonogram"
+      ],
+      "options": [
+        {
+          "label": { "en": "Match-3 grid", "tr": "3'lü eşleştirme ızgarası" },
+          "suffix": {
+            "en": "Use a match-3 grid: swap adjacent tiles, match 3 or more, gravity and refill.",
+            "tr": "3'lü eşleştirme kullan: komşu taşları değiştir, 3+ eşleştir, yerçekimi ve yenileme uygula."
+          }
+        },
+        {
+          "label": { "en": "Jigsaw", "tr": "Yapboz" },
+          "suffix": {
+            "en": "Use a jigsaw: drag pieces into the target layout and snap them into place.",
+            "tr": "Yapboz kullan: parçaları hedef düzene sürükle ve yerine oturt."
+          }
+        },
+        {
+          "label": { "en": "Sliding tiles", "tr": "Kayan taşlar" },
+          "suffix": {
+            "en": "Use a sliding-tile puzzle with one empty cell and a target arrangement.",
+            "tr": "Tek boşluklu kayan taş puzzle'ı ve hedef dizilim kullan."
+          }
+        }
+      ]
+    },
+    {
+      "id": "scope",
+      "highImpact": true,
+      "ask": {
+        "en": "How large should the first version be?",
+        "tr": "İlk sürüm ne kadar kapsamlı olsun?"
+      },
+      "answeredBy": ["tek seviye", "single level", "5 seviye", "five levels", "kampanya", "campaign"],
+      "options": [
+        {
+          "label": { "en": "One polished level", "tr": "Tek cilalı seviye" },
+          "suffix": {
+            "en": "Build one polished level with score, moves, hint and restart.",
+            "tr": "Skor, hamle, ipucu ve yeniden başlatma içeren tek cilalı seviye yap."
+          }
+        },
+        {
+          "label": { "en": "Five-level mini campaign", "tr": "Beş seviyelik mini kampanya" },
+          "suffix": {
+            "en": "Build five levels with increasing difficulty, level select and saved progress.",
+            "tr": "Artan zorlukta beş seviye, seviye seçimi ve kayıtlı ilerleme yap."
+          }
+        }
+      ]
+    },
+    {
+      "id": "theme",
+      "highImpact": false,
+      "ask": {
+        "en": "What visual theme should the tiles use?",
+        "tr": "Taşlar hangi görsel temayı kullansın?"
+      },
+      "answeredBy": ["kedi", "cat", "hayvan", "animal", "meyve", "fruit", "uzay", "space"],
+      "options": [
+        {
+          "label": { "en": "Cat illustrations", "tr": "Kedi illüstrasyonları" },
+          "suffix": { "en": "Use cat illustrations for the tiles.", "tr": "Taşlar için kedi illüstrasyonları kullan." }
+        },
+        {
+          "label": { "en": "Simple shapes", "tr": "Basit şekiller" },
+          "suffix": { "en": "Use simple colored shapes for the tiles.", "tr": "Taşlar için basit renkli şekiller kullan." }
+        }
+      ]
+    }
+  ],
+  "verification": [
+    "Initial board is solvable and has no unintended immediate matches.",
+    "Only adjacent swaps are accepted; a swap that creates no match is reverted.",
+    "A 3+ match removes the tiles, scores, applies gravity/refill and resolves cascades.",
+    "When no moves remain, the board shuffles or the level ends; it never freezes.",
+    "Win/lose conditions trigger once and show the correct overlay; restart resets board, moves and score.",
+    "Hint points to a real valid move; input is ignored during animations.",
+    "Touch and mouse input both work; progress persists after reload when requested."
+  ],
+  "sources": []
+}

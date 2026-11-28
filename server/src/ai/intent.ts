@@ -39,6 +39,11 @@ import {
   INTENT_VERIFICATIONS,
 } from "../../../shared/intent";
 import { documentStats, readDocument } from "../documentTools";
+import {
+  applyDomainClarification,
+  domainPromptFacts,
+  matchDomainCards,
+} from "./domainKnowledge";
 
 const MAX_OUTPUT_TOKENS = 1_600;
 const TIMEOUT_MS = 35_000;
@@ -141,6 +146,7 @@ Rules:
 - Preserve prohibitions exactly: "do not re-add", "don't change X", "remove nothing", "mevcut itemleri yeniden ekleme" are constraints. Never turn a prohibition into a positive action.
 - Never make the user choose a model or restate the whole request.
 - If the user already answered a clarification, needsClarification must be false.
+- If a "Domain reference" is present, treat its rules as authoritative over your own memory, use its vocabulary, and prefer its high-impact questions when the request is a new build and leaves that decision open. Never ask what the request already answers.
 
 Good clarification example:
 User: "add a task detail field"
@@ -237,12 +243,16 @@ async function userPrompt(
   analysis: AnalysisResult,
   instruction: string,
   options: IntentOptions,
+  domainFacts?: string,
 ): Promise<string> {
   return [
     await projectFacts(analysis, options.activeFile),
     existingCodeHints(analysis, instruction),
     `Interface language (use for understanding, question and option labels): ${options.language ?? "unknown"}`,
     options.clarified ? "The user already clarified the request. Do not ask again." : "",
+    domainFacts
+      ? `Domain reference (authoritative; use its rules instead of memory and ask only what the request leaves open):\n${domainFacts}`
+      : "",
     options.history && options.history.length > 0
       ? `Recent conversation (use it to resolve references like "again", "the same", "that file"):\n${options.history
           .slice(-6)
@@ -1069,6 +1079,8 @@ export async function analyzeIntent(
     };
   }
   const config = await resolveIntentModel(options);
+  const domainMatch = matchDomainCards(instruction, { limit: 1 })[0];
+  const domainFacts = domainMatch ? domainPromptFacts(domainMatch) : "";
   const skillList = await listSkills(analysis.rootPath, projectId).catch(() => null);
   const skillFeedback = await readSkillFeedback(analysis.rootPath).catch(() => null);
   const skillIndex = (skillList?.skills ?? [])
@@ -1084,7 +1096,7 @@ export async function analyzeIntent(
     { role: "system" as const, content: systemPrompt() },
     {
       role: "user" as const,
-      content: await userPrompt(analysis, instruction, { ...options, skillIndex }),
+      content: await userPrompt(analysis, instruction, { ...options, skillIndex }, domainFacts),
     },
   ];
   let tokenUsage = { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
@@ -1182,6 +1194,9 @@ export async function analyzeIntent(
                   .join(", ")}`,
                 `User request:\n${instruction.trim()}`,
                 `Interface language: ${options.language ?? "unknown"}`,
+                domainFacts
+                  ? `Domain reference (authoritative):\n${domainFacts.slice(0, 2_000)}`
+                  : "",
                 "Return only the JSON object with the schema. No prose, no Markdown.",
               ].join("\n\n"),
             },
@@ -1229,6 +1244,13 @@ export async function analyzeIntent(
   intent = forceExplicitEditIntent(intent, instruction);
   intent = preserveNegations(intent, instruction);
   intent = await applyProjectMismatchGuard(intent, instruction, analysis, options);
+  intent = applyDomainClarification(
+    intent,
+    instruction,
+    domainMatch,
+    options.language,
+    options.clarified,
+  );
   if (intent.areas.length === 0) {
     const areas = likelyProjectAreas(analysis, instruction);
     if (areas.length > 0) intent = { ...intent, areas };

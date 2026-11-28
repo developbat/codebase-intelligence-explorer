@@ -1,0 +1,105 @@
+{
+  "id": "booking",
+  "name": "Booking and appointments",
+  "aliases": ["booking", "randevu", "rezervasyon"],
+  "signals": [
+    "booking",
+    "randevu",
+    "rezervasyon",
+    "appointment",
+    "takvim",
+    "calendar",
+    "slot",
+    "musaitlik",
+    "availability",
+    "reservation"
+  ],
+  "summary": "A scheduling flow where a user picks a service/resource and an available time slot; the system prevents double booking and keeps availability in sync.",
+  "entities": [
+    "service (duration, buffer, price)",
+    "resource/staff/room/table",
+    "availability rules (working hours, breaks, holidays)",
+    "slot and booking: start, end, status, customer",
+    "timezone and calendar view"
+  ],
+  "mechanics": [
+    "Generate slots from working hours, duration and buffer; exclude breaks and existing bookings.",
+    "Create a booking only if the slot is still free (atomic check).",
+    "Cancel/reschedule frees the old slot and validates the new one.",
+    "Show availability in the user's timezone; handle DST.",
+    "Optional: capacity per slot, waitlist, reminders."
+  ],
+  "ux": [
+    "Step flow: service → date → slot → details → confirmation.",
+    "Disabled past/full slots; clear confirmation and cancellation.",
+    "Show the timezone and duration; prevent double submit."
+  ],
+  "pitfalls": [
+    "Race condition: two users book the same slot.",
+    "Slot generation ignoring duration/buffer or breaks.",
+    "Timezone/DST bugs; date-only vs datetime mixing.",
+    "Cancel keeps the slot blocked; reschedule leaves a ghost booking.",
+    "No validation for past dates or malformed times."
+  ],
+  "defaults": [
+    "One service, one resource, local time, no payment.",
+    "Slot step based on service duration and a 10-minute buffer.",
+    "Book/cancel only; add reminders later."
+  ],
+  "questions": [
+    {
+      "id": "resource",
+      "highImpact": true,
+      "ask": {
+        "en": "What is being booked?",
+        "tr": "Ne rezerve ediliyor?"
+      },
+      "answeredBy": ["personel", "staff", "calisan", "oda", "room", "masa", "table", "arac", "vehicle"],
+      "options": [
+        {
+          "label": { "en": "A single resource", "tr": "Tek kaynak" },
+          "suffix": {
+            "en": "Book a single resource with one availability calendar.",
+            "tr": "Tek kaynak ve tek müsaitlik takvimi ile rezervasyon yap."
+          }
+        },
+        {
+          "label": { "en": "Staff or rooms", "tr": "Personel veya odalar" },
+          "suffix": {
+            "en": "Support multiple staff/rooms, each with its own availability.",
+            "tr": "Her biri kendi müsaitliğine sahip birden fazla personel/oda destekle."
+          }
+        }
+      ]
+    },
+    {
+      "id": "payment",
+      "highImpact": true,
+      "ask": {
+        "en": "Should the flow take payment?",
+        "tr": "Akış ödeme alsın mı?"
+      },
+      "answeredBy": ["odeme", "payment", "kredi karti", "credit card", "ucretsiz", "free"],
+      "options": [
+        {
+          "label": { "en": "No payment", "tr": "Ödeme yok" },
+          "suffix": { "en": "Do not add payment; confirm the booking directly.", "tr": "Ödeme ekleme; rezervasyonu doğrudan onayla." }
+        },
+        {
+          "label": { "en": "Payment step", "tr": "Ödeme adımı" },
+          "suffix": { "en": "Add a payment step before confirmation.", "tr": "Onaydan önce ödeme adımı ekle." }
+        }
+      ]
+    }
+  ],
+  "verification": [
+    "Slots respect working hours, service duration, buffer and breaks.",
+    "An existing booking removes its slot from availability.",
+    "Two bookings cannot occupy the same resource and time; the second is rejected.",
+    "Cancel frees the slot; reschedule validates the new slot and releases the old one.",
+    "Past dates/times and malformed input are rejected with a visible message.",
+    "Timezone/DST display is correct for the selected timezone.",
+    "Double submit does not create duplicate bookings."
+  ],
+  "sources": []
+}

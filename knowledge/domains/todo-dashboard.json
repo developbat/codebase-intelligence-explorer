@@ -1,0 +1,148 @@
+{
+  "id": "todo-dashboard",
+  "name": "Todo list or dashboard",
+  "aliases": [
+    "todo",
+    "yapılacaklar",
+    "görev listesi",
+    "dashboard"
+  ],
+  "signals": [
+    "todo",
+    "to do",
+    "yapilacaklar",
+    "yapilacak listesi",
+    "gorev listesi",
+    "task list",
+    "checklist",
+    "dashboard",
+    "kontrol paneli",
+    "kanban",
+    "alisveris listesi",
+    "todo app",
+    "todo list",
+    "todo uygulama",
+    "yapilacak uygulama",
+    "gorev uygulama"
+  ],
+  "summary": "A CRUD app for items/tasks with optional status, priority, filters and persistence, often shown as a list, board or summary dashboard.",
+  "entities": [
+    "item/task: id, title, optional detail, status, priority, due date, tags",
+    "list/board/columns and filters",
+    "counts and summary metrics",
+    "persistence layer (localStorage or API)"
+  ],
+  "mechanics": [
+    "Create, edit, complete and delete items; validate empty titles.",
+    "Filter by status/priority/text and keep counts in sync.",
+    "Persist items so a reload keeps the data.",
+    "Optional: drag between columns, reorder, bulk actions, undo."
+  ],
+  "ux": [
+    "Empty state with a clear first action.",
+    "Keyboard add (Enter) and accessible labels; focus returns after actions.",
+    "Confirm destructive bulk actions; show inline errors."
+  ],
+  "pitfalls": [
+    "Counts drift from the visible filtered list.",
+    "Data lost on reload because writes are debounced incorrectly.",
+    "Editing state shared between rows; wrong item updated.",
+    "Delete without confirmation for bulk actions.",
+    "Broken empty state or inaccessible controls."
+  ],
+  "defaults": [
+    "Single-user app with localStorage persistence and no auth.",
+    "List view with add, edit, complete, delete and a text filter.",
+    "Status and priority are optional; keep the first version small."
+  ],
+  "questions": [
+    {
+      "id": "persistence",
+      "highImpact": true,
+      "ask": {
+        "en": "Where should the items be stored?",
+        "tr": "Kayıtlar nerede tutulsun?"
+      },
+      "answeredBy": [
+        "localstorage",
+        "tarayici",
+        "browser storage",
+        "veritabani",
+        "database",
+        "backend",
+        "api",
+        "sunucu"
+      ],
+      "options": [
+        {
+          "label": {
+            "en": "Browser storage",
+            "tr": "Tarayıcı depolaması"
+          },
+          "suffix": {
+            "en": "Persist items in localStorage; no backend or auth.",
+            "tr": "Kayıtları localStorage'da tut; backend ve giriş olmasın."
+          }
+        },
+        {
+          "label": {
+            "en": "Backend API",
+            "tr": "Backend API"
+          },
+          "suffix": {
+            "en": "Persist items through a backend API and database.",
+            "tr": "Kayıtları backend API ve veritabanı üzerinden tut."
+          }
+        }
+      ]
+    },
+    {
+      "id": "auth",
+      "highImpact": true,
+      "ask": {
+        "en": "Should users sign in?",
+        "tr": "Kullanıcı girişi olsun mu?"
+      },
+      "answeredBy": [
+        "giris",
+        "login",
+        "auth",
+        "kullanici hesabi",
+        "multi user",
+        "cok kullanici"
+      ],
+      "options": [
+        {
+          "label": {
+            "en": "No accounts",
+            "tr": "Hesap yok"
+          },
+          "suffix": {
+            "en": "Do not add accounts or authentication.",
+            "tr": "Hesap ve kimlik doğrulama ekleme."
+          }
+        },
+        {
+          "label": {
+            "en": "Simple sign-in",
+            "tr": "Basit giriş"
+          },
+          "suffix": {
+            "en": "Add simple user accounts and per-user data.",
+            "tr": "Basit kullanıcı hesapları ve kullanıcıya özel veri ekle."
+          }
+        }
+      ]
+    }
+  ],
+  "verification": [
+    "Add, edit, complete and delete update the list and counts immediately.",
+    "Reload keeps the data when persistence is enabled.",
+    "Text/status filters show only matching items and counts stay consistent.",
+    "Empty title is rejected with a visible message; no duplicate ids.",
+    "Empty state appears and the first action works.",
+    "Keyboard add (Enter) works and focus returns after edit/delete.",
+    "No console errors and no stale state after rapid actions."
+  ],
+  "sources": []
+}

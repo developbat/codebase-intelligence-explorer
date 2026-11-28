@@ -1,0 +1,103 @@
+{
+  "id": "platformer",
+  "name": "2D platformer",
+  "aliases": ["platformer", "platform oyunu", "side scroller"],
+  "signals": [
+    "platformer",
+    "platform oyunu",
+    "side scroller",
+    "side-scroller",
+    "ziplama",
+    "gravity",
+    "yercekimi",
+    "mario",
+    "metroidvania",
+    "level gecme"
+  ],
+  "summary": "A side-view game where a character runs and jumps across platforms under gravity, avoids hazards, collects items and reaches a goal.",
+  "entities": [
+    "player body (position, velocity, grounded state)",
+    "platforms and collision boxes",
+    "gravity, jump force, horizontal acceleration, friction",
+    "hazards, enemies, collectibles, goal/checkpoint",
+    "camera, level data, lives/score/HUD"
+  ],
+  "mechanics": [
+    "Gravity pulls the player down; grounded state resets jump availability.",
+    "Jump applies an impulse; variable jump height or coyote time improves feel.",
+    "Horizontal movement accelerates and decelerates; collision resolves on both axes.",
+    "Platforms are solid from the correct sides; one-way platforms are optional.",
+    "Hazards/enemies damage or respawn the player; collectibles increment score.",
+    "Reaching the goal completes the level; restart resets the level state."
+  ],
+  "ux": [
+    "Keyboard arrows/WASD + space, and touch controls on mobile.",
+    "Show lives/score/level in a HUD; pause and restart.",
+    "Keep the player visible with a camera that follows smoothly."
+  ],
+  "pitfalls": [
+    "Tunneling through platforms at high speed; sticking to walls.",
+    "Jump that feels floaty or impossible; no coyote time.",
+    "Collision handled only on one axis; player sinks into the floor.",
+    "Game loop tied to frame rate; physics breaks on high-refresh displays.",
+    "Input stuck after focus loss; restart not resetting velocity/position."
+  ],
+  "defaults": [
+    "2D side-scroller, keyboard controls, canvas or DOM.",
+    "Three short levels, one enemy type, coins, checkpoint at the start.",
+    "Fixed-timestep physics with requestAnimationFrame rendering."
+  ],
+  "questions": [
+    {
+      "id": "controls",
+      "highImpact": true,
+      "ask": {
+        "en": "Which controls should the game support?",
+        "tr": "Oyun hangi kontrolleri desteklesin?"
+      },
+      "answeredBy": ["klavye", "keyboard", "dokunmatik", "touch", "gamepad"],
+      "options": [
+        {
+          "label": { "en": "Keyboard only", "tr": "Sadece klavye" },
+          "suffix": { "en": "Use keyboard controls only.", "tr": "Sadece klavye kontrolleri kullan." }
+        },
+        {
+          "label": { "en": "Keyboard and touch", "tr": "Klavye ve dokunmatik" },
+          "suffix": {
+            "en": "Support keyboard and on-screen touch controls.",
+            "tr": "Klavye ve ekran üstü dokunmatik kontrolleri destekle."
+          }
+        }
+      ]
+    },
+    {
+      "id": "scope",
+      "highImpact": true,
+      "ask": {
+        "en": "How many levels should the first version have?",
+        "tr": "İlk sürümde kaç seviye olsun?"
+      },
+      "answeredBy": ["tek seviye", "single level", "3 seviye", "three levels", "5 seviye"],
+      "options": [
+        {
+          "label": { "en": "One playable level", "tr": "Tek oynanabilir seviye" },
+          "suffix": { "en": "Build one complete playable level.", "tr": "Tek ve tam oynanabilir bir seviye yap." }
+        },
+        {
+          "label": { "en": "Three levels", "tr": "Üç seviye" },
+          "suffix": { "en": "Build three short levels with a level select.", "tr": "Seviye seçimli üç kısa seviye yap." }
+        }
+      ]
+    }
+  ],
+  "verification": [
+    "Player falls under gravity and lands on a platform without sinking or tunneling.",
+    "Jump raises the player and returns to the ground; it cannot be repeated in mid-air.",
+    "Horizontal movement stops at walls; one-way platforms behave as configured.",
+    "Collecting an item increments the HUD exactly once.",
+    "Hazard/enemy contact respawns or damages exactly once.",
+    "Reaching the goal completes the level; restart resets position, velocity, score and enemies.",
+    "The loop keeps a stable frame rate and input stops cleanly on blur."
+  ],
+  "sources": []
+}

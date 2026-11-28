@@ -1,0 +1,166 @@
+{
+  "id": "chess",
+  "name": "Chess",
+  "aliases": ["satranç", "satranc", "chess"],
+  "signals": [
+    "satranc",
+    "chess",
+    "checkmate",
+    "sah mat",
+    "vezir",
+    "piyon",
+    "kale",
+    "at",
+    "fil",
+    "bishop",
+    "knight",
+    "rook",
+    "queen",
+    "pawn",
+    "castling",
+    "rok",
+    "en passant",
+    "gecerken",
+    "promotion",
+    "terfi"
+  ],
+  "summary": "Two-player turn-based board game on an 8x8 grid with six piece types, check/checkmate detection and special moves (castling, en passant, promotion).",
+  "entities": [
+    "8x8 board with files a-h and ranks 1-8",
+    "pieces: king, queen, rook, bishop, knight, pawn (white and black)",
+    "turn state, move history, captured pieces",
+    "check, checkmate, stalemate, draw state",
+    "special-move flags: castling rights, en-passant target, promotion choice"
+  ],
+  "mechanics": [
+    "White moves first; players alternate one legal move per turn.",
+    "A move may never leave the mover's own king in check, including moving a pinned piece.",
+    "King moves one square in any direction; cannot move into check.",
+    "Queen moves any distance along rank, file or diagonal; rook along rank/file; bishop along diagonals; none may jump over pieces.",
+    "Knight moves in an L shape (two squares then one) and is the only piece that jumps.",
+    "Pawn moves one square forward, two from its start rank, captures diagonally, and promotes on reaching the last rank.",
+    "Check is when the king is attacked; the player must resolve it. Checkmate is check with no legal reply.",
+    "Castling: king and rook move together when neither has moved, squares between are empty, and the king is not in, through or into check.",
+    "En passant: a pawn may capture a pawn that just advanced two squares, only on the immediately following move.",
+    "Promotion: a pawn reaching the last rank becomes queen, rook, bishop or knight (player choice).",
+    "Draws: stalemate, insufficient material, threefold repetition, fifty-move rule, agreement."
+  ],
+  "ux": [
+    "Highlight legal moves on selection; show last move and check indicator.",
+    "Promotion picker for queen/rook/bishop/knight; captured-piece tray; move list in algebraic notation.",
+    "Undo/restart in casual mode; board flip; optional coordinates and sound.",
+    "Prevent input while an AI move or animation is running."
+  ],
+  "pitfalls": [
+    "Allowing a king to be captured instead of ending the game at checkmate.",
+    "Not detecting check, pins, or a king moving into an attacked square.",
+    "Castling through check or with a moved king/rook; wrong en-passant timing.",
+    "Hard-coding queen promotion; wrong file/rank to board-index mapping.",
+    "AI choosing illegal moves; no threefold-repetition or fifty-move tracking.",
+    "Accepting a move while it is not that side's turn."
+  ],
+  "defaults": [
+    "2D board, local two-player, standard FIDE-style rules.",
+    "Algebraic notation, undo enabled, promotion picker, check highlight.",
+    "If an AI opponent is requested, start with a simple legal-move search, not a full engine."
+  ],
+  "questions": [
+    {
+      "id": "opponent",
+      "highImpact": true,
+      "ask": {
+        "en": "Who should the player play against?",
+        "tr": "Oyuncu kime karşı oynasın?"
+      },
+      "answeredBy": [
+        "iki kisilik",
+        "two player",
+        "local multiplayer",
+        "bilgisayara karsi",
+        "yapay zeka",
+        "vs ai",
+        "ai opponent",
+        "bot"
+      ],
+      "options": [
+        {
+          "label": { "en": "Two players on one board", "tr": "Tek tahtada iki oyuncu" },
+          "suffix": {
+            "en": "Use local two-player mode on one board.",
+            "tr": "Tek tahtada iki kişilik yerel mod kullan."
+          }
+        },
+        {
+          "label": { "en": "Play against the computer", "tr": "Bilgisayara karşı oyna" },
+          "suffix": {
+            "en": "Add a computer opponent that only plays legal moves.",
+            "tr": "Sadece yasal hamleler oynayan bir bilgisayar rakibi ekle."
+          }
+        },
+        {
+          "label": { "en": "Both modes", "tr": "İkisi de" },
+          "suffix": {
+            "en": "Support local two-player and a computer opponent.",
+            "tr": "Hem yerel iki kişilik hem bilgisayar rakibi destekle."
+          }
+        }
+      ]
+    },
+    {
+      "id": "rules",
+      "highImpact": true,
+      "ask": {
+        "en": "Which rule set should the game enforce?",
+        "tr": "Oyun hangi kural setini uygulasın?"
+      },
+      "answeredBy": ["basit kurallar", "simplified rules", "tam kural", "full rules", "fide"],
+      "options": [
+        {
+          "label": { "en": "Standard rules with special moves", "tr": "Özel hamlelerle standart kurallar" },
+          "suffix": {
+            "en": "Enforce standard chess rules including castling, en passant and promotion.",
+            "tr": "Rok, geçerken alma ve terfi dahil standart satranç kurallarını uygula."
+          }
+        },
+        {
+          "label": { "en": "Simplified rules first", "tr": "Önce basit kurallar" },
+          "suffix": {
+            "en": "Start with basic movement, check and checkmate; leave special moves out.",
+            "tr": "Temel hareket, şah ve mat ile başla; özel hamleleri dışarıda bırak."
+          }
+        }
+      ]
+    },
+    {
+      "id": "presentation",
+      "highImpact": false,
+      "ask": {
+        "en": "How should the board look?",
+        "tr": "Tahta nasıl görünsün?"
+      },
+      "answeredBy": ["3d", "2d", "klasik tahta", "wooden board"],
+      "options": [
+        {
+          "label": { "en": "Clean 2D board", "tr": "Sade 2D tahta" },
+          "suffix": { "en": "Use a clean 2D board.", "tr": "Sade bir 2D tahta kullan." }
+        },
+        {
+          "label": { "en": "Wooden classic board", "tr": "Ahşap klasik tahta" },
+          "suffix": { "en": "Use a wooden classic board style.", "tr": "Ahşap klasik tahta stili kullan." }
+        }
+      ]
+    }
+  ],
+  "verification": [
+    "Start position is correct and White moves first.",
+    "Pawn single/double advance, diagonal capture and promotion work; illegal pawn moves are rejected.",
+    "Knight jumps over pieces; rook/bishop/queen cannot pass through pieces.",
+    "A pinned piece cannot expose its king; the king cannot move into check.",
+    "Check is detected; checkmate ends the game; stalemate is a draw.",
+    "Castling works both sides and is rejected when the king/rook moved, a square is occupied, or the king passes through check.",
+    "En passant works only immediately after the double pawn push.",
+    "Turn alternation is enforced and the AI only plays legal moves.",
+    "Undo/restart restores board, turn and special-move rights."
+  ],
+  "sources": ["https://www.fide.com/fide/handbook.html"]
+}
