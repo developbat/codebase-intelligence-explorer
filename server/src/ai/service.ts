@@ -4037,6 +4037,15 @@ export async function auditMissingSelectors(
     .map(([id, file]) => ({ id, file }));
 }
 
+export function softBudgetAction(
+  mode: "off" | "warn" | "stop",
+  softUsage: number,
+  softBudget?: number,
+): "none" | "warn" | "stop" {
+  if (mode === "off" || !softBudget || softUsage < softBudget) return "none";
+  return mode === "stop" ? "stop" : "warn";
+}
+
 export function budgetExceeded(
   tokenUsage: AiTokenUsage | undefined,
   estimatedCostUsd: number | undefined,
@@ -5029,6 +5038,7 @@ export async function runAgentTask(
   let acceptanceAuditFailed = false;
   let transientRetries = 0;
   let budgetWarned = false;
+  let softBudgetWarned = false;
   let budgetWarning: string | undefined;
   let planPath: string | undefined;
   const budgetMode = options.budgetMode ?? "stop";
@@ -5047,15 +5057,27 @@ export async function runAgentTask(
     // The soft guard is per attempt. startingUsage belongs to earlier attempts
     // and must not make a focused retry stop before its first model turn.
     const softUsage = tokenTotal.totalTokens;
-    if (options.softTokenBudget && softUsage >= options.softTokenBudget) {
-      stoppedReason = "budget";
-      summary = `Soft task budget reached: ${softUsage.toLocaleString()} of ${options.softTokenBudget.toLocaleString()} tokens in this attempt${
+    const softAction = softBudgetAction(
+      budgetMode,
+      softUsage,
+      options.softTokenBudget,
+    );
+    if (softAction !== "none") {
+      const message = `Soft task budget reached: ${softUsage.toLocaleString()} of ${options.softTokenBudget?.toLocaleString() ?? "?"} tokens in this attempt${
         startingUsage.totalTokens > 0
           ? ` (${cumulativeUsage.totalTokens.toLocaleString()} total across attempts)`
           : ""
-      }. The task loop will continue with a focused retry.`;
-      log("warn", "Soft task budget reached", summary.slice(0, 180));
-      break;
+      }.`;
+      if (softAction === "stop") {
+        stoppedReason = "budget";
+        summary = `${message} Stopped before the next model call because task budgets are set to stop.`;
+        log("warn", "Soft task budget reached", summary.slice(0, 180));
+        break;
+      }
+      if (!softBudgetWarned) {
+        softBudgetWarned = true;
+        log("warn", "Soft task budget reached · continuing", message);
+      }
     }
     if (
       budgetMode !== "off" &&

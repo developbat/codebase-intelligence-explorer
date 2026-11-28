@@ -1672,9 +1672,9 @@ export function taskBudgetForEffort(effort: ProjectTaskEffort): {
 }
 
 export function taskStepBudget(effort: ProjectTaskEffort): number {
-  if (effort === "simple") return 10;
-  if (effort === "hard") return 20;
-  return 14;
+  if (effort === "simple") return 12;
+  if (effort === "hard") return 32;
+  return 20;
 }
 
 /**

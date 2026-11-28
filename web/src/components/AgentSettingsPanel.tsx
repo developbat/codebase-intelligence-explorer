@@ -239,7 +239,7 @@ export function AgentSettingsPanel({ settings, onSaved }: AgentSettingsPanelProp
         <div>
           <strong>{t("Task budget behavior")}</strong>
           <small>
-            {t("Usage is always recorded and reported. Choose whether a budget should only warn or stop the run.")}
+            {t("Usage is always recorded and reported. Off runs to completion (a hard lifetime safety cap still applies); warn only logs; stop at the limit.")}
           </small>
         </div>
         <select

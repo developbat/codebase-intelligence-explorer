@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { IntentAnalysis } from "../../shared/intent";
 import type { AiAgentStep } from "../../shared/ai";
+import { softBudgetAction } from "./ai/service";
 import {
   blockDependentsOf,
   intentTask,
@@ -890,13 +891,20 @@ test("write detection uses structured task fields", () => {
   assert.equal(taskLooksLikeWrite({ ...base, action: "run" }), false);
 });
 
+test("soft budget mode off never stops a run", () => {
+  assert.equal(softBudgetAction("off", 999_999, 100_000), "none");
+  assert.equal(softBudgetAction("warn", 100_000, 100_000), "warn");
+  assert.equal(softBudgetAction("warn", 99_999, 100_000), "none");
+  assert.equal(softBudgetAction("stop", 100_000, 100_000), "stop");
+});
+
 test("task budgets scale with effort and stop runaway usage", () => {
   assert.deepEqual(taskBudgetForEffort("simple"), { tokens: 80_000, costUsd: 0.05 });
   assert.deepEqual(taskBudgetForEffort("standard"), { tokens: 160_000, costUsd: 0.12 });
   assert.deepEqual(taskBudgetForEffort("hard"), { tokens: 320_000, costUsd: 0.25 });
-  assert.equal(taskStepBudget("simple"), 10);
-  assert.equal(taskStepBudget("standard"), 14);
-  assert.equal(taskStepBudget("hard"), 20);
+  assert.equal(taskStepBudget("simple"), 12);
+  assert.equal(taskStepBudget("standard"), 20);
+  assert.equal(taskStepBudget("hard"), 32);
   assert.equal(
     budgetExceeded({ inputTokens: 0, outputTokens: 0, totalTokens: 80_001 }, undefined, 80_000),
     true,

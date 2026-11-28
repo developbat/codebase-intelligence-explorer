@@ -991,6 +991,7 @@ export function CodeStudio({
   const workflowScrollRef = useRef<HTMLDivElement>(null);
   const [resizing, setResizing] = useState<"left" | "right" | null>(null);
   const [previewPath, setPreviewPath] = useState("");
+  const [extraHtmlFiles, setExtraHtmlFiles] = useState<string[]>([]);
   const [previewKey, setPreviewKey] = useState(0);
   const [livePreviewUrl, setLivePreviewUrl] = useState("");
   const [runResult, setRunResult] = useState<{
@@ -1527,8 +1528,16 @@ export function CodeStudio({
     }
   }, [livePreviewUrl, livePreviewUrls]);
   const htmlFiles = useMemo(
-    () => analysis.files.filter((file) => /\.html?$/i.test(file.path)).map((file) => file.path),
-    [analysis.files],
+    () => [
+      ...new Set([
+        ...analysis.files
+          .filter((file) => /\.html?$/i.test(file.path))
+          .map((file) => file.path),
+        // The agent may create index.html before the analysis is refreshed.
+        ...extraHtmlFiles,
+      ]),
+    ],
+    [analysis.files, extraHtmlFiles],
   );
   const projectRuleFiles = useMemo(
     () =>
@@ -1733,6 +1742,7 @@ export function CodeStudio({
     setMessage(null);
     setTestDiscovery(null);
     setLivePreviewUrl("");
+    setExtraHtmlFiles([]);
     setPreviewPath(
       analysis.files.find((file) => file.path === "index.html")?.path ??
         analysis.files.find((file) => /(^|\/)index\.html?$/i.test(file.path))?.path ??
@@ -2737,6 +2747,18 @@ export function CodeStudio({
   async function refreshAgentFiles(paths: string[]) {
     if (paths.length === 0) return;
     setAnalysisStale(true);
+    const newHtmlFiles = paths.filter((path) => /\.html?$/i.test(path));
+    if (newHtmlFiles.length > 0) {
+      setExtraHtmlFiles((current) => [...new Set([...current, ...newHtmlFiles])]);
+      setPreviewPath((current) => {
+        if (current && /\.html?$/i.test(current)) return current;
+        return (
+          newHtmlFiles.find((path) => /(^|\/)index\.html?$/i.test(path)) ?? newHtmlFiles[0]
+        );
+      });
+      setPreviewKey((value) => value + 1);
+      setRightTab("preview");
+    }
     const refreshed = await Promise.all(
       paths.map(async (changedPath) => {
         const file = await api.fileContent(analysis.id, changedPath).catch(() => null);
@@ -2764,7 +2786,7 @@ export function CodeStudio({
     const shown = files.slice(0, 3).join(", ");
     const more = files.length > 3 ? ` (+${files.length - 3})` : "";
     return t(
-      "Files changed on disk: {files}. {preview} The code graph refreshes in the background; use the workspace banner when you want to reload the analysis. No page reload was performed.",
+      "Files changed on disk: {files}. {preview} The code graph refreshes in the background; use the workspace banner when you want to reload the analysis. The workspace page itself was not reloaded.",
       {
         files: `${shown}${more}`,
         preview: visual

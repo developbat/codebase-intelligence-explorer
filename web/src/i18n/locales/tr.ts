@@ -635,8 +635,8 @@ export const tr: Dictionary = {
   "Analyzing codebase": "Kod tabanı analiz ediliyor",
   "Rescanning project": "Proje yeniden taranıyor",
   "Refreshing the analysis in place…": "Analiz yerinde yenileniyor…",
-  "Files changed on disk: {files}. {preview} The code graph refreshes in the background; use the workspace banner when you want to reload the analysis. No page reload was performed.":
-    "Diskte değişen dosyalar: {files}. {preview} Kod grafiği arka planda yenilenir; analizi yüklemek istediğinde üstteki çalışma alanı bildirimini kullan. Sayfa yenilenmedi.",
+  "Files changed on disk: {files}. {preview} The code graph refreshes in the background; use the workspace banner when you want to reload the analysis. The workspace page itself was not reloaded.":
+    "Diskte değişen dosyalar: {files}. {preview} Kod grafiği arka planda yenilenir; analizi yüklemek istediğinde üstteki çalışma alanı bildirimini kullan. Çalışma alanı sayfası yeniden yüklenmedi.",
   "The preview was refreshed in place.": "Önizleme yerinde yenilendi.",
   "The change report is ready in the right panel.": "Değişiklik raporu sağ panelde hazır.",
   "Workspace": "Çalışma alanı",
@@ -2239,5 +2239,6 @@ export const tr: Dictionary = {
   "Untitled goal": "Başlıksız hedef",
   "Controls what the agent may do without asking. When an option is off, the agent pauses and asks Allow once / Always allow / Deny before that action.": "Ajanın sormadan neler yapabileceğini belirler. Bir seçenek kapalıysa ajan, o işlemden önce Bir kez izin ver / Her zaman izin ver / Reddet seçenekleriyle durur.",
   "Default saved": "Varsayılan kaydedildi",
-  "Default location: {path}": "Varsayılan konum: {path}"
+  "Default location: {path}": "Varsayılan konum: {path}",
+  "Usage is always recorded and reported. Off runs to completion (a hard lifetime safety cap still applies); warn only logs; stop at the limit.": "Kullanım her zaman kaydedilir ve raporlanır. Kapalı, çalışmayı tamamlar (yine de sert ömür güvenlik sınırı geçerlidir); yalnızca uyar, sadece kaydeder; sınırda dur, sınırda durdurur."
 };
