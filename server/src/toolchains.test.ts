@@ -9,7 +9,12 @@ import {
   normalizeLanguages,
   recommendedToolIds,
 } from "./toolchains";
-import { toolchainPath } from "./shellPath";
+import {
+  bundledNodeBin,
+  managedToolsBin,
+  resetToolchainPathCache,
+  toolchainPath,
+} from "./shellPath";
 
 test("language recommendation maps project languages to managed tools", () => {
   const languages = normalizeLanguages(["typescript", "tsx", "python", "go"]);
@@ -77,5 +82,22 @@ test("detects project tools hoisted to a workspace root", async () => {
     assert.match(eslint?.version ?? "", /9\.1\.2/);
   } finally {
     await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+
+test("PATH starts with app-managed tools and includes the bundled runtime", () => {
+  const previous = process.env.CIE_DATA_DIR;
+  process.env.CIE_DATA_DIR = path.join(os.tmpdir(), "cie-path-test");
+  try {
+    resetToolchainPathCache();
+    const entries = toolchainPath().split(path.delimiter);
+    assert.equal(entries[0], managedToolsBin());
+    const bundled = bundledNodeBin();
+    if (bundled) assert.ok(entries.includes(bundled));
+  } finally {
+    if (previous === undefined) delete process.env.CIE_DATA_DIR;
+    else process.env.CIE_DATA_DIR = previous;
+    resetToolchainPathCache();
   }
 });

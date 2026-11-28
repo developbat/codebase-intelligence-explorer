@@ -10,7 +10,15 @@ import type {
   ToolchainTool,
 } from "../../shared/toolchains";
 
-import { toolchainPath } from "./shellPath";
+import {
+  bundledNpmExec,
+  bundledNodeRoot,
+  cieDataDir,
+  managedToolsBin,
+  managedToolsRoot,
+  shellQuote,
+  toolchainPath,
+} from "./shellPath";
 
 const execFileAsync = promisify(execFile);
 
@@ -573,12 +581,20 @@ async function localNodeModulesRoots(projectRoot?: string): Promise<string[]> {
   if (cachedRoots && Date.now() - cachedRoots.at < CACHE_MS) return cachedRoots.roots;
   const roots: string[] = [];
   try {
-    const result = await execFileAsync("npm", ["root"], {
-      cwd: projectRoot,
-      timeout: 5_000,
-      maxBuffer: 128 * 1024,
-      env: { ...process.env, PATH: toolchainPath() },
-    });
+    const npm = bundledNpmExec();
+    const result = npm
+      ? await execFileAsync(npm.node, [npm.npmCli, "root"], {
+          cwd: projectRoot,
+          timeout: 5_000,
+          maxBuffer: 128 * 1024,
+          env: { ...process.env, PATH: toolchainPath() },
+        })
+      : await execFileAsync("npm", ["root"], {
+          cwd: projectRoot,
+          timeout: 5_000,
+          maxBuffer: 128 * 1024,
+          env: { ...process.env, PATH: toolchainPath() },
+        });
     const root = `${result.stdout ?? ""}`.trim().split(/\r?\n/).pop();
     if (root) roots.push(path.resolve(root));
   } catch {
@@ -760,6 +776,11 @@ export async function checkToolchains(
     recommended: [...recommended],
     recommendedMissing,
     projectRoot: context.rootPath,
+    runtime: {
+      bundled: bundledNodeRoot() !== null,
+      managedToolsDir: managedToolsRoot(),
+      dataDir: cieDataDir(),
+    },
   };
   cached.set(cacheKey, { report, at: Date.now() });
   return report;
@@ -788,9 +809,38 @@ async function resolveInstallCommand(
     };
   }
   if (command.startsWith("npm ")) {
+    const npm = bundledNpmExec();
+    const args = command.replace(/^npm\s+/, "");
+    const globalInstall = /^(?:install|i)\s+(?:-g|--global)\b/.test(args);
+    if (globalInstall) {
+      await fs.promises.mkdir(managedToolsRoot(), { recursive: true, mode: 0o700 });
+      const prefix = ` --prefix ${shellQuote(managedToolsRoot())}`;
+      if (npm) {
+        return {
+          command: `${shellQuote(npm.node)} ${shellQuote(npm.npmCli)} ${args}${prefix}`,
+        };
+      }
+      if (await hasCommand("npm")) return { command: `${command}${prefix}` };
+      return {
+        error: `npm was not found. The bundled Node runtime is missing; reinstall the app.`,
+      };
+    }
+    if (npm) {
+      return { command: `${shellQuote(npm.node)} ${shellQuote(npm.npmCli)} ${args}` };
+    }
     if (await hasCommand("npm")) return { command };
     return {
       error: `npm was not found. Install Node.js first, then run: ${command}`,
+    };
+  }
+  if (command.startsWith("go install ")) {
+    const gobin = managedToolsBin();
+    await fs.promises.mkdir(gobin, { recursive: true, mode: 0o700 });
+    return {
+      command:
+        process.platform === "win32"
+          ? `set GOBIN=${gobin} && ${command}`
+          : `GOBIN=${shellQuote(gobin)} ${command}`,
     };
   }
   if (command.startsWith("sudo ")) {

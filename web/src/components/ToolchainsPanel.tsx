@@ -120,6 +120,15 @@ export function ToolchainsPanel({ projectId }: { projectId?: string }) {
               </button>
             ) : null}
           </div>
+          {report.runtime ? (
+            <small className="toolchains-runtime">
+              {t("Runtime")}:{" "}
+              {report.tools.find((tool) => tool.id === "node")?.version ?? "—"} · npm{" "}
+              {report.tools.find((tool) => tool.id === "npm")?.version ?? "—"}
+              {report.runtime.bundled ? ` · ${t("bundled")}` : ""} · {t("Tools")}:{" "}
+              <code>{report.runtime.managedToolsDir}</code>
+            </small>
+          ) : null}
           <div className="toolchains-list">
             {[...report.tools]
               .sort((a, b) => {

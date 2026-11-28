@@ -9,6 +9,7 @@ const targets = [
   "dist-server",
   "dist-electron",
   "build",
+  "vendor/node/current",
 ];
 
 function clean(directory) {

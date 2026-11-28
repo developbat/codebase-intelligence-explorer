@@ -12,6 +12,9 @@ files:
   - "!node_modules/**"
 
 extraResources:
+  - from: vendor/node/current
+    to: runtime/node
+    filter: ["**/*", "!**/._*", "!**/.DS_Store"]
   - from: dist
     to: app/dist
     filter: ["**/*", "!**/._*"]

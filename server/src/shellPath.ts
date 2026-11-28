@@ -17,6 +17,67 @@ import path from "node:path";
 let ensured = false;
 let cachedPath: string | null = null;
 
+/** Same data directory the rest of the server uses. */
+export function cieDataDir(): string {
+  return process.env.CIE_DATA_DIR || path.join(os.homedir(), ".codebase-intelligence-explorer");
+}
+
+export function managedToolsRoot(): string {
+  return path.join(cieDataDir(), "tools");
+}
+
+export function managedToolsBin(): string {
+  return process.platform === "win32" ? managedToolsRoot() : path.join(managedToolsRoot(), "bin");
+}
+
+/**
+ * Root of the Node runtime bundled with the app. Packaged builds put it in
+ * `Resources/runtime/node`; dev builds use `vendor/node/current`.
+ */
+export function bundledNodeRoot(): string | null {
+  const candidates: string[] = [];
+  const appRoot = process.env.CIE_APP_ROOT;
+  if (appRoot) {
+    candidates.push(path.resolve(appRoot, "..", "runtime", "node"));
+    candidates.push(path.resolve(appRoot, "runtime", "node"));
+  }
+  candidates.push(path.resolve(process.cwd(), "vendor", "node", "current"));
+  for (const candidate of candidates) {
+    const binary =
+      process.platform === "win32"
+        ? path.join(candidate, "node.exe")
+        : path.join(candidate, "bin", "node");
+    if (fs.existsSync(binary)) return candidate;
+  }
+  return null;
+}
+
+export function bundledNodeBin(): string | null {
+  const root = bundledNodeRoot();
+  if (!root) return null;
+  return process.platform === "win32" ? root : path.join(root, "bin");
+}
+
+/** Absolute node + npm-cli pair for app-managed npm installs. */
+export function bundledNpmExec(): { node: string; npmCli: string } | null {
+  const root = bundledNodeRoot();
+  if (!root) return null;
+  const node =
+    process.platform === "win32" ? path.join(root, "node.exe") : path.join(root, "bin", "node");
+  const npmCli =
+    process.platform === "win32"
+      ? path.join(root, "node_modules", "npm", "bin", "npm-cli.js")
+      : path.join(root, "lib", "node_modules", "npm", "bin", "npm-cli.js");
+  if (!fs.existsSync(node) || !fs.existsSync(npmCli)) return null;
+  return { node, npmCli };
+}
+
+/** Quote an argument for the shell used by exec(). */
+export function shellQuote(value: string): string {
+  if (process.platform === "win32") return `"${value.replace(/"/g, '""')}"`;
+  return `'${value.replace(/'/g, `'\''`)}'`;
+}
+
 function existingDirectories(directories: string[]): string[] {
   return directories.filter((directory) => {
     try {
@@ -40,8 +101,17 @@ function nvmDirectories(home: string): string[] {
 }
 
 function knownDirectories(): string[] {
-  if (process.platform === "win32") return [];
   const home = os.homedir();
+  if (process.platform === "win32") {
+    return existingDirectories([
+      path.join(home, "AppData", "Roaming", "npm"),
+      path.join(home, "AppData", "Local", "pnpm"),
+      path.join(home, "AppData", "Local", "Microsoft", "WinGet", "Links"),
+      path.join(home, "go", "bin"),
+      path.join(home, ".cargo", "bin"),
+      path.join(home, "scoop", "shims"),
+    ]);
+  }
   return existingDirectories([
     "/opt/homebrew/bin",
     "/opt/homebrew/sbin",
@@ -102,9 +172,18 @@ function mergePath(entries: string[]): string {
   return merged.join(path.delimiter);
 }
 
+export function resetToolchainPathCache(): void {
+  cachedPath = null;
+  ensured = false;
+}
+
 export function toolchainPath(): string {
   if (cachedPath) return cachedPath;
   cachedPath = mergePath([
+    // App-managed tools first, then the bundled LTS runtime. This keeps
+    // language servers and npm working on machines with no system Node.
+    managedToolsBin(),
+    bundledNodeBin() ?? "",
     loginShellPath() ?? "",
     knownDirectories().join(path.delimiter),
     process.env.PATH ?? "",

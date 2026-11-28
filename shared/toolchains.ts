@@ -47,6 +47,14 @@ export interface ToolchainReport {
   recommended: string[];
   recommendedMissing: string[];
   projectRoot?: string;
+  runtime?: {
+    /** True when the app ships its own Node LTS runtime. */
+    bundled: boolean;
+    /** Directory where app-managed tools are installed. */
+    managedToolsDir: string;
+    /** App data directory. */
+    dataDir: string;
+  };
 }
 
 export interface ToolchainInstallResult {

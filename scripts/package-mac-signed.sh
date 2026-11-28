@@ -22,6 +22,11 @@ elif [ -n "$APPLE_KEYCHAIN_PROFILE" ]; then
   NOTARIZE=true
 fi
 
+# `npm run package:mac` is the sign-only build (no notarization).
+if [ "${CIE_NOTARIZE:-}" = "0" ]; then
+  NOTARIZE=false
+fi
+
 # electron-builder 26 passes the certificate common name to codesign. When the
 # login keychain holds two Developer ID certificates with the same name, that is
 # ambiguous, so pin the SHA-1 of a valid identity. CI imports a fresh keychain
@@ -40,6 +45,8 @@ if [ "$NOTARIZE" = "true" ] && [ -z "$IDENTITY_ARGS" ] && [ -z "$CSC_LINK" ]; th
   echo "Notarization requested but no Developer ID Application identity was found." >&2
   exit 1
 fi
+
+npm run fetch:node
 
 rm -rf "$OUT"
 npm run build
@@ -62,6 +69,7 @@ if [ -n "$APP" ]; then
     xcrun stapler validate "$APP" || true
     spctl --assess --type execute --verbose=2 "$APP" || true
   fi
+  node scripts/verify-package.mjs "$OUT"
 fi
 
 mkdir -p release

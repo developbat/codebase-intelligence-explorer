@@ -374,6 +374,8 @@ export const tr: Dictionary = {
   "Detected runtimes, package managers and language servers. Missing recommended tools can be installed here.": "Algılanan çalışma zamanları, paket yöneticileri ve dil sunucuları. Eksik önerilen araçlar buradan kurulabilir.",
   "Project languages": "Proje dilleri",
   "Recommended missing": "Eksik önerilen",
+  "Runtime": "Çalışma zamanı",
+  "bundled": "paketle gelen",
   "Install recommended": "Önerilenleri kur",
   "recommended": "önerilen",
   "required": "gerekli",

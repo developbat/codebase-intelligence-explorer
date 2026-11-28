@@ -1,0 +1,5 @@
+{
+  "version": "24.22.3",
+  "lts": "Krypton",
+  "note": "Pinned LTS runtime bundled for project commands and app-managed tools. Bump this file and rebuild; per-project versions are handled separately."
+}
